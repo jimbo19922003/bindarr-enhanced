@@ -1430,4 +1430,5 @@ router.post('/collection/bulk', async (req, res) => {
 });
 
 router.normalizeSearchParams = normalizeSearchParams;
+router.addCardToCollection = addCardToCollection;
 module.exports = router;

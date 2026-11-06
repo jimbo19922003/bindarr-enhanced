@@ -431,6 +431,23 @@ router.put('/sealed/lots/:id', async (req, res) => {
     );
     if (!existing) return fail(res, 404, 'Sealed lot not found');
     const body = req.body || {};
+    const opened = await db.get(
+      `SELECT COUNT(*) AS n FROM sealed_opening WHERE lot_id = ? AND user_id = ?`,
+      [existing.id, req.user.id]
+    );
+    if (opened.n > 0) {
+      const nextQuantity = body.quantity == null ? existing.quantity : Number(body.quantity);
+      const nextRemaining = body.remaining_quantity == null ? existing.remaining_quantity : Number(body.remaining_quantity);
+      const nextCost = body.total_cost == null ? existing.total_cost_cents : sealed.moneyToCents(body.total_cost, 'Total cost');
+      const nextCurrency = body.currency == null ? existing.currency : String(body.currency).trim().toUpperCase();
+      const unchanged = nextQuantity === existing.quantity
+        && nextRemaining === existing.remaining_quantity
+        && nextCost === existing.total_cost_cents
+        && nextCurrency === existing.currency;
+      if (!unchanged) {
+        return fail(res, 400, 'This lot has an opening, so its quantity and cost stay with that opening.');
+      }
+    }
     const lot = sealed.nextLot(
       {
         quantity: existing.quantity,
