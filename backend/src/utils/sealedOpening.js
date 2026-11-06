@@ -2,6 +2,7 @@
 
 const sealed = require('./sealedInventory');
 const accounting = require('./openingAccounting');
+const { matcher, normName } = require('./setCatalogueMatch');
 
 function bound(value, name, max, required) {
   const text = String(value == null ? '' : value).trim();
@@ -158,6 +159,30 @@ function presentOpening(row, pulls) {
   };
 }
 
+// A sealed product's set code is the seller catalog's code (PokéWallet "30C").
+// Card search uses the card catalog's id ("30th"). Prefer a card-catalog row
+// whose name is the sealed set's name, then one saved card set with that name.
+// Two different saved set ids for the same name are not guessed between.
+function pickCatalogSet({ code, name, cached, sets }) {
+  const list = Array.isArray(sets) ? sets : [];
+  const found = matcher(list)(code || '', name || '');
+  if (found && found.id) return { set_id: String(found.id), set_name: found.name || name || '' };
+  const wanted = normName(name);
+  const hits = [];
+  const seen = new Set();
+  if (wanted) {
+    for (const row of cached || []) {
+      if (normName(row.set_name) !== wanted) continue;
+      const id = String(row.set_id || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      hits.push({ set_id: id, set_name: row.set_name || name || '' });
+    }
+  }
+  if (hits.length === 1) return hits[0];
+  return { set_id: '', set_name: name || '' };
+}
+
 function openedOn(value, currency) {
   return sealed.normalizeLot({
     quantity: 1,
@@ -182,5 +207,6 @@ module.exports = {
   normalizePull,
   notesOf,
   openedOn,
+  pickCatalogSet,
   presentOpening,
 };

@@ -14,6 +14,29 @@ process.env.DEFAULT_ADMIN_PASSWORD = 'test-admin-password';
 const db = require('../src/db');
 const sealedRoutes = require('../src/routes/sealed');
 const openingRoutes = require('../src/routes/sealedOpenings');
+const { pickCatalogSet } = require('../src/utils/sealedOpening');
+
+assert.deepStrictEqual(pickCatalogSet({
+  code: '30C',
+  name: '30th Celebration',
+  cached: [{ set_id: '30th', set_name: '30th Celebration' }],
+  sets: [{ id: 'cel25', name: 'Celebrations' }],
+}), { set_id: '30th', set_name: '30th Celebration' });
+assert.deepStrictEqual(pickCatalogSet({
+  code: '30C',
+  name: '30th Celebration',
+  cached: [],
+  sets: [{ id: '30th', name: '30th Celebration' }],
+}), { set_id: '30th', set_name: '30th Celebration' });
+assert.strictEqual(pickCatalogSet({
+  code: '30C',
+  name: '30th Celebration',
+  cached: [
+    { set_id: '30th', set_name: '30th Celebration' },
+    { set_id: 'cel25', set_name: '30th Celebration' },
+  ],
+  sets: [],
+}).set_id, '');
 
 function send(port, method, urlPath, userId, body) {
   return new Promise((resolve, reject) => {
@@ -50,8 +73,8 @@ async function main() {
     `INSERT INTO users (username, password_hash, role, share_token, api_key) VALUES ('opener', 'x', 'member', 'opener-share', 'opener-key')`
   );
   await db.run(
-    `INSERT INTO card_cache (id, name, set_name, number, image_url, game, price_trend, price_currency, price_source)
-     VALUES ('tcgdex-en-open-hit', 'Mewtwo ex', '30th Celebration', '151', 'https://example.com/mewtwo.jpg', 'pokemon', 12.5, 'USD', 'tcgdex')`
+    `INSERT INTO card_cache (id, name, set_id, set_name, number, image_url, game, price_trend, price_currency, price_source)
+     VALUES ('tcgdex-en-open-hit', 'Mewtwo ex', '30th', '30th Celebration', '151', 'https://example.com/mewtwo.jpg', 'pokemon', 12.5, 'USD', 'tcgdex')`
   );
   await db.run(
     `INSERT INTO card_cache (id, name, game, price_trend, price_currency, price_source)
@@ -84,6 +107,11 @@ async function main() {
   assert.strictEqual(created.status, 201, JSON.stringify(created.body));
   const productId = created.body.product.id;
   const lotId = created.body.product.lots[0].id;
+
+  await db.run(`UPDATE app_settings SET pokemon_provider = 'pokemontcg' WHERE id = 1`);
+  const resolved = await send(port, 'GET', '/api/sealed/card-set?code=30C&name=30th%20Celebration', admin.id);
+  assert.strictEqual(resolved.status, 200, JSON.stringify(resolved.body));
+  assert.strictEqual(resolved.body.set_id, '30th');
 
   const opened = await send(port, 'POST', `/api/sealed/lots/${lotId}/openings`, admin.id, {
     opened_at: '2026-11-06',

@@ -4,6 +4,7 @@ const express = require('express');
 const db = require('../db');
 const accounting = require('../utils/openingAccounting');
 const openings = require('../utils/sealedOpening');
+const pokemonProvider = require('../utils/pokemonProvider');
 
 const router = express.Router();
 const MAX_PULLS = 100;
@@ -93,6 +94,45 @@ async function insertPull(userId, openingId, pull) {
     ]
   );
 }
+
+async function catalogSets(lang) {
+  const provider = await pokemonProvider.providerFor(lang);
+  if (provider !== pokemonProvider.POKEMONTCG) {
+    try {
+      const api = await pokemonProvider.apiFor(lang);
+      if (typeof api.listSets === 'function') {
+        const sets = await api.listSets(lang);
+        if (Array.isArray(sets) && sets.length) return sets;
+      }
+    } catch (err) {
+      console.error('Card set list unavailable for an opening', err.message);
+    }
+  }
+  try {
+    return await db.all(`SELECT id, name FROM sets WHERE game = 'pokemon'`);
+  } catch {
+    return [];
+  }
+}
+
+router.get('/sealed/card-set', async (req, res) => {
+  try {
+    const code = String(req.query.code || '').slice(0, 40);
+    const name = String(req.query.name || '').slice(0, 120);
+    const lang = String(req.query.lang || 'en').slice(0, 12);
+    const sets = await catalogSets(lang);
+    const cached = name
+      ? await db.all(
+        `SELECT DISTINCT set_id, set_name FROM card_cache WHERE game = 'pokemon' AND set_name = ? COLLATE NOCASE`,
+        [name]
+      )
+      : [];
+    res.json(openings.pickCatalogSet({ code, name, cached, sets }));
+  } catch (err) {
+    console.error('Failed to resolve a card set for an opening', err);
+    fail(res, 500, 'Could not find the card set.');
+  }
+});
 
 router.get('/sealed/cards', async (req, res) => {
   try {

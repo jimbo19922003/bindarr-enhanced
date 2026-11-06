@@ -181,7 +181,8 @@ function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
   const inputRef = useRef(null);
   const [openedAt, setOpenedAt] = useState(todayISO());
   const [notes, setNotes] = useState('');
-  const [setCode, setSetCode] = useState(product.set_id || '');
+  const [setCode, setSetCode] = useState('');
+  const [setNote, setSetNote] = useState('');
   const [number, setNumber] = useState('');
   const [pulls, setPulls] = useState([]);
   const [matches, setMatches] = useState([]);
@@ -191,6 +192,31 @@ function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
   const setLabel = product.set_name || setCode;
 
   useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    let gone = false;
+    const params = new URLSearchParams({
+      code: product.set_id || '',
+      name: product.set_name || '',
+      lang: langCode(product.language || 'en'),
+    });
+    (async () => {
+      try {
+        const response = await fetch(`/api/sealed/card-set?${params.toString()}`);
+        const data = await response.json().catch(() => ({}));
+        if (gone || !response.ok) return;
+        if (data.set_id) {
+          setSetCode(data.set_id);
+          setSetNote('');
+        } else if (product.set_id) {
+          setSetNote(t('sealed.ripSetCode', { code: product.set_id }));
+        }
+      } catch { /* the set field stays editable */ }
+    })();
+    return () => { gone = true; };
+  // t is a new function every render. The set only needs to be resolved once per product.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [product.set_id, product.set_name, product.language]);
 
   const addCard = (card) => {
     setPulls(current => [pullFromCard(card, product, lot.currency), ...current]);
@@ -292,6 +318,7 @@ function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
           <label>{t('sealed.set')}</label>
           <input className="input-control" value={setCode} onChange={e => setSetCode(e.target.value)} aria-label={t('sealed.set')} />
           {product.set_name && <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{product.set_name}</p>}
+          {setNote && <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{setNote}</p>}
         </div>
         <div className="form-group" style={{ marginBottom: 0 }}>
           <label>{t('sealed.notes')}</label>
