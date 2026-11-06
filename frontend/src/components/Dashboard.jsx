@@ -140,7 +140,8 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
     );
   }
 
-  if (!stats || stats.summary.totalCards === 0) {
+  const sealedUnits = stats && stats.summary.sealed ? stats.summary.sealed.remainingUnits : 0;
+  if (!stats || (stats.summary.totalCards === 0 && sealedUnits === 0)) {
     const isFiltered = Boolean(gameFilter);
     const gameName = isFiltered ? gameLabel(gameFilter, true) : '';
     return (
@@ -214,6 +215,16 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
             </div>
           </div>
           <div className="metric-value">{currencySymbol()}{money(summary.totalValue)}</div>
+          {summary.sealed && summary.sealed.remainingUnits > 0 && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+              {(summary.sealed.marketValue > 0 || summary.sealed.valuationComplete) && (
+                <div>{t('dash.sealedIncluded', { value: `${currencySymbol()}${money(summary.sealed.marketValue)}` })}</div>
+              )}
+              {summary.sealed.unpricedUnits > 0 && (
+                <div>{t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits })}</div>
+              )}
+            </div>
+          )}
           {(() => {
             const change = timePeriod === '7d' ? summary.change7d :
                            timePeriod === '30d' ? summary.change30d :
@@ -248,7 +259,9 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
           </div>
           <div className="metric-value">{currencySymbol()}{money(summary.totalSpent)}</div>
           <div className="metric-footer">
-            <span>{t('dash.avgPerCard', { price: priceText(summary.avgCardValue) })}</span>
+            {summary.totalCards > 0 && (
+              <span>{t('dash.avgPerCard', { price: priceText(summary.avgCardValue) })}</span>
+            )}
           </div>
         </div>
 

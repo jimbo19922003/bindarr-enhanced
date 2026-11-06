@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from 'react';
-import { LayoutDashboard, Database, MapPin, Sparkles, Settings as SettingsIcon, LogOut, ShieldAlert, Plus, Swords, StickyNote } from 'lucide-react';
+import { LayoutDashboard, Database, MapPin, Sparkles, Settings as SettingsIcon, LogOut, ShieldAlert, Plus, Swords, StickyNote, Package } from 'lucide-react';
 import Login from './components/Login';
 import Logo from './components/Logo';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -21,6 +21,7 @@ const SharedCollection = lazy(() => import('./components/SharedCollection'));
 const SharedContainer = lazy(() => import('./components/SharedContainer'));
 const DeckBuilder = lazy(() => import('./components/DeckBuilder'));
 const Notes = lazy(() => import('./components/Notes'));
+const SealedInventory = lazy(() => import('./components/SealedInventory'));
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -427,6 +428,8 @@ function App() {
         );
       case 'deckbuilder':
         return <DeckBuilder showToast={showToast} />;
+      case 'sealed':
+        return <SealedInventory showToast={showToast} />;
       case 'notes':
         return <Notes showToast={showToast} />;
       case 'settings':
@@ -485,6 +488,15 @@ function App() {
           >
             <Database size={18} />
             <span className="nav-tab-label">{t('nav.collection')}</span>
+          </button>
+          <button
+            className={`nav-tab ${activeTab === 'sealed' ? 'active' : ''}`}
+            onClick={() => goTab('sealed')}
+            aria-label={t('nav.sealed')}
+            title={t('nav.sealed')}
+          >
+            <Package size={18} />
+            <span className="nav-tab-label">{t('nav.sealed')}</span>
           </button>
           <button
             className={`nav-tab ${activeTab === 'storage' ? 'active' : ''}`}

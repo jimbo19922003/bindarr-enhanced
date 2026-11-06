@@ -878,6 +878,55 @@ async function initDb() {
 
   await splitStackedRows();
 
+  // Sealed catalog is separate from the purchase lots that own quantity and
+  // cost. Market quotes stay on the product. Costs stay in integer cents on
+  // the lot. Both are per user; a manual product is not a shared catalog row.
+  await run(`
+    CREATE TABLE IF NOT EXISTS sealed_product (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      product_type TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'English',
+      set_id TEXT NOT NULL DEFAULT '',
+      set_name TEXT NOT NULL DEFAULT '',
+      image_url TEXT NOT NULL DEFAULT '',
+      provider TEXT NOT NULL DEFAULT '',
+      provider_product_id TEXT NOT NULL DEFAULT '',
+      market_price_cents INTEGER,
+      market_currency TEXT,
+      market_quoted_at TEXT,
+      market_source TEXT NOT NULL DEFAULT '',
+      archived_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  await run(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sealed_product_provider
+      ON sealed_product(user_id, provider, provider_product_id)
+      WHERE provider_product_id != ''
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS sealed_lot (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES sealed_product(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL,
+      remaining_quantity INTEGER NOT NULL,
+      total_cost_cents INTEGER NOT NULL,
+      remaining_cost_cents INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      purchased_at TEXT,
+      location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      archived_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_sealed_lot_user ON sealed_lot(user_id, product_id)`);
+
   // --- PERFORMANCE INDEXES ---
   // `user_id` first, because it is the predicate on essentially every read in the
   // app — every collection query, every stats aggregate — and nothing indexed it.

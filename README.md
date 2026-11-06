@@ -286,9 +286,27 @@ empty set search may be followed by one name-only search for that same card.
 Anything uncertain is listed for confirmation and does not change a price.
 Requests stay inside the key's hourly and daily allowance, and one pass
 asks for at most 25 cards. An admin can save the key in Admin or Settings;
-a saved key is used instead of `POKEWALLET_API_KEY`. Card ids stay as
-they are. TCGCSV is still called the same way; this does not try to get
-around a block on that service.
+a saved key is used instead of `POKEWALLET_API_KEY`.
+
+## Sealed inventory
+
+Sealed products are a catalog, separate from the purchase lots that record
+what you actually bought. The same product can have several lots, each with
+its own quantity, purchase date, currency, and total cost in integer cents.
+The current market quote is stored on the product and does not overwrite the
+cost. A missing quote is unknown, not zero. Archive hides a product or a lot
+from the portfolio without deleting it.
+
+Remaining cost is the share of the original total still sealed. Integer
+division leaves the leftover cent on the units that are still there, so the
+cents add back to the original total. Costs in different currencies are not
+converted.
+
+The dashboard net worth adds the known market value of units still sealed,
+and total invested adds their remaining cost. Cards are unchanged. Opening a
+product and linking the pulls is not part of this screen. Import and export
+use CSV from the Sealed tab. A location name in the file must already exist
+for that user.
 
 ## Card scanning
 
