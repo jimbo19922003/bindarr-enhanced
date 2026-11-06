@@ -73,12 +73,12 @@ async function main() {
     `INSERT INTO users (username, password_hash, role, share_token, api_key) VALUES ('opener', 'x', 'member', 'opener-share', 'opener-key')`
   );
   await db.run(
-    `INSERT INTO card_cache (id, name, set_id, set_name, number, image_url, game, price_trend, price_currency, price_source)
-     VALUES ('tcgdex-en-open-hit', 'Mewtwo ex', '30th', '30th Celebration', '151', 'https://example.com/mewtwo.jpg', 'pokemon', 12.5, 'USD', 'tcgdex')`
+    `INSERT INTO card_cache (id, name, set_id, set_name, number, image_url, game, language, supertype, price_trend, price_currency, price_source)
+     VALUES ('tcgdex-en-open-hit', 'Mewtwo ex', '30th', '30th Celebration', '151', 'https://example.com/mewtwo.jpg', 'pokemon', 'English', 'Pokémon', 12.5, 'USD', 'tcgdex')`
   );
   await db.run(
-    `INSERT INTO card_cache (id, name, game, price_trend, price_currency, price_source)
-     VALUES ('tcgdex-jp-open', 'Mewtwo', 'pokemon', 9, 'EUR', 'tcgdex')`
+    `INSERT INTO card_cache (id, name, game, language, supertype, price_trend, price_currency, price_source)
+     VALUES ('tcgdex-jp-open', 'Mewtwo', 'pokemon', 'English', 'Pokémon', 9, 'EUR', 'tcgdex')`
   );
   const copy = await db.run(
     `INSERT INTO collection (user_id, card_id, quantity, purchase_price, game, list_type)
@@ -137,7 +137,8 @@ async function main() {
   assert.strictEqual(opening.analytics.value_difference_kind, 'estimated_unrealized');
   assert.ok(Math.abs(opening.analytics.cost_recovery_percent - 54.54545454545454) < 1e-10);
   assert.strictEqual(opening.analytics.opened_value, '28.00');
-  assert.strictEqual(opening.analytics.missing_snapshot_quantity, 4);
+  assert.strictEqual(opening.analytics.missing_snapshot_quantity, 1);
+  assert.strictEqual(opening.pulls.find(pull => pull.name === 'Commons').value_at_opening, '0.00');
   assert.ok(!JSON.stringify(opening.pulls).includes('cost_cents'));
 
   const stock = await send(port, 'GET', `/api/sealed/products/${productId}`, admin.id);
@@ -155,7 +156,7 @@ async function main() {
   const hit = linked.body.opening.pulls.find(pull => pull.card_id === 'tcgdex-en-open-hit');
   assert.strictEqual(hit.name, 'Mewtwo ex');
   assert.strictEqual(hit.current_value, '12.50');
-  assert.strictEqual(hit.value_at_opening, null);
+  assert.strictEqual(hit.value_at_opening, '12.50');
   assert.strictEqual(hit.collection_id, copy.lastID);
   const still = await db.get(`SELECT purchase_price, quantity FROM collection WHERE id = ?`, [copy.lastID]);
   assert.strictEqual(still.purchase_price, 4);
@@ -169,6 +170,26 @@ async function main() {
   const skipped = foreignPrice.body.opening.pulls.find(pull => pull.card_id === 'tcgdex-jp-open');
   assert.strictEqual(skipped.current_value, null);
   assert.strictEqual(skipped.line_value, null);
+  assert.ok(skipped.collection_id);
+  const filedForeign = await db.get(
+    `SELECT purchase_price FROM collection WHERE id = ? AND user_id = ?`,
+    [skipped.collection_id, admin.id]
+  );
+  assert.strictEqual(filedForeign.purchase_price, 0);
+
+  const filed = await send(port, 'POST', `/api/sealed/openings/${opening.id}/pulls`, admin.id, {
+    card_id: 'tcgdex-en-open-hit',
+    quantity: 1,
+  });
+  assert.strictEqual(filed.status, 201, JSON.stringify(filed.body));
+  const fresh = filed.body.opening.pulls.find(pull => pull.card_id === 'tcgdex-en-open-hit' && pull.collection_id !== copy.lastID);
+  assert.strictEqual(fresh.current_value, '12.50');
+  assert.strictEqual(fresh.value_at_opening, '12.50');
+  const copies = await db.get(
+    `SELECT COUNT(*) AS n FROM collection WHERE user_id = ? AND card_id = ?`,
+    [admin.id, 'tcgdex-en-open-hit']
+  );
+  assert.strictEqual(copies.n, 2);
 
   const mixed = await send(port, 'POST', `/api/sealed/openings/${opening.id}/pulls`, admin.id, {
     name: 'Euro hit',
@@ -184,8 +205,8 @@ async function main() {
     line_value: '8.00',
   });
   assert.strictEqual(bulk.status, 201, JSON.stringify(bulk.body));
-  assert.strictEqual(bulk.body.opening.analytics.known_value, '50.50');
-  assert.strictEqual(bulk.body.opening.analytics.recorded_quantity, 18);
+  assert.strictEqual(bulk.body.opening.analytics.known_value, '63.00');
+  assert.strictEqual(bulk.body.opening.analytics.recorded_quantity, 19);
 
   const both = await send(port, 'POST', `/api/sealed/openings/${opening.id}/pulls`, admin.id, {
     name: 'Both',

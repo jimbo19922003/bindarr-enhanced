@@ -56,7 +56,7 @@ function SealedInventory({ showToast }) {
   const [catalogResults, setCatalogResults] = useState([]);
   const [catalogError, setCatalogError] = useState('');
   const [catalogBusy, setCatalogBusy] = useState(false);
-  const [pane, setPane] = useState('add');
+  const [pane, setPane] = useState('collection');
   const [picked, setPicked] = useState({});
   const [addOpen, setAddOpen] = useState(false);
   const [shared, setShared] = useState({ currency: 'USD', purchased_at: todayISO(), location_id: '' });
@@ -357,13 +357,13 @@ function SealedInventory({ showToast }) {
 
       <div style={{ display: 'flex', justifyContent: 'center' }}>
         <div className="sub-nav-tabs" style={{ width: '100%', maxWidth: '420px', margin: 0 }}>
-          <button type="button" className={`sub-nav-tab ${pane === 'add' ? 'active' : ''}`} onClick={() => setPane('add')}>
-            <Search size={18} />
-            <span>{t('sealed.tabAdd')}</span>
-          </button>
           <button type="button" className={`sub-nav-tab ${pane === 'collection' ? 'active' : ''}`} onClick={() => setPane('collection')}>
             <Package size={18} />
             <span>{t('sealed.tabCollection')}</span>
+          </button>
+          <button type="button" className={`sub-nav-tab ${pane === 'add' ? 'active' : ''}`} onClick={() => setPane('add')}>
+            <Search size={18} />
+            <span>{t('sealed.tabAdd')}</span>
           </button>
         </div>
       </div>

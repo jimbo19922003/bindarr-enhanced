@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Zap } from 'lucide-react';
+import { ChevronDown, ChevronRight, X, Zap } from 'lucide-react';
 import { useT } from '../utils/i18n';
 import { langCode } from '../utils/languages';
 
@@ -161,7 +161,9 @@ function SealedOpenings({ product, showToast, onChanged, ripLot, onCloseRip }) {
 
 function pullFromCard(card, product, currency) {
   const priceCurrency = String(card.price_currency || 'USD').toUpperCase();
-  const usable = card.price_trend != null && card.price_trend !== '' && priceCurrency === currency;
+  const amount = Number(card.price_trend);
+  const usable = Number.isFinite(amount) && amount > 0 && priceCurrency === currency;
+  const price = usable ? amount.toFixed(2) : '';
   const image = typeof card.image_url === 'string' && /^https?:\/\//.test(card.image_url) ? card.image_url : '';
   return {
     key: nextKey(),
@@ -171,10 +173,14 @@ function pullFromCard(card, product, currency) {
     number: card.number || '',
     image_url: image,
     quantity: 1,
-    current_value: usable ? Number(card.price_trend).toFixed(2) : '',
-    value_at_opening: '',
+    current_value: price,
+    value_at_opening: price,
     bulk: false,
   };
+}
+
+function looksLikeNumber(value) {
+  return /^#?[A-Za-z]{0,8}\d+[A-Za-z★]?$/.test(value);
 }
 
 function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
@@ -225,17 +231,18 @@ function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
     inputRef.current?.focus();
   };
 
-  const lookupNumber = async () => {
+  const lookupCard = async () => {
     const typed = number.trim();
     if (!typed || looking) return;
     if (!setCode.trim()) {
       showToast(t('sealed.ripNeedsSet'));
       return;
     }
+    const query = typed.replace(/^#/, '');
+    const byNumber = looksLikeNumber(query);
     setLooking(true);
     try {
       const params = new URLSearchParams({
-        number: typed,
         set: setCode.trim(),
         scope: 'internet',
         game: 'pokemon',
@@ -243,6 +250,8 @@ function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
         page: '1',
         limit: '10',
       });
+      if (byNumber) params.set('number', query.split('/')[0]);
+      else params.set('name', query);
       const response = await fetch(`/api/search?${params.toString()}`);
       const data = await response.json().catch(() => ([]));
       if (!response.ok) {
@@ -250,10 +259,12 @@ function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
         return;
       }
       const found = Array.isArray(data) ? data : [];
-      const exact = found.filter(card => String(card.number) === typed || parseInt(card.number, 10) === parseInt(typed, 10));
+      const exact = byNumber
+        ? found.filter(card => String(card.number) === query || parseInt(card.number, 10) === parseInt(query, 10))
+        : found.filter(card => String(card.name || '').toLowerCase() === query.toLowerCase());
       const hit = exact.length === 1 ? exact[0] : (found.length === 1 ? found[0] : null);
       if (!hit) {
-        if (found.length === 0) showToast(t('search.errNoSuchNumber', { number: typed, set: setLabel || setCode }));
+        if (found.length === 0) showToast(t('sealed.ripNone', { query: typed, set: setLabel || setCode }));
         setMatches(found);
         return;
       }
@@ -334,18 +345,17 @@ function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
         <input
           ref={inputRef}
           className="input-control"
-          inputMode="numeric"
-          placeholder={t('search.rapidNumberPlaceholder')}
+          placeholder={t('sealed.ripQuery')}
           value={number}
           onChange={e => setNumber(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookupNumber(); } }}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookupCard(); } }}
           style={{ flex: '1 1 10rem', fontSize: '1.05rem', fontWeight: 700 }}
         />
-        <button className="btn btn-secondary" type="button" onClick={lookupNumber} disabled={looking}>{t('sealed.addPull')}</button>
+        <button className="btn btn-secondary" type="button" onClick={lookupCard} disabled={looking}>{t('sealed.addPull')}</button>
       </div>
       {matches.length > 0 && (
         <div style={{ display: 'grid', gap: '0.3rem' }}>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.ripSeveral', { count: matches.length, number: number.trim() })}</p>
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.ripPick', { count: matches.length, query: number.trim() })}</p>
           {matches.map(card => (
             <button key={card.id} className="btn btn-secondary" type="button" onClick={() => addCard(card)} style={{ justifyContent: 'flex-start' }}>
               #{card.number} {card.name}
@@ -393,7 +403,7 @@ function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
       <div className="quick-add-footer">
         <div className="quick-add-footer-actions">
           <button className="btn btn-secondary" type="button" onClick={onClose}>{t('common.cancel')}</button>
-          <button className="btn btn-primary" type="submit" disabled={busy}>{t('sealed.letItRip')}</button>
+          <button className="btn btn-primary" type="submit" disabled={busy}>{t('sealed.addToCollection')}</button>
         </div>
       </div>
     </form>
@@ -402,6 +412,9 @@ function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
 
 function OpeningCard({ opening, t, confirmRemove, onAskRemove, onCancelRemove, onPatch, onRemove, onReload, showToast }) {
   const stats = opening.analytics;
+  const [open, setOpen] = useState(false);
+  const [openPull, setOpenPull] = useState(null);
+  const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState(emptyLine(false));
   const prices = stats.recorded_quantity === 0
     ? t('sealed.noPulls')
@@ -486,97 +499,139 @@ function OpeningCard({ opening, t, confirmRemove, onAskRemove, onCancelRemove, o
     }
   };
 
+  const currentLabel = (pull) => {
+    const value = pull.line_value != null ? pull.line_value : pull.current_value;
+    return value ? money(opening.currency, value) : t('sealed.marketUnknown');
+  };
+
   return (
     <article className="glass-panel" style={{ padding: '0.9rem', display: 'grid', gap: '0.65rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <div>
+      <button
+        type="button"
+        onClick={() => setOpen(value => !value)}
+        aria-expanded={open}
+        style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', background: 'transparent', border: 0, padding: 0, color: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+      >
+        <span style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', minWidth: 0 }}>
+          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           <strong style={{ color: 'var(--text-strong)' }}>
             {opening.opened_at ? `${t('sealed.openedOn')} ${opening.opened_at}` : t('sealed.openingsTitle')}
           </strong>
+        </span>
+        <span style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+          <span>{money(opening.currency, stats.cost)}</span>
+          <span>{t('sealed.recordedPulls')} {stats.recorded_quantity}</span>
+          <span>{money(opening.currency, stats.known_value)}</span>
+          <span>{recoveryLabel(stats.cost_recovery_percent)}</span>
+        </span>
+      </button>
+      {open && (
+        <>
           {opening.notes && <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{opening.notes}</div>}
-        </div>
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          <span style={{ color: 'var(--text-strong)', fontSize: '0.8rem', border: '1px solid var(--border-glass)', borderRadius: '999px', padding: '0.15rem 0.55rem' }}>
-            {stats.entry_complete ? t('sealed.entryComplete') : t('sealed.entryIncomplete')}
-          </span>
-          <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', border: '1px solid var(--border-glass)', borderRadius: '999px', padding: '0.15rem 0.55rem' }}>
-            {prices}
-          </span>
-        </div>
-      </div>
-      {!stats.entry_complete && (
-        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.entryIncompleteHint')}</p>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--text-strong)', fontSize: '0.8rem', border: '1px solid var(--border-glass)', borderRadius: '999px', padding: '0.15rem 0.55rem' }}>
+              {stats.entry_complete ? t('sealed.entryComplete') : t('sealed.entryIncomplete')}
+            </span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', border: '1px solid var(--border-glass)', borderRadius: '999px', padding: '0.15rem 0.55rem' }}>
+              {prices}
+            </span>
+          </div>
+          {!stats.entry_complete && (
+            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.entryIncompleteHint')}</p>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.55rem' }}>
+            <Stat label={t('sealed.openingCost')} value={money(opening.currency, stats.cost)} />
+            <Stat label={t('sealed.recordedPulls')} value={String(stats.recorded_quantity)} />
+            <Stat label={t('sealed.knownValue')} value={money(opening.currency, stats.known_value)} />
+            <Stat label={t('sealed.valueAtOpening')} value={stats.opened_value == null ? t('sealed.noSnapshot') : money(opening.currency, stats.opened_value)} />
+            <Stat label={t('sealed.estimatedDifference')} value={money(opening.currency, stats.value_difference)} />
+            <Stat label={t('sealed.recovery')} value={recoveryLabel(stats.cost_recovery_percent)} />
+          </div>
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.notProfit')}</p>
+          {stats.opened_value != null && stats.missing_snapshot_quantity > 0 && (
+            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+              {t('sealed.missingSnapshot', { count: stats.missing_snapshot_quantity })}
+            </p>
+          )}
+          {opening.pulls.map(pull => {
+            const shown = openPull === pull.id;
+            const snapshot = pull.opened_line_value != null ? pull.opened_line_value : pull.value_at_opening;
+            return (
+              <div key={pull.id} style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '0.45rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setOpenPull(shown ? null : pull.id)}
+                  aria-expanded={shown}
+                  style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', width: '100%', background: 'transparent', border: 0, padding: 0, color: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+                >
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ fontWeight: 650, color: 'var(--text-strong)' }}>{pull.name} × {pull.quantity}</span>
+                    <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                      {[pull.set_name, pull.number].filter(Boolean).join(' · ') || (pull.line_value != null ? t('sealed.addBulk') : '')}
+                    </span>
+                  </span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>{currentLabel(pull)}</span>
+                </button>
+                {shown && (
+                  <form onSubmit={event => savePull(pull, event)} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '0.4rem', alignItems: 'end', marginTop: '0.45rem' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label>{pull.line_value != null ? t('sealed.lineValue') : t('sealed.pullValue')}</label>
+                      <input className="input-control" name="current" defaultValue={pull.line_value != null ? pull.line_value || '' : pull.current_value || ''} placeholder={t('sealed.marketUnknown')} />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label>{t('sealed.snapshotValue')}</label>
+                      <input className="input-control" name="snapshot" defaultValue={snapshot || ''} />
+                    </div>
+                    <button className="btn btn-secondary" type="submit">{t('sealed.save')}</button>
+                    <button className="btn btn-secondary" type="button" onClick={() => removePull(pull)}>{t('sealed.removePull')}</button>
+                  </form>
+                )}
+              </div>
+            );
+          })}
+          {adding && (
+            <form onSubmit={addPull} style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 1.4fr) 5rem minmax(6rem, 1fr) minmax(6rem, 1fr) auto', gap: '0.4rem', alignItems: 'end' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>{t('sealed.pullName')}</label>
+                <input className="input-control" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder={draft.bulk ? t('sealed.otherCards') : t('sealed.pullName')} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>{t('card.quantity')}</label>
+                <input className="input-control" type="number" min="1" value={draft.quantity} onChange={e => setDraft({ ...draft, quantity: e.target.value })} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>{draft.bulk ? t('sealed.lineValue') : t('sealed.pullValue')}</label>
+                <input className="input-control" value={draft.bulk ? draft.line_value : draft.current_value} onChange={e => setDraft({ ...draft, [draft.bulk ? 'line_value' : 'current_value']: e.target.value })} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>{t('sealed.snapshotValue')}</label>
+                <input className="input-control" value={draft.value_at_opening} onChange={e => setDraft({ ...draft, value_at_opening: e.target.value })} />
+              </div>
+              <button className="btn btn-secondary" type="submit">{draft.bulk ? t('sealed.addBulk') : t('sealed.addPull')}</button>
+            </form>
+          )}
+          <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary" type="button" onClick={() => { setAdding(true); setDraft(emptyLine(false)); }}>
+              {t('sealed.addPull')}
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={() => { setAdding(true); setDraft(emptyLine(true)); }}>
+              {t('sealed.addBulk')}
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={() => onPatch(opening, { entry_complete: !opening.entry_complete }).catch(err => showToast(err.message))}>
+              {opening.entry_complete ? t('sealed.markIncomplete') : t('sealed.markComplete')}
+            </button>
+            {!confirmRemove && (
+              <button className="btn btn-secondary" type="button" onClick={onAskRemove}>{t('sealed.removeOpening')}</button>
+            )}
+            {confirmRemove && (
+              <>
+                <button className="btn btn-primary" type="button" onClick={() => onRemove(opening).catch(err => showToast(err.message))}>{t('sealed.removeOpeningConfirm')}</button>
+                <button className="btn btn-secondary" type="button" onClick={onCancelRemove}>{t('common.cancel')}</button>
+              </>
+            )}
+          </div>
+        </>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.55rem' }}>
-        <Stat label={t('sealed.openingCost')} value={money(opening.currency, stats.cost)} />
-        <Stat label={t('sealed.recordedPulls')} value={String(stats.recorded_quantity)} />
-        <Stat label={t('sealed.knownValue')} value={money(opening.currency, stats.known_value)} />
-        <Stat label={t('sealed.valueAtOpening')} value={stats.opened_value == null ? t('sealed.noSnapshot') : money(opening.currency, stats.opened_value)} />
-        <Stat label={t('sealed.estimatedDifference')} value={money(opening.currency, stats.value_difference)} />
-        <Stat label={t('sealed.recovery')} value={recoveryLabel(stats.cost_recovery_percent)} />
-      </div>
-      <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.notProfit')}</p>
-      {stats.opened_value != null && stats.missing_snapshot_quantity > 0 && (
-        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-          {t('sealed.missingSnapshot', { count: stats.missing_snapshot_quantity })}
-        </p>
-      )}
-      {opening.pulls.map(pull => (
-        <form key={pull.id} onSubmit={event => savePull(pull, event)} style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 1.4fr) repeat(3, minmax(6rem, 1fr)) auto', gap: '0.4rem', alignItems: 'end' }}>
-          <div>
-            <div style={{ fontWeight: 650, color: 'var(--text-strong)' }}>{pull.name} × {pull.quantity}</div>
-            <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
-              {[pull.set_name, pull.number].filter(Boolean).join(' · ') || (pull.line_value != null ? t('sealed.addBulk') : '')}
-            </div>
-          </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label>{pull.line_value != null ? t('sealed.lineValue') : t('sealed.pullValue')}</label>
-            <input className="input-control" name="current" defaultValue={pull.line_value != null ? pull.line_value || '' : pull.current_value || ''} placeholder={t('sealed.marketUnknown')} />
-          </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label>{t('sealed.snapshotValue')}</label>
-            <input className="input-control" name="snapshot" defaultValue={pull.opened_line_value != null ? pull.opened_line_value || '' : pull.value_at_opening || ''} />
-          </div>
-          <button className="btn btn-secondary" type="submit">{t('sealed.save')}</button>
-          <button className="btn btn-secondary" type="button" onClick={() => removePull(pull)}>{t('sealed.removePull')}</button>
-        </form>
-      ))}
-      <form onSubmit={addPull} style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 1.4fr) 5rem minmax(6rem, 1fr) minmax(6rem, 1fr) auto', gap: '0.4rem', alignItems: 'end' }}>
-        <div className="form-group" style={{ marginBottom: 0 }}>
-          <label>{t('sealed.pullName')}</label>
-          <input className="input-control" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder={draft.bulk ? t('sealed.otherCards') : t('sealed.pullName')} />
-        </div>
-        <div className="form-group" style={{ marginBottom: 0 }}>
-          <label>{t('card.quantity')}</label>
-          <input className="input-control" type="number" min="1" value={draft.quantity} onChange={e => setDraft({ ...draft, quantity: e.target.value })} />
-        </div>
-        <div className="form-group" style={{ marginBottom: 0 }}>
-          <label>{draft.bulk ? t('sealed.lineValue') : t('sealed.pullValue')}</label>
-          <input className="input-control" value={draft.bulk ? draft.line_value : draft.current_value} onChange={e => setDraft({ ...draft, [draft.bulk ? 'line_value' : 'current_value']: e.target.value })} />
-        </div>
-        <div className="form-group" style={{ marginBottom: 0 }}>
-          <label>{t('sealed.snapshotValue')}</label>
-          <input className="input-control" value={draft.value_at_opening} onChange={e => setDraft({ ...draft, value_at_opening: e.target.value })} />
-        </div>
-        <button className="btn btn-secondary" type="submit">{draft.bulk ? t('sealed.addBulk') : t('sealed.addPull')}</button>
-      </form>
-      <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-        <button className="btn btn-secondary" type="button" onClick={() => setDraft(emptyLine(!draft.bulk))}>
-          {draft.bulk ? t('sealed.addPull') : t('sealed.addBulk')}
-        </button>
-        <button className="btn btn-secondary" type="button" onClick={() => onPatch(opening, { entry_complete: !opening.entry_complete }).catch(err => showToast(err.message))}>
-          {opening.entry_complete ? t('sealed.markIncomplete') : t('sealed.markComplete')}
-        </button>
-        {!confirmRemove && (
-          <button className="btn btn-secondary" type="button" onClick={onAskRemove}>{t('sealed.removeOpening')}</button>
-        )}
-        {confirmRemove && (
-          <>
-            <button className="btn btn-primary" type="button" onClick={() => onRemove(opening).catch(err => showToast(err.message))}>{t('sealed.removeOpeningConfirm')}</button>
-            <button className="btn btn-secondary" type="button" onClick={onCancelRemove}>{t('common.cancel')}</button>
-          </>
-        )}
-      </div>
     </article>
   );
 }

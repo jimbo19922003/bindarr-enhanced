@@ -5,6 +5,7 @@ const db = require('../db');
 const accounting = require('../utils/openingAccounting');
 const openings = require('../utils/sealedOpening');
 const pokemonProvider = require('../utils/pokemonProvider');
+const collection = require('./collection');
 
 const router = express.Router();
 const MAX_PULLS = 100;
@@ -52,34 +53,76 @@ async function presentOwned(userId, openingId) {
 async function cardFor(cardId) {
   if (!cardId) return null;
   return db.get(
-    `SELECT id, name, set_name, number, image_url, price_trend, price_currency FROM card_cache WHERE id = ?`,
+    `SELECT id, name, set_name, number, image_url, price_trend, price_currency, language, game FROM card_cache WHERE id = ?`,
     [cardId]
   );
 }
 
-async function resolvePull(userId, raw, currency, fillPrice) {
+async function forgetFiled(userId, ids) {
+  if (!ids || !ids.length) return;
+  const marks = ids.map(() => '?').join(', ');
+  await db.run(
+    `DELETE FROM collection WHERE user_id = ? AND id IN (${marks})`,
+    [userId, ...ids]
+  );
+}
+
+// A card pull is a real collection copy. The opening cost is not its purchase
+// price. PokéWallet prices the card on the way in, the same as adding it from
+// search, and that price is the value at opening when none was typed.
+async function filePull(user, pull, currency) {
+  if (!pull.cardId || pull.collectionId) return;
+  const known = await cardFor(pull.cardId);
+  const added = await collection.addCardToCollection(user, {
+    card_id: pull.cardId,
+    quantity: pull.quantity,
+    language: (known && known.language) || 'English',
+    purchase_price: 0,
+    game: (known && known.game) || 'pokemon',
+    location_id: null,
+  });
+  pull.filedIds = added.ids && added.ids.length ? added.ids : [added.id];
+  pull.collectionId = added.id;
+  const owned = await db.get(
+    `SELECT card_id FROM collection WHERE id = ? AND user_id = ?`,
+    [added.id, user.id]
+  );
+  if (owned && owned.card_id) pull.cardId = owned.card_id;
+  const priced = await cardFor(pull.cardId);
+  openings.fillFromCard(pull, priced);
+  openings.applyCatalogPrice(pull, priced, currency);
+}
+
+async function resolvePull(user, raw, currency, fillPrice) {
   const pull = openings.normalizePull(raw, currency);
-  if (pull.collectionId) {
-    const copy = await db.get(
-      `SELECT c.id, c.card_id, cache.name, cache.set_name, cache.number, cache.image_url,
-              cache.price_trend, cache.price_currency
-         FROM collection c
-         JOIN card_cache cache ON cache.id = c.card_id
-        WHERE c.id = ? AND c.user_id = ?`,
-      [pull.collectionId, userId]
-    );
-    if (!copy) throw new TypeError('Collection card not found');
-    if (pull.cardId && pull.cardId !== copy.card_id) throw new TypeError('Card does not match the collection copy');
-    openings.fillFromCard(pull, copy);
-    if (fillPrice) openings.applyCatalogPrice(pull, copy, currency);
-  } else if (pull.cardId) {
-    const card = await cardFor(pull.cardId);
-    if (!card) throw new TypeError('Card not found');
-    openings.fillFromCard(pull, card);
-    if (fillPrice) openings.applyCatalogPrice(pull, card, currency);
+  pull.filedIds = [];
+  try {
+    if (pull.collectionId) {
+      const copy = await db.get(
+        `SELECT c.id, c.card_id, cache.name, cache.set_name, cache.number, cache.image_url,
+                cache.price_trend, cache.price_currency
+           FROM collection c
+           JOIN card_cache cache ON cache.id = c.card_id
+          WHERE c.id = ? AND c.user_id = ?`,
+        [pull.collectionId, user.id]
+      );
+      if (!copy) throw new TypeError('Collection card not found');
+      if (pull.cardId && pull.cardId !== copy.card_id) throw new TypeError('Card does not match the collection copy');
+      openings.fillFromCard(pull, copy);
+      if (fillPrice) openings.applyCatalogPrice(pull, copy, currency);
+    } else if (pull.cardId) {
+      const card = await cardFor(pull.cardId);
+      if (!card) throw new TypeError('Card not found');
+      openings.fillFromCard(pull, card);
+      if (fillPrice) await filePull(user, pull, currency);
+    }
+    if (fillPrice) openings.snapshotOpeningValue(pull);
+    if (!pull.name) throw new TypeError('Pull name is required');
+    return pull;
+  } catch (err) {
+    await forgetFiled(user.id, pull.filedIds);
+    throw err;
   }
-  if (!pull.name) throw new TypeError('Pull name is required');
-  return pull;
 }
 
 async function insertPull(userId, openingId, pull) {
@@ -205,7 +248,24 @@ router.post('/sealed/lots/:id/openings', async (req, res) => {
     if (!Array.isArray(rawPulls) || rawPulls.length > MAX_PULLS) {
       return fail(res, 400, 'An opening can record at most 100 pulls.');
     }
-    const openingId = await db.withTransaction(async () => {
+    const lotPreview = await db.get(
+      `SELECT currency FROM sealed_lot WHERE id = ? AND user_id = ?`,
+      [req.params.id, req.user.id]
+    );
+    if (!lotPreview) return fail(res, 404, 'Sealed lot not found');
+    const prepared = [];
+    try {
+      for (const raw of rawPulls) {
+        prepared.push(await resolvePull(req.user, raw, lotPreview.currency, true));
+      }
+    } catch (err) {
+      await forgetFiled(req.user.id, prepared.flatMap(pull => pull.filedIds || []));
+      throw err;
+    }
+    const filedIds = prepared.flatMap(pull => pull.filedIds || []);
+    let openingId;
+    try {
+      openingId = await db.withTransaction(async () => {
       const lot = await db.get(
         `SELECT * FROM sealed_lot WHERE id = ? AND user_id = ?`,
         [req.params.id, req.user.id]
@@ -250,12 +310,15 @@ router.post('/sealed/lots/:id/openings', async (req, res) => {
           body.entry_complete === true ? 1 : 0,
         ]
       );
-      for (const raw of rawPulls) {
-        const pull = await resolvePull(req.user.id, raw, lot.currency, true);
+      for (const pull of prepared) {
         await insertPull(req.user.id, inserted.lastID, pull);
       }
       return inserted.lastID;
     });
+    } catch (err) {
+      await forgetFiled(req.user.id, filedIds);
+      throw err;
+    }
     res.status(201).json({ opening: await presentOwned(req.user.id, openingId) });
   } catch (err) {
     const status = statusOf(err);
@@ -354,8 +417,13 @@ router.post('/sealed/openings/:id/pulls', async (req, res) => {
       [opening.id, req.user.id]
     );
     if (count.n >= MAX_PULLS) return fail(res, 400, 'An opening can record at most 100 pulls.');
-    const pull = await resolvePull(req.user.id, req.body || {}, opening.currency, true);
-    await insertPull(req.user.id, opening.id, pull);
+    const pull = await resolvePull(req.user, req.body || {}, opening.currency, true);
+    try {
+      await insertPull(req.user.id, opening.id, pull);
+    } catch (err) {
+      await forgetFiled(req.user.id, pull.filedIds);
+      throw err;
+    }
     res.status(201).json({ opening: await presentOwned(req.user.id, opening.id) });
   } catch (err) {
     const status = statusOf(err);
@@ -376,7 +444,7 @@ router.put('/sealed/openings/:id/pulls/:pullId', async (req, res) => {
       [req.params.pullId, opening.id, req.user.id]
     );
     if (!existing) return fail(res, 404, 'Pull not found');
-    const pull = await resolvePull(req.user.id, req.body || {}, opening.currency, false);
+    const pull = await resolvePull(req.user, req.body || {}, opening.currency, false);
     await db.run(
       `UPDATE sealed_pull
           SET card_id = ?, collection_id = ?, name = ?, set_name = ?, number = ?, image_url = ?,

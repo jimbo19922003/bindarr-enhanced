@@ -75,8 +75,18 @@ function applyCatalogPrice(pull, card, currency) {
   if (!pull.currentBlank || !card || card.price_trend == null || card.price_trend === '') return;
   const priceCurrency = String(card.price_currency || 'USD').toUpperCase();
   if (priceCurrency !== currency) return;
-  pull.currentUnit = sealed.moneyToCents(Number(card.price_trend), 'Current value');
+  const amount = Number(card.price_trend);
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  pull.currentUnit = sealed.moneyToCents(amount, 'Current value');
   pull.currentBlank = false;
+}
+
+// The price known when the pull is first recorded is the value at opening.
+// A later edit of the current price does not rewrite it, and a blank stays blank.
+function snapshotOpeningValue(pull) {
+  if (pull.openedUnit != null || pull.openedLine != null) return;
+  if (pull.currentUnit != null) pull.openedUnit = pull.currentUnit;
+  else if (pull.currentLine != null) pull.openedLine = pull.currentLine;
 }
 
 function fillFromCard(pull, card) {
@@ -209,4 +219,5 @@ module.exports = {
   openedOn,
   pickCatalogSet,
   presentOpening,
+  snapshotOpeningValue,
 };
