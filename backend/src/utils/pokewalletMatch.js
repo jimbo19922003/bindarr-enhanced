@@ -145,10 +145,22 @@ function extractQuote(result) {
   };
 }
 
+// PokéWallet often appends the collector number, and sometimes a set code,
+// after the printed name: "Mewtwo ex - 151/158", "Pikachu - 025/165".
+// Parenthetical suffixes are already removed by foldName. A trailing word
+// such as "ex" is a different card and does not match.
 function nameMatches(card, info) {
   const want = foldName(card && card.name);
   if (!want) return false;
-  return [info.name, info.clean_name].some(name => foldName(name) === want);
+  return [info.name, info.clean_name].some(name => foldedNameAgrees(want, foldName(name)));
+}
+
+function foldedNameAgrees(want, got) {
+  if (!want || !got) return false;
+  if (got === want) return true;
+  if (!got.startsWith(want + ' ')) return false;
+  const rest = got.slice(want.length + 1);
+  return rest.split(' ').every(token => /^\d+$/.test(token) || /^[a-z]*\d+[a-z0-9]*$/.test(token));
 }
 
 function setAgrees(card, info) {
@@ -204,12 +216,43 @@ function matchSearchResults(card, results, total) {
   return { status: 'unmatched', reason: 'no_safe_match', matches: [], candidates: [] };
 }
 
+function printedNumber(value) {
+  const head = String(value || '').trim().split('/')[0].trim();
+  if (!head) return '';
+  if (/^\d+$/.test(head)) return String(Number(head));
+  return head;
+}
+
+// A short set id we can hand to PokéWallet. Long labels are not set codes.
+function setCodeToken(setId) {
+  const raw = String(setId || '').trim();
+  if (!raw || /\s/.test(raw) || raw.length > 16) return '';
+  return raw;
+}
+
+// The card name on its own. Used when a set-qualified search comes back empty,
+// and as the name half of the set-qualified query.
+function nameQuery(card) {
+  const name = String(card && card.name || '').trim().replace(/\s+/g, ' ');
+  if (name.length > 100) return name.slice(0, 100).trim();
+  return name;
+}
+
+// PokéWallet's documented search shapes are a card name, a set code, a
+// collector number on its own, a numeric set id plus a number ("24541 148"),
+// or a name plus a set code ("cubone cbb3c"). A name plus a collector number
+// ("Mewtwo ex 151") is not one of those shapes and comes back empty. The
+// collector number is applied to the results instead.
 function searchQuery(card) {
-  const name = String(card && card.name || '').trim();
-  const number = String(card && card.number || '').trim();
-  const setId = String(card && card.set_id || '').trim();
-  let query = [name, number].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-  if (query.length < 2) query = [setId, number].filter(Boolean).join(' ').trim();
+  const name = nameQuery(card);
+  const number = printedNumber(card && card.number);
+  const setCode = setCodeToken(card && card.set_id);
+  let query = '';
+  if (setCode && /^\d+$/.test(setCode) && number) query = `${setCode} ${number}`;
+  else if (name && setCode) query = `${name} ${setCode}`;
+  else if (name) query = name;
+  else query = [setCode, number].filter(Boolean).join(' ');
+  query = query.replace(/\s+/g, ' ').trim();
   if (query.length > 100) query = query.slice(0, 100).trim();
   return query;
 }
@@ -220,6 +263,7 @@ module.exports = {
   isProviderCardId,
   extractQuote,
   matchSearchResults,
+  nameQuery,
   searchQuery,
   summarizeCandidate,
   productIdFromUrl,

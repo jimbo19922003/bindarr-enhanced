@@ -81,6 +81,14 @@ fi
 # before nodemon, or the process exits before it listens and the port returns 502.
 bash .devcontainer/rebuild-sqlite3.sh
 
+# GitHub's port proxy sets X-Forwarded-For. express-rate-limit rejects that
+# header unless Express trusts the one proxy in front of it, and the request
+# then fails. A hop count of 1 is this proxy only. An operator who set
+# TRUST_PROXY already keeps their own value.
+if [ -n "${CODESPACE_NAME:-}" ] && [ -z "${TRUST_PROXY:-}" ]; then
+  export TRUST_PROXY=1
+fi
+
 echo "Starting Bindarr in this terminal. Leave it open."
 echo "http://localhost:${PORT}"
 # nodemon treats end-of-stdin as "the user closed the terminal" and exits.

@@ -16,6 +16,12 @@
 // Auth is X-API-Key. Free tier is 100 requests/hour and 1,000/day. Search and
 // card detail are the endpoints this uses; both are on the free tier. Bulk
 // set prices are a paid endpoint and are not called.
+//
+// Search is one request per card: the card name plus its set code. PokéWallet
+// does not accept a name plus a collector number. The number is checked on
+// the results. A set-qualified search that comes back with no rows gets one
+// name-only follow-up, still inside the same hourly, daily, and per-run caps.
+// A day-long cache means that follow-up is not repeated on the next refresh.
 
 const axios = require('axios');
 const { createHash } = require('crypto');
@@ -358,6 +364,10 @@ async function note(card, status, reason, extra) {
   });
 }
 
+function emptySearch(body) {
+  return !!(body && !body.card_info && Array.isArray(body.results) && body.results.length === 0);
+}
+
 async function priceOne(card, report, force) {
   report.examined += 1;
   const mapping = await db.get(`SELECT provider_card_id, manual FROM pokewallet_map WHERE card_id = ?`, [card.id]);
@@ -389,6 +399,7 @@ async function priceOne(card, report, force) {
   try {
     if (mapping && mapping.manual && mapping.provider_card_id) {
       fetched = await request('/cards/' + encodeURIComponent(mapping.provider_card_id));
+      if (!fetched.cached) report.requests += 1;
     } else {
       const query = match.searchQuery(card);
       if (query.length < 2) {
@@ -398,6 +409,17 @@ async function priceOne(card, report, force) {
         return 'ok';
       }
       fetched = await request('/search', { q: query, limit: 20, page: 1 });
+      if (!fetched.cached) report.requests += 1;
+      const nameOnly = match.nameQuery(card);
+      // An empty page means the set code was not a PokéWallet set code.
+      // One broader name search can still find the printing. A page that
+      // returned the wrong cards is not retried: that would spend a second
+      // request on every near miss.
+      if (nameOnly && nameOnly !== query && emptySearch(fetched.body) && report.requests < MAX_REQUESTS_PER_RUN) {
+        const broader = await request('/search', { q: nameOnly, limit: 100, page: 1 });
+        if (!broader.cached) report.requests += 1;
+        fetched = broader;
+      }
     }
   } catch (err) {
     if (err.code === 'not_found') {
@@ -415,8 +437,7 @@ async function priceOne(card, report, force) {
     console.warn(`PokéWallet ${card.id}: upstream`);
     return 'failed';
   }
-  if (!fetched.cached) report.requests += 1;
-  else report.cached += 1;
+  if (fetched.cached) report.cached += 1;
   const manualFetch = !!(mapping && mapping.manual && mapping.provider_card_id);
   return settle(card, report, fetched.body, manualFetch, mapping && mapping.provider_card_id);
 }

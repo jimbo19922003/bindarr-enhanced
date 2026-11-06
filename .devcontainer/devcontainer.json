@@ -17,7 +17,8 @@
     "DB_PATH": "${containerWorkspaceFolder}/.devcontainer/data/bindarr.db",
     "PORT": "3001",
     "HTTPS_PORT": "",
-    "ALLOW_REGISTRATION": "false"
+    "ALLOW_REGISTRATION": "false",
+    "TRUST_PROXY": "1"
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "postAttachCommand": "bash .devcontainer/start.sh --ensure",

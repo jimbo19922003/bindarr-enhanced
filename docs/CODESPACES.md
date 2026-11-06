@@ -37,7 +37,9 @@ When the terminal prints `Bindarr Server running on port 3001`, refresh port
 the visibility private. The page and the API are the same origin: Express
 serves the built frontend. Codespaces presents that forwarded port over
 HTTPS, which is what the browser needs for the camera. The server itself
-listens with HTTP.
+listens with HTTP. The dev container trusts that one proxy
+(`TRUST_PROXY=1`), so the forwarded client address does not make the
+rate limiter reject the request.
 
 To start it yourself in a terminal:
 

@@ -280,8 +280,13 @@ PokéWallet is a separate price lookup, not another catalogue. Set
 `POKEWALLET_API_KEY` on the server and restart, then use **Admin → PokéWallet
 prices**. It can fill an English TCGdex card that still has no positive price
 when the set, collector number, and name agree and the product is a single.
+The lookup sends the card name and set code. PokéWallet does not search by
+a name plus a collector number; the number is checked on the results. An
+empty set search may be followed by one name-only search for that same card.
 Anything uncertain is listed for confirmation and does not change a price.
-Requests stay inside the key's hourly and daily allowance. Card ids stay as
+Requests stay inside the key's hourly and daily allowance, and one pass
+asks for at most 25 cards. An admin can save the key in Admin or Settings;
+a saved key is used instead of `POKEWALLET_API_KEY`. Card ids stay as
 they are. TCGCSV is still called the same way; this does not try to get
 around a block on that service.
 

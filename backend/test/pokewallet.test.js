@@ -11,7 +11,7 @@ process.env.POKEWALLET_API_KEY = 'pk_test_SHOULD_NOT_LEAK_9f3a';
 
 const db = require('../src/db');
 const api = require('../src/pokewalletApi');
-const { extractQuote, matchSearchResults } = require('../src/utils/pokewalletMatch');
+const { extractQuote, matchSearchResults, searchQuery } = require('../src/utils/pokewalletMatch');
 const { cacheNormalizedCards } = require('../src/utils/cardCache');
 const { resolveCardPrice } = require('../src/utils/priceHelpers');
 
@@ -22,7 +22,7 @@ const ambiguousSearch = fixture('search-ambiguous.json');
 const manualCard = fixture('card-manual.json');
 const sealedCard = fixture('card-sealed.json');
 
-const hits = { n: 0, keys: [] };
+const hits = { n: 0, keys: [], queries: [] };
 let mode = 'search';
 let releaseDelay = () => {};
 let delayPromise = Promise.resolve();
@@ -49,6 +49,32 @@ const server = http.createServer((req, res) => {
     return send(res, 404, { error: 'Card not found' });
   }
   const q = url.searchParams.get('q') || '';
+  hits.queries.push(q);
+  if (q.includes('MISSING')) {
+    return send(res, 200, { results: [], pagination: { page: 1, limit: 20, total: 0, total_pages: 0 } });
+  }
+  if (q === 'Mewtwo ex') {
+    return send(res, 200, {
+      query: q,
+      results: [{
+        id: 'pk_15115115115115115115115115115111',
+        card_info: {
+          name: 'Mewtwo ex - 151/158',
+          clean_name: 'Mewtwo ex 151 158',
+          set_name: '30th Celebration',
+          set_code: '30C',
+          card_number: '151/158',
+          product_type: 'card',
+        },
+        tcgplayer: {
+          url: 'https://www.tcgplayer.com/product/555151',
+          prices: [{ sub_type_name: 'Holofoil', market_price: 40, updated_at: '2026-11-01T00:00:00Z' }],
+        },
+        cardmarket: null,
+      }],
+      pagination: { page: 1, limit: 100, total: 1, total_pages: 1 },
+    });
+  }
   if (q.includes('Cubone')) return send(res, 200, ambiguousSearch);
   if (q.includes('Mewtwo')) {
     const headers = mode === 'remaining-zero' ? { 'x-ratelimit-remaining-hour': '0', 'x-ratelimit-remaining-day': '10' } : {};
@@ -62,6 +88,7 @@ async function reset() {
   mode = 'search';
   hits.n = 0;
   hits.keys = [];
+  hits.queries = [];
   await db.run(`DELETE FROM collection`);
   await db.run(`DELETE FROM pokewallet_map`);
   await db.run(`DELETE FROM pokewallet_cache`);
@@ -138,6 +165,42 @@ async function main() {
     assert.strictEqual(unconfirmed.status, 'ambiguous');
     assert.strictEqual(unconfirmed.reason, 'set_unconfirmed');
 
+    // PokéWallet search is name + set code, or a numeric set id + number.
+    // "Mewtwo ex 151" is not a query it accepts.
+    assert.strictEqual(searchQuery({ name: 'Mewtwo ex', number: '151', set_id: '30th' }), 'Mewtwo ex 30th');
+    assert.strictEqual(searchQuery({ name: 'Cubone', number: '4', set_id: 'CBB3C' }), 'Cubone CBB3C');
+    assert.strictEqual(searchQuery({ name: 'Pikachu', number: '148', set_id: '24541' }), '24541 148');
+    assert.strictEqual(searchQuery({ name: 'Pikachu', number: '025/165', set_id: '24541' }), '24541 25');
+    const celebrationMatch = matchSearchResults(
+      { name: 'Mewtwo ex', number: '151', set_id: '30th', set_name: '30th Celebration' },
+      [{
+        id: 'pk_15115115115115115115115115115111',
+        card_info: {
+          name: 'Mewtwo ex - 151/158',
+          clean_name: 'Mewtwo ex 151 158',
+          set_name: '30th Celebration',
+          set_code: '30C',
+          card_number: '151/158',
+          product_type: 'card',
+        },
+        tcgplayer: { prices: [{ sub_type_name: 'Holofoil', market_price: 40 }] },
+      }],
+      1
+    );
+    assert.strictEqual(celebrationMatch.status, 'matched');
+    assert.strictEqual(celebrationMatch.matches.length, 1);
+    const differentCard = matchSearchResults(
+      { name: 'Mewtwo', number: '151', set_id: '30th', set_name: '30th Celebration' },
+      celebrationMatch.matches,
+      1
+    );
+    assert.strictEqual(differentCard.status, 'unmatched');
+    assert.strictEqual(matchSearchResults(
+      { name: 'Pikachu', number: '25', set_id: 'sv3pt5', set_name: '151' },
+      [{ card_info: { name: 'Pikachu - 025/165', card_number: '025/165', set_name: '151', set_code: 'MEW', product_type: 'card' } }],
+      1
+    ).status, 'matched');
+
     // Re-running init does not rewrite a card that is already there.
     await addCard({ id: 'tcgdex-en-30th-003', name: 'Mewtwo', setId: '30th', setName: 'Celebrations: Classic Collection', number: '003' });
     await db.initDb();
@@ -153,6 +216,7 @@ async function main() {
     assert.strictEqual(priced.updated, 1);
     assert.strictEqual(priced.skipped_language, 1);
     assert.strictEqual(hits.n, 1);
+    assert.deepStrictEqual(hits.queries, ['Mewtwo 30th']);
     assert.deepStrictEqual(hits.keys, [KEY]);
     const row = await db.get(`SELECT * FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-003']);
     assert.strictEqual(row.id, 'tcgdex-en-30th-003');
@@ -204,11 +268,28 @@ async function main() {
     const ambiguous = await api.updateCollectionPrices({ force: true });
     assert.strictEqual(ambiguous.ambiguous, 1);
     assert.strictEqual(ambiguous.updated, 0);
+    assert.strictEqual(hits.n, 1, 'a page of results is not searched a second time');
+    assert.deepStrictEqual(hits.queries, ['Cubone CBB3C']);
     assert.strictEqual((await db.get(`SELECT price_trend, price_source FROM card_cache WHERE id = ?`, ['tcgdex-en-cbb3c-4'])).price_source, 'tcgdex');
     const state = await api.status();
     assert.strictEqual(state.issues.length, 1);
     assert.strictEqual(state.issues[0].candidates.length, 2);
     assertNoSecret(state);
+
+    // Set code "MISSING" is not a PokéWallet code, so the first search is empty
+    // and one name-only search is allowed. The number is read from the result.
+    await reset();
+    await addCard({ id: 'tcgdex-en-30th-151', name: 'Mewtwo ex', setId: 'MISSING', setName: '30th Celebration', number: '151' });
+    const celebration = await api.updateCollectionPrices({ force: true });
+    assert.strictEqual(celebration.updated, 1);
+    assert.strictEqual(celebration.requests, 2);
+    assert.deepStrictEqual(hits.queries, ['Mewtwo ex MISSING', 'Mewtwo ex']);
+    const sir = await db.get(`SELECT id, number, set_id, price_trend, price_source FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-151']);
+    assert.strictEqual(sir.id, 'tcgdex-en-30th-151');
+    assert.strictEqual(sir.number, '151');
+    assert.strictEqual(sir.set_id, 'MISSING');
+    assert.strictEqual(sir.price_trend, 40);
+    assert.strictEqual(sir.price_source, 'pokewallet-tcgplayer');
 
     await reset();
     await addCard({ id: 'tcgdex-en-30th-003', name: 'Mewtwo', setId: '30th', setName: 'Celebrations: Classic Collection', number: '003', userId: 1 });
