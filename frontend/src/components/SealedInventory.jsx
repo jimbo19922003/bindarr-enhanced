@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, ArchiveRestore, Check, Download, Package, Plus, Search, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Download, Package, Plus, Search, X } from 'lucide-react';
 import { useT } from '../utils/i18n';
 
 const TYPES = ['booster_box', 'booster_pack', 'etb', 'tin', 'collection_box', 'blister', 'other'];
@@ -223,21 +223,15 @@ function SealedInventory({ showToast }) {
 
   const resultKey = (result) => `${result.provider}:${result.provider_product_id}`;
 
-  const togglePick = (result) => {
-    const key = resultKey(result);
-    const removing = Boolean(picked[key]);
+  const openAdd = (result) => {
     setForm(null);
-    setPicked(current => {
-      if (!current[key]) return { ...current, [key]: { result, quantity: '1', total_cost: '' } };
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
-    if (removing) {
-      if (Object.keys(picked).length === 1) setAddOpen(false);
-    } else {
-      setAddOpen(true);
-    }
+    setPicked({ [resultKey(result)]: { result, quantity: '1', total_cost: '' } });
+    setAddOpen(true);
+  };
+
+  const closeAdd = () => {
+    setAddOpen(false);
+    setPicked({});
   };
 
   const saveSelected = async (event) => {
@@ -274,8 +268,7 @@ function SealedInventory({ showToast }) {
       showToast(data.error || t('sealed.errSave'), 'error');
       return;
     }
-    setPicked({});
-    setAddOpen(false);
+    closeAdd();
     setPane('collection');
     showToast(t('sealed.saved'), 'success');
     refresh();
@@ -415,16 +408,13 @@ function SealedInventory({ showToast }) {
 
       {catalogResults.length > 0 && (
         <div className="card-grid">
-          {catalogResults.map(result => {
-            const key = resultKey(result);
-            const chosen = Boolean(picked[key]);
-            return (
+          {catalogResults.map(result => (
             <div
-              key={key}
+              key={resultKey(result)}
               className="tcg-card"
-              onClick={() => togglePick(result)}
+              onClick={() => openAdd(result)}
             >
-              <div className="tcg-card-inner" style={chosen ? { outline: '3px solid var(--accent-red)', outlineOffset: '2px' } : undefined}>
+              <div className="tcg-card-inner">
                 {result.image_url ? (
                   <img src={result.image_url} alt="" className="tcg-card-image" style={{ objectFit: 'contain', background: 'var(--bg-secondary)' }} />
                 ) : (
@@ -432,12 +422,6 @@ function SealedInventory({ showToast }) {
                     <Package size={28} />
                   </div>
                 )}
-                <div style={{ position: 'absolute', top: '8px', left: '8px', width: '22px', height: '22px', borderRadius: '50%', background: chosen ? 'var(--accent-red)' : 'rgba(0,0,0,0.6)', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
-                  {chosen ? <Check size={12} /> : null}
-                </div>
-                <div style={{ position: 'absolute', bottom: '8px', right: '8px', background: 'rgba(0,0,0,0.85)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border-glass-hover)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span style={{ fontSize: '0.65rem', fontWeight: 700 }}>{chosen ? t('sealed.selected') : t('sealed.select')}</span>
-                </div>
               </div>
               <div className="tcg-card-info">
                 <div className="tcg-card-name">{result.name}</div>
@@ -447,29 +431,19 @@ function SealedInventory({ showToast }) {
                 </div>
               </div>
             </div>
-            );
-          })}
+          ))}
         </div>
       )}
 
-      {pickedList.length > 0 && !addOpen && (
-        <div className="glass-panel" style={{ padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', position: 'sticky', bottom: '0.5rem', zIndex: 30 }}>
-          <strong style={{ flex: '1 1 auto' }}>{t('sealed.selectedCount', { count: pickedList.length })}</strong>
-          <button className="btn btn-secondary" type="button" onClick={() => { setPicked({}); setAddOpen(false); }}>{t('sealed.clearSelected')}</button>
-          <button className="btn btn-primary" type="button" onClick={() => setAddOpen(true)}>{t('sealed.addToInventory')}</button>
-        </div>
-      )}
-
-      <div className={`drawer-backdrop ${addOpen ? 'open' : ''}`} onClick={() => setAddOpen(false)} />
+      <div className={`drawer-backdrop ${addOpen ? 'open' : ''}`} onClick={closeAdd} />
       <div className={`quick-add-drawer ${addOpen ? 'open' : ''}`} style={{ maxWidth: '720px' }}>
         {addOpen && pickedList.length > 0 && (
           <form onSubmit={saveSelected} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
               <div style={{ minWidth: 0 }}>
                 <h3 style={{ color: 'var(--text-strong)', fontSize: '1.25rem', margin: 0 }}>{t('sealed.addProductsTitle')}</h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>{t('sealed.selectedHint')}</p>
               </div>
-              <button className="btn btn-secondary btn-icon-only" type="button" onClick={() => setAddOpen(false)} style={{ borderRadius: '50%', flexShrink: 0 }} aria-label={t('common.cancel')}>
+              <button className="btn btn-secondary btn-icon-only" type="button" onClick={closeAdd} style={{ borderRadius: '50%', flexShrink: 0 }} aria-label={t('common.cancel')}>
                 <X size={18} />
               </button>
             </div>
@@ -526,7 +500,7 @@ function SealedInventory({ showToast }) {
 
             <div className="quick-add-footer" style={{ marginTop: '0.25rem', paddingTop: '0.25rem' }}>
               <div className="quick-add-footer-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setAddOpen(false)}>{t('common.cancel')}</button>
+                <button type="button" className="btn btn-secondary" onClick={closeAdd}>{t('common.cancel')}</button>
                 <button type="submit" className="btn btn-primary">{t('sealed.addToInventory')}</button>
               </div>
             </div>

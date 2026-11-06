@@ -311,8 +311,9 @@ the Collection side of the Sealed tab. A location name in the file must
 already exist for that user.
 
 Add and Collection are separate tabs. A search returns sealed products only.
-Select every product from that search, enter each lot's quantity and cost,
-and save them together. That is still one PokéWallet search. The picture is
+Click a product to open the add dialog, then enter that lot's quantity and
+cost. The results stay on screen, so the next product does not search again.
+The picture is
 TCGplayer's public product image for the id PokéWallet already returned. The
 search needs the PokéWallet key saved in Settings. A missing market price
 stays unknown. A product the search does not list is still entered by hand.
