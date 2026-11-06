@@ -5,6 +5,13 @@ import SealedOpenings from './SealedOpenings';
 
 const TYPES = ['booster_box', 'booster_pack', 'etb', 'tin', 'collection_box', 'blister', 'other'];
 
+function todayISO() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
 const emptyForm = () => ({
   name: '',
   product_type: 'etb',
@@ -18,7 +25,7 @@ const emptyForm = () => ({
   remaining_quantity: '',
   total_cost: '',
   currency: 'USD',
-  purchased_at: '',
+  purchased_at: todayISO(),
   location_id: '',
   notes: '',
   provider: '',
@@ -52,7 +59,7 @@ function SealedInventory({ showToast }) {
   const [pane, setPane] = useState('add');
   const [picked, setPicked] = useState({});
   const [addOpen, setAddOpen] = useState(false);
-  const [shared, setShared] = useState({ currency: 'USD', purchased_at: '', location_id: '' });
+  const [shared, setShared] = useState({ currency: 'USD', purchased_at: todayISO(), location_id: '' });
 
   const typeLabel = (value) => t(`sealed.type.${value}`);
 
@@ -175,10 +182,11 @@ function SealedInventory({ showToast }) {
     const data = await response.json();
     if (!response.ok) {
       showToast(data.error || t('sealed.errSave'), 'error');
-      return;
+      return false;
     }
     showToast(t('sealed.saved'), 'success');
     refresh();
+    return true;
   };
 
   const updateLot = async (lot, patch) => {
@@ -589,37 +597,48 @@ function SealedInventory({ showToast }) {
       <div style={{ display: 'grid', gap: '0.75rem' }}>
         {products.map(product => (
           <article key={product.id} className="glass-panel" style={{ padding: '0.9rem', opacity: product.archived_at ? 0.65 : 1 }}>
-            <button
-              type="button"
-              onClick={() => setSelectedId(selectedId === product.id ? null : product.id)}
-              style={{ all: 'unset', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: '1rem', width: '100%', alignItems: 'center' }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setSelectedId(selectedId === product.id ? null : product.id)}
+                style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.7rem', flex: '1 1 16rem' }}
+              >
                 {product.image_url && <img src={product.image_url} alt="" width="48" height="48" style={{ objectFit: 'contain', borderRadius: '4px' }} />}
                 <span>
-                <strong style={{ color: 'var(--text-strong)' }}>{product.name}</strong>
-                <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
-                  {typeLabel(product.product_type)} · {product.language}{product.set_name ? ` · ${product.set_name}` : ''}
+                  <strong style={{ color: 'var(--text-strong)' }}>{product.name}</strong>
+                  <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
+                    {typeLabel(product.product_type)} · {product.language}{product.set_name ? ` · ${product.set_name}` : ''}
+                  </span>
                 </span>
-                </span>
-              </span>
-              <span style={{ color: 'var(--text-secondary)', textAlign: 'right' }}>
-                {t('sealed.onHand', { count: product.remaining_quantity })}
-                <br />
-                {t('sealed.marketShort')} {moneyLabel(product.market_price, product.market_currency)}
-              </span>
-            </button>
+              </button>
+              {selected && selected.id === product.id ? (
+                <MarketForm
+                  product={product}
+                  t={t}
+                  onQuote={(market_price, market_currency) => saveQuote({ ...product, market_price, market_currency })}
+                  onRefreshQuote={() => refreshQuote(product)}
+                  onArchive={() => setArchived('product', product.id, !product.archived_at)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(product.id)}
+                  style={{ all: 'unset', cursor: 'pointer', color: 'var(--text-secondary)', textAlign: 'right' }}
+                >
+                  {t('sealed.onHand', { count: product.remaining_quantity })}
+                  <br />
+                  {t('sealed.marketShort')} {moneyLabel(product.market_price, product.market_currency)}
+                </button>
+              )}
+            </div>
             {selected && selected.id === product.id && (
               <ProductDetail
                 product={selected}
                 locations={locations}
                 t={t}
-                onArchive={() => setArchived('product', product.id, !product.archived_at)}
-                onQuote={(market_price, market_currency) => saveQuote({ ...product, market_price, market_currency })}
                 onAddLot={lot => addLot(product.id, lot)}
                 onUpdateLot={updateLot}
                 onArchiveLot={(lot, archived) => setArchived('lot', lot.id, archived)}
-                onRefreshQuote={() => refreshQuote(product)}
                 showToast={showToast}
                 onChanged={refresh}
               />
@@ -647,10 +666,9 @@ function SealedInventory({ showToast }) {
   );
 }
 
-function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, onUpdateLot, onArchiveLot, onRefreshQuote, showToast, onChanged }) {
+function MarketForm({ product, t, onQuote, onRefreshQuote, onArchive }) {
   const [market, setMarket] = useState(product.market_price || '');
   const [marketCurrency, setMarketCurrency] = useState(product.market_currency || 'USD');
-  const [lot, setLot] = useState({ quantity: '1', remaining_quantity: '', total_cost: '', currency: 'USD', purchased_at: '', location_id: '', notes: '' });
 
   useEffect(() => {
     setMarket(product.market_price || '');
@@ -658,24 +676,87 @@ function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, on
   }, [product.id, product.market_price, product.market_currency]);
 
   return (
+    <form
+      onSubmit={(event) => { event.preventDefault(); onQuote(market, marketCurrency); }}
+      style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}
+    >
+      <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{t('sealed.onHand', { count: product.remaining_quantity })}</span>
+      <input className="input-control" value={market} onChange={e => setMarket(e.target.value)} aria-label={t('sealed.market')} placeholder={t('sealed.market')} style={{ width: '6.5rem' }} />
+      <input className="input-control" value={marketCurrency} onChange={e => setMarketCurrency(e.target.value.toUpperCase())} aria-label={t('sealed.marketCurrency')} maxLength={3} style={{ width: '4.2rem' }} />
+      <button className="btn btn-secondary" type="submit">{t('sealed.saveQuote')}</button>
+      {(product.provider === 'pokewallet' || product.provider === 'tcgcsv') && product.provider_product_id && (
+        <button className="btn btn-secondary" type="button" onClick={onRefreshQuote}>{t('sealed.updateQuote')}</button>
+      )}
+      <button className="btn btn-secondary" type="button" onClick={onArchive}>
+        {product.archived_at ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+        {product.archived_at ? t('sealed.restore') : t('sealed.archive')}
+      </button>
+    </form>
+  );
+}
+
+function compareLots(a, b, sort) {
+  if (sort.key === 'purchased_at') {
+    if (!a.purchased_at && !b.purchased_at) return a.id - b.id;
+    if (!a.purchased_at) return 1;
+    if (!b.purchased_at) return -1;
+    const cmp = a.purchased_at < b.purchased_at ? -1 : a.purchased_at > b.purchased_at ? 1 : 0;
+    return sort.dir === 'asc' ? cmp : -cmp;
+  }
+  const cmp = a.total_cost_cents - b.total_cost_cents;
+  if (cmp !== 0) return sort.dir === 'asc' ? cmp : -cmp;
+  return a.id - b.id;
+}
+
+function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchiveLot, showToast, onChanged }) {
+  const [ripLot, setRipLot] = useState(null);
+  const [sort, setSort] = useState({ key: 'purchased_at', dir: 'desc' });
+  const [lot, setLot] = useState({ quantity: '1', remaining_quantity: '', total_cost: '', currency: 'USD', purchased_at: todayISO(), location_id: '', notes: '' });
+  const lots = [...(product.lots || [])].sort((a, b) => compareLots(a, b, sort));
+
+  useEffect(() => { setRipLot(null); }, [product.id]);
+
+  const toggleSort = (key) => {
+    setSort(current => (
+      current.key === key
+        ? { key, dir: current.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: 'asc' }
+    ));
+  };
+
+  const sortMark = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+
+  return (
     <div style={{ marginTop: '0.8rem', display: 'grid', gap: '0.7rem' }}>
-      {product.image_url && <img src={product.image_url} alt={product.name} style={{ width: '6rem', height: '6rem', objectFit: 'contain' }} />}
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input className="input-control" value={market} onChange={e => setMarket(e.target.value)} aria-label={t('sealed.market')} placeholder={t('sealed.market')} style={{ width: '7rem' }} />
-        <input className="input-control" value={marketCurrency} onChange={e => setMarketCurrency(e.target.value.toUpperCase())} aria-label={t('sealed.marketCurrency')} maxLength={3} style={{ width: '4.5rem' }} />
-        <button className="btn btn-secondary" type="button" onClick={() => onQuote(market, marketCurrency)}>{t('sealed.saveQuote')}</button>
-        {(product.provider === 'pokewallet' || product.provider === 'tcgcsv') && product.provider_product_id && (
-          <button className="btn btn-secondary" type="button" onClick={onRefreshQuote}>{t('sealed.updateQuote')}</button>
-        )}
-        <button className="btn btn-secondary" type="button" onClick={onArchive}>
-          {product.archived_at ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-          {product.archived_at ? t('sealed.restore') : t('sealed.archive')}
-        </button>
+      <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.quoteHint')}</p>
+      <div className="collection-table-wrapper" style={{ marginTop: 0 }}>
+        <table className="collection-table">
+          <thead>
+            <tr>
+              <th aria-sort={sort.key === 'purchased_at' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                <button type="button" onClick={() => toggleSort('purchased_at')} style={{ background: 'none', border: 0, padding: 0, color: 'inherit', font: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', cursor: 'pointer' }}>
+                  {t('sealed.purchased')}{sortMark('purchased_at')}
+                </button>
+              </th>
+              <th>{t('sealed.quantity')}</th>
+              <th aria-sort={sort.key === 'total_cost' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                <button type="button" onClick={() => toggleSort('total_cost')} style={{ background: 'none', border: 0, padding: 0, color: 'inherit', font: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', cursor: 'pointer' }}>
+                  {t('sealed.colPaid')}{sortMark('total_cost')}
+                </button>
+              </th>
+              <th>{t('sealed.colLeft')}</th>
+              <th className="hide-mobile">{t('sealed.colBasis')}</th>
+              <th className="hide-mobile">{t('sealed.location')}</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {lots.map(item => (
+              <LotRow key={item.id} lot={item} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot} onRip={() => setRipLot(item)} />
+            ))}
+          </tbody>
+        </table>
       </div>
-      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{t('sealed.quoteHint')}</p>
-      {product.lots.map(item => (
-        <LotRow key={item.id} lot={item} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot} />
-      ))}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '0.45rem' }}>
         <input className="input-control" type="number" min="1" value={lot.quantity} onChange={e => setLot({ ...lot, quantity: e.target.value })} aria-label={t('sealed.quantity')} />
         <input className="input-control" value={lot.total_cost} onChange={e => setLot({ ...lot, total_cost: e.target.value })} placeholder={t('sealed.cost')} aria-label={t('sealed.cost')} />
@@ -688,42 +769,58 @@ function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, on
         <button
           className="btn btn-secondary"
           type="button"
-          onClick={() => onAddLot({
-            quantity: Number(lot.quantity),
-            total_cost: lot.total_cost,
-            currency: lot.currency,
-            purchased_at: lot.purchased_at,
-            location_id: lot.location_id === '' ? null : Number(lot.location_id),
-            notes: lot.notes,
-          })}
+          onClick={async () => {
+            const added = await onAddLot({
+              quantity: Number(lot.quantity),
+              total_cost: lot.total_cost,
+              currency: lot.currency,
+              purchased_at: lot.purchased_at,
+              location_id: lot.location_id === '' ? null : Number(lot.location_id),
+              notes: lot.notes,
+            });
+            if (added) {
+              setLot({ quantity: '1', remaining_quantity: '', total_cost: '', currency: lot.currency, purchased_at: todayISO(), location_id: '', notes: '' });
+            }
+          }}
         >
           {t('sealed.addLot')}
         </button>
       </div>
-      <SealedOpenings product={product} showToast={showToast} onChanged={onChanged} />
+      <SealedOpenings product={product} showToast={showToast} onChanged={onChanged} ripLot={ripLot} onCloseRip={() => setRipLot(null)} />
     </div>
   );
 }
 
-function LotRow({ lot, t, onUpdateLot, onArchiveLot }) {
+function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip }) {
   const [remaining, setRemaining] = useState(String(lot.remaining_quantity));
   const [cost, setCost] = useState(lot.total_cost);
+  const canRip = !lot.archived_at && lot.remaining_quantity > 0;
   useEffect(() => {
     setRemaining(String(lot.remaining_quantity));
     setCost(lot.total_cost);
   }, [lot.id, lot.remaining_quantity, lot.total_cost]);
   return (
-    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', opacity: lot.archived_at ? 0.6 : 1 }}>
-      <span>{t('sealed.lotLine', { count: lot.quantity, cost: `${lot.currency} ${lot.total_cost}`, remaining: lot.remaining_quantity, basis: `${lot.currency} ${lot.remaining_cost}` })}</span>
-      {lot.location_name && <span style={{ color: 'var(--text-secondary)' }}>{lot.location_name}</span>}
-      {lot.purchased_at && <span style={{ color: 'var(--text-secondary)' }}>{lot.purchased_at}</span>}
-      <input className="input-control" value={remaining} onChange={e => setRemaining(e.target.value)} aria-label={t('sealed.remaining')} style={{ width: '4.5rem' }} />
-      <input className="input-control" value={cost} onChange={e => setCost(e.target.value)} aria-label={t('sealed.cost')} style={{ width: '6rem' }} />
-      <button className="btn btn-secondary" type="button" onClick={() => onUpdateLot(lot, { remaining_quantity: Number(remaining), total_cost: cost })}>{t('sealed.save')}</button>
-      <button className="btn btn-secondary" type="button" onClick={() => onArchiveLot(lot, !lot.archived_at)}>
-        {lot.archived_at ? t('sealed.restore') : t('sealed.archive')}
-      </button>
-    </div>
+    <tr style={{ opacity: lot.archived_at ? 0.6 : 1 }}>
+      <td>{lot.purchased_at || '—'}</td>
+      <td>{lot.quantity}</td>
+      <td>
+        <input className="input-control" value={cost} onChange={e => setCost(e.target.value)} aria-label={t('sealed.cost')} style={{ width: '6rem' }} />
+      </td>
+      <td>
+        <input className="input-control" value={remaining} onChange={e => setRemaining(e.target.value)} aria-label={t('sealed.remaining')} style={{ width: '4.2rem' }} />
+      </td>
+      <td className="hide-mobile">{lot.currency} {lot.remaining_cost}</td>
+      <td className="hide-mobile">{lot.location_name || '—'}</td>
+      <td>
+        <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {canRip && <button className="btn btn-primary" type="button" onClick={onRip}>{t('sealed.letItRip')}</button>}
+          <button className="btn btn-secondary" type="button" onClick={() => onUpdateLot(lot, { remaining_quantity: Number(remaining), total_cost: cost })}>{t('sealed.save')}</button>
+          <button className="btn btn-secondary" type="button" onClick={() => onArchiveLot(lot, !lot.archived_at)}>
+            {lot.archived_at ? t('sealed.restore') : t('sealed.archive')}
+          </button>
+        </div>
+      </td>
+    </tr>
   );
 }
 

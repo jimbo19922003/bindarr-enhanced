@@ -317,7 +317,9 @@ TCGplayer's public product image for the id PokéWallet already returned. The
 search needs the PokéWallet key saved in Settings. A missing market price
 stays unknown. A product the search does not list is still entered by hand.
 
-Open one unit at a time from a lot. That opening keeps the share of the lot
+Each purchase lot has its own LET IT RIP. That opens rapid add with the
+product's set already filled in: type a card number and press Enter to record
+the pull. The opening keeps the share of the lot
 cost allocated to it. Pulls recorded on it have their own current value, and
 an optional value from the day it was opened. A blank price is missing, not
 zero. The difference between known current value and opening cost is an

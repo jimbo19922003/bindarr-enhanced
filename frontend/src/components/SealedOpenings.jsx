@@ -1,6 +1,14 @@
-import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, Zap } from 'lucide-react';
 import { useT } from '../utils/i18n';
+import { langCode } from '../utils/languages';
+
+function todayISO() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
 
 let lineKey = 0;
 const nextKey = () => {
@@ -31,13 +39,11 @@ function money(currency, amount) {
   return `${currency} ${amount}`;
 }
 
-function SealedOpenings({ product, showToast, onChanged }) {
+function SealedOpenings({ product, showToast, onChanged, ripLot, onCloseRip }) {
   const { t } = useT();
   const [rows, setRows] = useState([]);
-  const [dialog, setDialog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null);
-  const openable = (product.lots || []).filter(lot => !lot.archived_at && lot.remaining_quantity > 0);
 
   const reload = async () => {
     const response = await fetch(`/api/sealed/products/${product.id}/openings`);
@@ -63,52 +69,18 @@ function SealedOpenings({ product, showToast, onChanged }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product.id]);
 
-  const start = () => {
-    if (!openable.length) return;
-    setDialog(true);
-  };
-
-  const saveOpening = async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const pulls = [];
-    const count = Number(form.get('pull-count') || 0);
-    for (let index = 0; index < count; index += 1) {
-      const bulk = form.get(`bulk-${index}`) === '1';
-      const name = String(form.get(`name-${index}`) || '').trim();
-      const cardId = String(form.get(`card-${index}`) || '').trim();
-      if (!name && !cardId && !bulk) continue;
-      const pull = {
-        name: name || t('sealed.otherCards'),
-        quantity: Number(form.get(`qty-${index}`) || 1),
-        card_id: cardId || undefined,
-      };
-      const current = String(form.get(`current-${index}`) || '').trim();
-      const snapshot = String(form.get(`snapshot-${index}`) || '').trim();
-      if (bulk) {
-        if (current) pull.line_value = current;
-        if (snapshot) pull.opened_line_value = snapshot;
-      } else {
-        if (current) pull.current_value = current;
-        if (snapshot) pull.value_at_opening = snapshot;
-      }
-      pulls.push(pull);
-    }
+  const saveOpening = async (body) => {
+    if (!ripLot) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/sealed/lots/${form.get('lot_id')}/openings`, {
+      const response = await fetch(`/api/sealed/lots/${ripLot.id}/openings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          opened_at: form.get('opened_at') || '',
-          notes: form.get('notes') || '',
-          entry_complete: form.get('entry_complete') === 'on',
-          pulls,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || t('sealed.errOpening'));
-      setDialog(false);
+      if (onCloseRip) onCloseRip();
       showToast(t('sealed.openingSaved'));
       await reload();
       if (onChanged) await onChanged();
@@ -145,9 +117,6 @@ function SealedOpenings({ product, showToast, onChanged }) {
     <section style={{ display: 'grid', gap: '0.7rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
         <strong style={{ color: 'var(--text-strong)' }}>{t('sealed.openingsTitle')}</strong>
-        {openable.length > 0 && (
-          <button className="btn btn-primary" type="button" onClick={start}>{t('sealed.openUnit')}</button>
-        )}
       </div>
       <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{t('sealed.openHint')}</p>
       {currencies.length > 1 && (
@@ -171,54 +140,144 @@ function SealedOpenings({ product, showToast, onChanged }) {
         />
       ))}
 
-      <div className={`drawer-backdrop ${dialog ? 'open' : ''}`} onClick={() => setDialog(false)} />
-      <div className={`quick-add-drawer ${dialog ? 'open' : ''}`} style={{ maxWidth: '720px' }}>
-        {dialog && openable.length > 0 && (
-          <OpeningForm lots={openable} busy={busy} t={t} onClose={() => setDialog(false)} onSubmit={saveOpening} />
+      <div className={`drawer-backdrop ${ripLot ? 'open' : ''}`} onClick={onCloseRip} />
+      <div className={`quick-add-drawer ${ripLot ? 'open' : ''}`} style={{ maxWidth: '720px' }}>
+        {ripLot && (
+          <RipForm
+            key={ripLot.id}
+            product={product}
+            lot={ripLot}
+            busy={busy}
+            t={t}
+            showToast={showToast}
+            onClose={onCloseRip}
+            onSubmit={saveOpening}
+          />
         )}
       </div>
     </section>
   );
 }
 
-function OpeningForm({ lots, busy, t, onClose, onSubmit }) {
-  const [lines, setLines] = useState([emptyLine(false)]);
-  const [lotId, setLotId] = useState(String(lots[0].id));
-  const lot = lots.find(item => String(item.id) === lotId) || lots[0];
-  const currency = lot.currency;
+function pullFromCard(card, product, currency) {
+  const priceCurrency = String(card.price_currency || 'USD').toUpperCase();
+  const usable = card.price_trend != null && card.price_trend !== '' && priceCurrency === currency;
+  const image = typeof card.image_url === 'string' && /^https?:\/\//.test(card.image_url) ? card.image_url : '';
+  return {
+    key: nextKey(),
+    name: card.name,
+    card_id: card.id,
+    set_name: card.set_name || product.set_name || '',
+    number: card.number || '',
+    image_url: image,
+    quantity: 1,
+    current_value: usable ? Number(card.price_trend).toFixed(2) : '',
+    value_at_opening: '',
+    bulk: false,
+  };
+}
 
-  const lookup = async (key) => {
-    const line = lines.find(item => item.key === key);
-    const q = (line?.name || '').trim();
-    if (q.length < 2) return;
-    const response = await fetch(`/api/sealed/cards?q=${encodeURIComponent(q)}`);
-    const data = await response.json().catch(() => ({}));
-    const matches = response.ok ? (data.cards || []) : [];
-    setLines(current => current.map(item => (item.key === key ? { ...item, matches, note: matches.length ? '' : t('sealed.noCardMatch') } : item)));
+function RipForm({ product, lot, busy, t, showToast, onClose, onSubmit }) {
+  const inputRef = useRef(null);
+  const [openedAt, setOpenedAt] = useState(todayISO());
+  const [notes, setNotes] = useState('');
+  const [setCode, setSetCode] = useState(product.set_id || '');
+  const [number, setNumber] = useState('');
+  const [pulls, setPulls] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [looking, setLooking] = useState(false);
+  const [entryComplete, setEntryComplete] = useState(false);
+  const [bulk, setBulk] = useState(false);
+  const setLabel = product.set_name || setCode;
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const addCard = (card) => {
+    setPulls(current => [pullFromCard(card, product, lot.currency), ...current]);
+    setNumber('');
+    setMatches([]);
+    inputRef.current?.focus();
   };
 
-  const choose = (key, card) => {
-    const pricedHere = card.price != null && String(card.currency || '').toUpperCase() === currency;
-    setLines(current => current.map(item => {
-      if (item.key !== key) return item;
-      return {
-        ...item,
-        card_id: card.id,
-        name: card.name,
-        matches: [],
-        note: pricedHere ? '' : (card.currency ? t('sealed.currencySkipped', { currency: card.currency }) : ''),
-        current_value: pricedHere && item.current_value === '' ? Number(card.price).toFixed(2) : item.current_value,
-      };
-    }));
+  const lookupNumber = async () => {
+    const typed = number.trim();
+    if (!typed || looking) return;
+    if (!setCode.trim()) {
+      showToast(t('sealed.ripNeedsSet'));
+      return;
+    }
+    setLooking(true);
+    try {
+      const params = new URLSearchParams({
+        number: typed,
+        set: setCode.trim(),
+        scope: 'internet',
+        game: 'pokemon',
+        lang: langCode(product.language || 'en'),
+        page: '1',
+        limit: '10',
+      });
+      const response = await fetch(`/api/search?${params.toString()}`);
+      const data = await response.json().catch(() => ([]));
+      if (!response.ok) {
+        showToast(data.error || t('sealed.errOpening'));
+        return;
+      }
+      const found = Array.isArray(data) ? data : [];
+      const exact = found.filter(card => String(card.number) === typed || parseInt(card.number, 10) === parseInt(typed, 10));
+      const hit = exact.length === 1 ? exact[0] : (found.length === 1 ? found[0] : null);
+      if (!hit) {
+        if (found.length === 0) showToast(t('search.errNoSuchNumber', { number: typed, set: setLabel || setCode }));
+        setMatches(found);
+        return;
+      }
+      addCard(hit);
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      setLooking(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  const submit = (event) => {
+    event.preventDefault();
+    onSubmit({
+      opened_at: openedAt,
+      notes,
+      entry_complete: entryComplete,
+      pulls: pulls.map(pull => {
+        if (pull.bulk) {
+          return {
+            name: pull.name.trim() || t('sealed.otherCards'),
+            quantity: Number(pull.quantity) || 1,
+            set_name: product.set_name || '',
+            ...(pull.line_value.trim() ? { line_value: pull.line_value.trim() } : {}),
+            ...(pull.value_at_opening.trim() ? { opened_line_value: pull.value_at_opening.trim() } : {}),
+          };
+        }
+        return {
+          name: pull.name,
+          card_id: pull.card_id,
+          quantity: pull.quantity,
+          set_name: pull.set_name,
+          number: pull.number,
+          ...(pull.image_url ? { image_url: pull.image_url } : {}),
+          ...(pull.current_value.trim() ? { current_value: pull.current_value.trim() } : {}),
+          ...(pull.value_at_opening.trim() ? { value_at_opening: pull.value_at_opening.trim() } : {}),
+        };
+      }),
+    });
   };
 
   return (
-    <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', width: '100%' }}>
-      <input type="hidden" name="pull-count" value={lines.length} />
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start' }}>
         <div>
-          <h3 style={{ color: 'var(--text-strong)', fontSize: '1.25rem', margin: 0 }}>{t('sealed.openTitle')}</h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>{t('sealed.openHint')}</p>
+          <h3 style={{ color: 'var(--text-strong)', fontSize: '1.25rem', margin: 0 }}>{t('sealed.letItRip')}</h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>
+            {t('sealed.ripLot', { cost: `${lot.currency} ${lot.total_cost}`, date: lot.purchased_at ? ` on ${lot.purchased_at}` : '' })}
+          </p>
         </div>
         <button className="btn btn-secondary btn-icon-only" type="button" onClick={onClose} style={{ borderRadius: '50%' }} aria-label={t('common.cancel')}>
           <X size={18} />
@@ -226,84 +285,88 @@ function OpeningForm({ lots, busy, t, onClose, onSubmit }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
         <div className="form-group" style={{ marginBottom: 0 }}>
-          <label>{t('sealed.lotToOpen')}</label>
-          <select className="select-control" name="lot_id" value={lotId} onChange={e => setLotId(e.target.value)}>
-            {lots.map(lot => (
-              <option key={lot.id} value={lot.id}>
-                {t('sealed.openLot', { remaining: lot.remaining_quantity, basis: `${lot.currency} ${lot.remaining_cost}` })}
-              </option>
-            ))}
-          </select>
+          <label>{t('sealed.openedOn')}</label>
+          <input className="input-control" type="date" value={openedAt} onChange={e => setOpenedAt(e.target.value)} />
         </div>
         <div className="form-group" style={{ marginBottom: 0 }}>
-          <label>{t('sealed.openedOn')}</label>
-          <input className="input-control" type="date" name="opened_at" />
+          <label>{t('sealed.set')}</label>
+          <input className="input-control" value={setCode} onChange={e => setSetCode(e.target.value)} aria-label={t('sealed.set')} />
+          {product.set_name && <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{product.set_name}</p>}
         </div>
         <div className="form-group" style={{ marginBottom: 0 }}>
           <label>{t('sealed.notes')}</label>
-          <input className="input-control" name="notes" />
+          <input className="input-control" value={notes} onChange={e => setNotes(e.target.value)} />
         </div>
       </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '40vh', overflowY: 'auto' }}>
-        {lines.map((line, index) => (
-          <div key={line.key} style={{ display: 'grid', gap: '0.55rem', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)' }}>
-            <input type="hidden" name={`bulk-${index}`} value={line.bulk ? '1' : '0'} />
-            <input type="hidden" name={`card-${index}`} value={line.card_id} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center' }}>
-              <strong style={{ color: 'var(--text-strong)', fontSize: '0.9rem' }}>{line.bulk ? t('sealed.addBulk') : t('sealed.addPull')}</strong>
-              <button className="btn btn-secondary" type="button" onClick={() => setLines(current => current.filter(item => item.key !== line.key))}>{t('sealed.removePull')}</button>
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>{t('sealed.pullName')}</label>
-              <div style={{ display: 'flex', gap: '0.45rem' }}>
-                <input className="input-control" name={`name-${index}`} value={line.name} onChange={e => setLines(current => current.map(item => item.key === line.key ? { ...item, name: e.target.value, card_id: '' } : item))} />
-                {!line.bulk && (
-                  <button className="btn btn-secondary" type="button" onClick={() => lookup(line.key)}>{t('sealed.findCard')}</button>
-                )}
-              </div>
-              {line.note && <p style={{ margin: '0.3rem 0 0', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{line.note}</p>}
-              {line.matches.length > 0 && (
-                <div style={{ display: 'grid', gap: '0.25rem', marginTop: '0.35rem' }}>
-                  {line.matches.map(card => (
-                    <button key={card.id} className="btn btn-secondary" type="button" onClick={() => choose(line.key, card)} style={{ justifyContent: 'flex-start' }}>
-                      {card.name}{card.set_name ? ` · ${card.set_name}` : ''}{card.number ? ` #${card.number}` : ''}
-                    </button>
-                  ))}
-                </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <Zap size={18} style={{ color: 'var(--accent-yellow)' }} />
+        <strong style={{ color: 'var(--text-strong)' }}>{setLabel ? t('search.rapidToSet', { set: setLabel }) : t('search.rapid')}</strong>
+      </div>
+      <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{setCode.trim() ? t('sealed.ripReady') : t('sealed.ripNeedsSet')}</p>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <input
+          ref={inputRef}
+          className="input-control"
+          inputMode="numeric"
+          placeholder={t('search.rapidNumberPlaceholder')}
+          value={number}
+          onChange={e => setNumber(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookupNumber(); } }}
+          style={{ flex: '1 1 10rem', fontSize: '1.05rem', fontWeight: 700 }}
+        />
+        <button className="btn btn-secondary" type="button" onClick={lookupNumber} disabled={looking}>{t('sealed.addPull')}</button>
+      </div>
+      {matches.length > 0 && (
+        <div style={{ display: 'grid', gap: '0.3rem' }}>
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.ripSeveral', { count: matches.length, number: number.trim() })}</p>
+          {matches.map(card => (
+            <button key={card.id} className="btn btn-secondary" type="button" onClick={() => addCard(card)} style={{ justifyContent: 'flex-start' }}>
+              #{card.number} {card.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {pulls.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', maxHeight: '240px', overflowY: 'auto' }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('search.addedThisSession', { count: pulls.length })}</div>
+          {pulls.map(pull => (
+            <div key={pull.key} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.4rem 0.55rem', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-sm)' }}>
+              <span style={{ flex: 1, minWidth: 0, color: 'var(--text-strong)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {pull.bulk ? pull.name || t('sealed.otherCards') : `#${pull.number} ${pull.name}`}
+                {pull.current_value ? ` · ${lot.currency} ${pull.current_value}` : ''}
+              </span>
+              {pull.bulk && (
+                <>
+                  <input className="input-control" type="number" min="1" value={pull.quantity} aria-label={t('card.quantity')} style={{ width: '4.2rem' }} onChange={e => setPulls(current => current.map(item => item.key === pull.key ? { ...item, quantity: e.target.value } : item))} />
+                  <input className="input-control" value={pull.line_value} aria-label={t('sealed.lineValue')} placeholder={t('sealed.lineValue')} style={{ width: '6rem' }} onChange={e => setPulls(current => current.map(item => item.key === pull.key ? { ...item, line_value: e.target.value } : item))} />
+                </>
               )}
+              <button className="btn btn-secondary" type="button" onClick={() => setPulls(current => current.filter(item => item.key !== pull.key))}>{t('search.undo')}</button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem' }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>{t('card.quantity')}</label>
-                <input className="input-control" name={`qty-${index}`} type="number" min="1" required value={line.quantity} onChange={e => setLines(current => current.map(item => item.key === line.key ? { ...item, quantity: e.target.value } : item))} />
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>{line.bulk ? t('sealed.lineValue') : t('sealed.pullValue')}</label>
-                <input className="input-control" name={`current-${index}`} value={line.bulk ? line.line_value : line.current_value} placeholder={currency} onChange={e => setLines(current => current.map(item => item.key === line.key ? { ...item, [line.bulk ? 'line_value' : 'current_value']: e.target.value } : item))} />
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>{t('sealed.snapshotValue')}</label>
-                <input className="input-control" name={`snapshot-${index}`} value={line.value_at_opening} placeholder={t('sealed.snapshotOptional')} onChange={e => setLines(current => current.map(item => item.key === line.key ? { ...item, value_at_opening: e.target.value } : item))} />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <button className="btn btn-secondary" type="button" onClick={() => setLines(current => [...current, emptyLine(false)])}>{t('sealed.addPull')}</button>
-        <button className="btn btn-secondary" type="button" onClick={() => setLines(current => [...current, emptyLine(true)])}>{t('sealed.addBulk')}</button>
+        <button
+          className="btn btn-secondary"
+          type="button"
+          onClick={() => {
+            setBulk(true);
+            setPulls(current => [{ key: nextKey(), bulk: true, name: t('sealed.otherCards'), quantity: '1', line_value: '', value_at_opening: '', current_value: '' }, ...current]);
+          }}
+        >
+          {t('sealed.addBulk')}
+        </button>
       </div>
-      <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.bulkHint')}</p>
-      <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.snapshotHint')}</p>
+      {bulk && <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.bulkHint')}</p>}
       <label style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
-        <input type="checkbox" name="entry_complete" />
+        <input type="checkbox" checked={entryComplete} onChange={e => setEntryComplete(e.target.checked)} />
         {t('sealed.markComplete')}
       </label>
       <div className="quick-add-footer">
         <div className="quick-add-footer-actions">
           <button className="btn btn-secondary" type="button" onClick={onClose}>{t('common.cancel')}</button>
-          <button className="btn btn-primary" type="submit" disabled={busy}>{t('sealed.openUnit')}</button>
+          <button className="btn btn-primary" type="submit" disabled={busy}>{t('sealed.letItRip')}</button>
         </div>
       </div>
     </form>

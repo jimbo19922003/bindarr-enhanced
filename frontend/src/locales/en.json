@@ -1648,5 +1648,13 @@
   "sealed.openingSaved": "Opening saved.",
   "sealed.errOpening": "Could not save that opening.",
   "sealed.lotToOpen": "Lot",
-  "sealed.oneCurrencyNote": "Openings in different currencies are listed on their own and are not added together."
+  "sealed.oneCurrencyNote": "Openings in different currencies are listed on their own and are not added together.",
+  "sealed.letItRip": "LET IT RIP!",
+  "sealed.ripLot": "This unit was bought for {cost}{date}.",
+  "sealed.ripReady": "Type a card number and press Enter. The set is already filled in from this product.",
+  "sealed.ripNeedsSet": "Enter the set code, then type a card number.",
+  "sealed.ripSeveral": "{count} cards match #{number}. Pick one.",
+  "sealed.colPaid": "Paid",
+  "sealed.colLeft": "Left",
+  "sealed.colBasis": "Basis"
 }
