@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { resolveCardPrice, isVintageSet, parseSqliteUtc } = require('../utils/priceHelpers');
 const { summarizeHoldings, emptyHoldings, centsToMoney } = require('../utils/sealedInventory');
+const { summarizePerformance } = require('../utils/openingPerformance');
 
 const router = express.Router();
 
@@ -19,6 +20,24 @@ async function sealedHoldingRows(userId) {
       WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL`,
     [userId]
   );
+}
+
+async function openingPerformanceFor(userId, game) {
+  if (game && game !== 'pokemon') return summarizePerformance([]);
+  const rows = await db.all(
+    `SELECT o.id AS opening_id, o.product_id, o.quantity AS units, o.cost_cents, o.currency,
+            o.entry_complete, p.set_name, p.product_type,
+            sp.quantity AS pull_quantity,
+            sp.current_unit_cents, sp.current_line_cents,
+            sp.opened_unit_cents, sp.opened_line_cents
+       FROM sealed_opening o
+       JOIN sealed_product p ON p.id = o.product_id AND p.user_id = o.user_id
+       LEFT JOIN sealed_pull sp ON sp.opening_id = o.id AND sp.user_id = o.user_id
+      WHERE o.user_id = ?
+      ORDER BY o.id, sp.id`,
+    [userId]
+  );
+  return summarizePerformance(rows);
 }
 
 async function sealedFor(userId, game) {
@@ -303,6 +322,7 @@ router.get('/stats', async (req, res) => {
     // An unknown quote adds nothing. Cost is what is still sealed, not the
     // original receipt after units have left the lot.
     const sealedHoldings = await sealedFor(req.user.id, game);
+    const openingPerformance = await openingPerformanceFor(req.user.id, game);
     totalValue += sealedHoldings.marketValue;
     totalSpent += sealedHoldings.cost;
     const gainAbs = totalValue - totalSpent;
@@ -354,7 +374,8 @@ router.get('/stats', async (req, res) => {
       topValuable,
       topSealed,
       recentAdditions,
-      setProgress: setProgress.slice(0, 4)
+      setProgress: setProgress.slice(0, 4),
+      openingPerformance,
     });
   } catch (error) {
     console.error(error);

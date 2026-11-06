@@ -94,6 +94,7 @@ async function main() {
   });
   app.use('/api', sealedRoutes);
   app.use('/api', openingRoutes);
+  app.use('/api', require('../src/routes/stats'));
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
@@ -136,6 +137,17 @@ async function main() {
   assert.strictEqual(opening.analytics.value_difference, '-25.00');
   assert.strictEqual(opening.analytics.value_difference_kind, 'estimated_unrealized');
   assert.ok(Math.abs(opening.analytics.cost_recovery_percent - 54.54545454545454) < 1e-10);
+  const performance = await send(port, 'GET', '/api/stats', admin.id);
+  assert.strictEqual(performance.status, 200, JSON.stringify(performance.body && performance.body.error));
+  const hobby = performance.body.openingPerformance.reports.find(item => item.currency === 'USD');
+  assert.strictEqual(hobby.overall.cost, 55);
+  assert.strictEqual(hobby.overall.knownValue, 30);
+  assert.strictEqual(hobby.overall.difference, -25);
+  assert.strictEqual(hobby.overall.openedValue, 28);
+  assert.strictEqual(hobby.overall.sinceOpen, 2);
+  assert.strictEqual(hobby.sets[0].name, '30th Celebration');
+  assert.strictEqual(hobby.productTypes[0].name, 'etb');
+
   assert.strictEqual(opening.analytics.opened_value, '28.00');
   assert.strictEqual(opening.analytics.missing_snapshot_quantity, 1);
   assert.strictEqual(opening.pulls.find(pull => pull.name === 'Commons').value_at_opening, '0.00');

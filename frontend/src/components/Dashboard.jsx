@@ -8,6 +8,7 @@ import { defaultGameFilter, gameOptions, showGamePicker, gameLabel } from '../ut
 import { useT } from '../utils/i18n';
 import CardInspectorModal from './CardInspectorModal';
 import CardImage from './CardImage';
+import OpenedPerformance from './OpenedPerformance';
 
 const COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
@@ -141,7 +142,8 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
   }
 
   const sealedUnits = stats && stats.summary.sealed ? stats.summary.sealed.remainingUnits : 0;
-  if (!stats || (stats.summary.totalCards === 0 && sealedUnits === 0)) {
+  const openedReports = stats && stats.openingPerformance ? stats.openingPerformance.reports : [];
+  if (!stats || (stats.summary.totalCards === 0 && sealedUnits === 0 && (!openedReports || openedReports.length === 0))) {
     const isFiltered = Boolean(gameFilter);
     const gameName = isFiltered ? gameLabel(gameFilter, true) : '';
     return (
@@ -280,6 +282,10 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
               </div>
               <div className="metric-footer">
                 <span>{roi.pct === null ? t('dash.roiUnset') : t('dash.roiVsCost', { pct: `${isPositive ? '+' : ''}${roi.pct}` })}</span>
+                {openedReports.length === 1 && (
+                  <div>{t('dash.openedOnGain', { value: `${openedReports[0].overall.difference < 0 ? '−' : '+'}${openedReports[0].currency} ${money(Math.abs(openedReports[0].overall.difference))}` })}</div>
+                )}
+                {openedReports.length > 1 && <div>{t('dash.openedOnGainMixed')}</div>}
               </div>
             </div>
           );
@@ -297,6 +303,8 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
           </div>
         </div>
       </div>
+
+      <OpenedPerformance performance={stats.openingPerformance} t={t} money={money} />
 
       {/* Net Worth History Timeline Chart */}
       <div className="glass-panel" style={{ marginBottom: '1.5rem', padding: '1.5rem 1.75rem' }}>
