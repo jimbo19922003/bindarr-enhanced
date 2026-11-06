@@ -32,7 +32,8 @@ Try it without installing anything at **[thenotoriousjeremy.github.io/bindarr](h
 - **Physical location tracking** — binders by page and slot (1–9), boxes by row and divider, with layout and scalable image-list views. Drag cards between pockets to arrange a binder, or file them by tapping on a phone.
 - **Deck Builder & checkout** — build decks, edit their properties, import ManaBox decklists, reserve cards for play, and see exactly which checked-out deck makes a copy unavailable.
 - **Search and bulk add** — search or browse a whole set with multi-select; pin a set and add by collector number one keystroke at a time.
-- **Dashboard** — collection value, 7/30-day trends, rarity and type breakdowns, set completion.
+- **Dashboard** — Executive (net worth, total invested, timeline), Sealed (what is still on the shelf), Rip report (opened product against its cost), and Cards (set completion, rarity, type, and where copies live).
+- **Sealed product** — a Pokémon catalog and the purchase lots you bought, kept apart from loose cards. Open a unit, record the pulls, and file those cards into the collection.
 - **Graded slabs** — record grader, grade and cert number per copy (PSA cert lookup fills them in), and give a slab its own value instead of the raw card's price.
 - **Cards in 11 languages** — search, scan and record Japanese, Korean, Chinese, German, French, Spanish, Italian, Portuguese and Russian printings. A copy references the printing it actually is, so it shows the name and artwork on the card while staying searchable by its English name.
 - **Exports and API** — CSV (TCGplayer-compatible) or JSON, plus a read-only API key for reading net worth from elsewhere.
@@ -302,10 +303,13 @@ division leaves the leftover cent on the units that are still there, so the
 cents add back to the original total. Costs in different currencies are not
 converted.
 
-The dashboard net worth adds the known market value of units still sealed,
-and total invested adds their remaining cost. The set chart adds that market
-value onto the set with the same name. Top sealed products are listed beside
-top cards. A sealed unit is not counted as a card. Import and export use CSV from
+The dashboard net worth includes the known market value of units still sealed.
+Total invested is what you paid for loose cards plus the original cost of every
+sealed lot, including units you have already opened. Opening a box leaves that
+cost in the total. The Sealed tab's cost still sealed is the share still on the shelf, and it
+falls as units are opened. The set chart
+adds sealed market value onto the set with the same name. Top sealed products
+are listed beside top cards. A sealed unit is not counted as a card. Import and export use CSV from
 the Collection side of the Sealed tab. A location name in the file must
 already exist for that user.
 
@@ -328,12 +332,40 @@ currency are not converted. A bulk line can record one quantity and one total
 instead of every card. If a per-card cost is wanted later, the opening cost
 is split by quantity across the pulls, with the leftover cent on the last
 pull, and it is not copied onto every pull or onto a collection purchase
-price. Removing an opening puts that unit and its cost back on the lot.
+price. Removing an opening puts that unit and its cost back on the lot and
+removes the collection copies that opening added. A card you already owned,
+and only linked to the pull, stays.
 
 Adding a Pokémon card prices it from PokéWallet when the catalog has no
 market price, so the copy is not stored as zero. The card list, pictures, and
 set names still come from the card catalog. One extra PokéWallet search fills
 prices on that result page when a key is saved. Magic and Lorcana are unchanged.
+
+## Dashboard
+
+The dashboard has four tabs. The game filter at the top applies to each of
+them, and amounts in different currencies stay in the currency they were
+quoted in.
+
+**Executive** is the portfolio: net worth, total invested, unrealized gain,
+and the value timeline. Total invested keeps card purchase prices and the
+full cost of sealed lots. Net worth includes cards plus the market value of
+sealed units still on hand.
+
+**Sealed** is what is still on the shelf: units, market value, cost still
+sealed, and that value against the remaining cost. Opened units leave this
+tab. Their results are on the Rip report.
+
+**Rip report** compares the known value of pulls with what the opened units
+cost. Missing prices are left out of the value. The set chart ranks that gap
+as a percentage of what the set cost, so a larger purchase is judged by the
+same measure as a smaller one. 0% is even with cost. Green is ahead and red
+is behind. A **$ / %** switch shows the same ranking in money, and best and
+worst follow the measure that is on. The table's Recovery column is the
+share of cost the known pulls cover, so 100% there is even.
+
+**Cards** is the collection: set completion, rarity, type or color,
+condition, extra copies, and which containers hold the cards.
 
 ## Card scanning
 
