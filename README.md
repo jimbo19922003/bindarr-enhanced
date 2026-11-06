@@ -403,6 +403,17 @@ Restore by dropping the file back into the volume with the container stopped. In
 
 Node 18+ and npm 9+.
 
+### GitHub Codespaces
+
+Create the Codespace from a branch that contains `.devcontainer/` (the pull
+request branch). After setup, the Ports panel lists port **3001** as
+**Bindarr test instance**, and a preview opens. A Codespace created from
+`main` has no dev container: the file list has no `.devcontainer` folder, no
+server starts, and the Ports panel stays empty. Switching branches in that
+Codespace does not fix it until **Codespaces: Rebuild Container**, or until
+you create a new Codespace from this branch. Details:
+[docs/CODESPACES.md](docs/CODESPACES.md).
+
 ```bash
 npm run install:all
 npm run dev

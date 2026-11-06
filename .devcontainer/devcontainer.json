@@ -3,7 +3,15 @@
   "image": "mcr.microsoft.com/devcontainers/javascript-node:1-20-bookworm",
   "forwardPorts": [3001],
   "portsAttributes": {
-    "3001": { "label": "Bindarr test instance", "onAutoForward": "notify", "protocol": "http", "visibility": "private" }
+    "3001": {
+      "label": "Bindarr test instance",
+      "onAutoForward": "openPreview",
+      "protocol": "http",
+      "visibility": "private"
+    }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "silent"
   },
   "remoteEnv": {
     "DB_PATH": "${containerWorkspaceFolder}/.devcontainer/data/bindarr.db",
@@ -12,5 +20,14 @@
     "ALLOW_REGISTRATION": "false"
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
-  "postStartCommand": "bash .devcontainer/start.sh --background"
+  "postStartCommand": "bash .devcontainer/start.sh --background",
+  "postAttachCommand": "bash .devcontainer/start.sh --ensure",
+  "waitFor": "postStartCommand",
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "docs/CODESPACES.md"
+      ]
+    }
+  }
 }

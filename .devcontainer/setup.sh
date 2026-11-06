@@ -12,4 +12,4 @@ npm ci --prefix backend
 npm ci --prefix frontend
 npm run build:frontend
 node backend/test/openingAccounting.test.js
-printf '\nSetup complete. Run: bash .devcontainer/start.sh\n'
+printf '\nSetup complete. The container start command listens on port 3001 and the Ports panel labels it "Bindarr test instance".\n'

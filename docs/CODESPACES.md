@@ -1,16 +1,34 @@
 # Codespaces development
 
-Use the `feature/collection-enhancements` branch, or a branch cut from it, when
-creating a Codespace. The container is Node 20 on Debian. It installs
-dependencies once, builds the frontend once, and runs the standalone
-opening-accounting test. That test is also picked up by `npm test`, because
-`backend/test/run.js` runs every `backend/test/*.test.js`.
+Create the Codespace from a branch that contains `.devcontainer/devcontainer.json`.
+`main` at the 1.8.8 release does not contain that folder. A Codespace created
+from `main` has an empty Ports panel because no dev container is configured and
+nothing starts a server. Changing the Git branch inside that Codespace does not
+apply this file until you run **Codespaces: Rebuild Container** from the
+Command Palette, or you create a new Codespace from this branch.
+
+On a pull request, use the pull request's **Code** button and create the
+Codespace on the pull request branch. From the repository, use **Code →
+Codespaces → New with options** and pick the branch.
+
+The container is Node 20 on Debian. The first create installs dependencies
+once, builds the frontend once, and runs the standalone opening-accounting
+test. That test is also picked up by `npm test`, because `backend/test/run.js`
+runs every `backend/test/*.test.js`.
 
 ## Start and resume
 
-Creating the Codespace runs `bash .devcontainer/setup.sh`. Starting it again,
-including after a stop, runs `bash .devcontainer/start.sh --background`. The
-server log is `.devcontainer/data/start.log`.
+Creating the Codespace runs `bash .devcontainer/setup.sh`, then
+`bash .devcontainer/start.sh --background`. The editor waits for that start
+attempt. Connecting again runs `bash .devcontainer/start.sh --ensure` in the
+terminal. The server log is `.devcontainer/data/start.log`.
+
+When the app is up, the terminal prints `http://localhost:3001` and the Ports
+panel lists port **3001** as **Bindarr test instance**. A preview of that port
+opens in the editor. Keep the port visibility private. The page and the API
+are the same origin: Express serves the built frontend. Codespaces presents
+that forwarded port over HTTPS, which is what the browser needs for the
+camera. The server itself listens with HTTP.
 
 To start it yourself in a terminal:
 
@@ -23,13 +41,9 @@ not reinstall dependencies. After a lockfile change, run `npm ci` in the
 package that changed (`npm ci`, `npm ci --prefix backend`, or
 `npm ci --prefix frontend`).
 
-Open forwarded port 3001 from the Ports panel and keep its visibility private.
-The page and the API are the same origin: Express serves the built frontend.
-Codespaces presents that forwarded port over HTTPS, which is what the browser
-needs for the camera. The server itself listens with HTTP. There is no Vite
-dev server and no hot reload. A frontend edit rebuilds the production bundle;
-refresh the browser after that build finishes. A backend JavaScript edit
-restarts through nodemon.
+There is no Vite dev server and no hot reload. A frontend edit rebuilds the
+production bundle; refresh the browser after that build finishes. A backend
+JavaScript edit restarts through nodemon.
 
 ## First account and data
 
