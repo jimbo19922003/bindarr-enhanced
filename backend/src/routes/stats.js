@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { resolveCardPrice, isVintageSet, parseSqliteUtc } = require('../utils/priceHelpers');
 const { summarizeHoldings, emptyHoldings, centsToMoney } = require('../utils/sealedInventory');
+const { summarizePerformance } = require('../utils/openingPerformance');
 
 const router = express.Router();
 
@@ -21,9 +22,54 @@ async function sealedHoldingRows(userId) {
   );
 }
 
+async function openingPerformanceFor(userId, game) {
+  if (game && game !== 'pokemon') return summarizePerformance([]);
+  const rows = await db.all(
+    `SELECT o.id AS opening_id, o.product_id, o.quantity AS units, o.cost_cents, o.currency,
+            o.entry_complete, p.set_name, p.product_type,
+            sp.quantity AS pull_quantity,
+            sp.current_unit_cents, sp.current_line_cents,
+            sp.opened_unit_cents, sp.opened_line_cents
+       FROM sealed_opening o
+       JOIN sealed_product p ON p.id = o.product_id AND p.user_id = o.user_id
+       LEFT JOIN sealed_pull sp ON sp.opening_id = o.id AND sp.user_id = o.user_id
+      WHERE o.user_id = ?
+      ORDER BY o.id, sp.id`,
+    [userId]
+  );
+  return summarizePerformance(rows);
+}
+
 async function sealedFor(userId, game) {
   if (game && game !== 'pokemon') return emptyHoldings();
   return summarizeHoldings(await sealedHoldingRows(userId));
+}
+
+// What was paid for sealed product, including units that have since been
+// opened. Remaining cost is a stock figure. This is the receipt. Archived
+// lots leave the portfolio. A lot that is fully opened stays, so ripping a
+// pack does not erase what it cost. Pulled cards are not given that cost as
+// a purchase price, so this is not added a second time through the collection.
+async function sealedInvestment(userId, game) {
+  if (game && game !== 'pokemon') return { spent: 0, currencies: [] };
+  const rows = await db.all(
+    `SELECT l.total_cost_cents AS totalCostCents, l.currency AS currency
+       FROM sealed_lot l
+       JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
+      WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL`,
+    [userId]
+  );
+  let cents = 0;
+  const currencies = new Set();
+  for (const row of rows) {
+    const line = Number(row.totalCostCents) || 0;
+    if (!Number.isSafeInteger(line) || !Number.isSafeInteger(cents + line)) {
+      throw new RangeError('Sealed spend is too large');
+    }
+    cents += line;
+    if (row.currency) currencies.add(row.currency);
+  }
+  return { spent: parseFloat((cents / 100).toFixed(2)), currencies: [...currencies].sort() };
 }
 
 // One row per sealed product still on hand. Market cents stay null when the
@@ -167,16 +213,37 @@ router.get('/stats', async (req, res) => {
       locationCounts[loc] = (locationCounts[loc] || 0) + qty;
     });
 
+    const cardSets = Object.keys(setCounts).map(id => ({
+      id,
+      name: setCounts[id].name,
+      count: setCounts[id].count,
+      value: parseFloat(setCounts[id].value.toFixed(2)),
+    })).filter(row => row.count > 0).sort((a, b) => b.value - a.value).slice(0, 8);
+
     // Sealed value joins the set it names. A box is not a card, so the card
     // count on that set stays put and only the market value moves.
     const sealedLinesRows = await sealedLines(req.user.id, game);
+    const sealedBySet = new Map();
+    const sealedByType = new Map();
+    const addSealedBucket = (map, key, name, units, value, unpriced) => {
+      const row = map.get(key) || { name, units: 0, value: 0, unpriced: 0 };
+      row.units += units;
+      row.value += value;
+      row.unpriced += unpriced;
+      map.set(key, row);
+    };
     const setIdByName = new Map();
     for (const [id, bucket] of Object.entries(setCounts)) {
       setIdByName.set(String(bucket.name || '').trim().toLowerCase(), id);
     }
     for (const line of sealedLinesRows) {
-      if (line.market_price_cents == null) continue;
-      const value = (line.market_price_cents * line.remaining) / 100;
+      const units = line.remaining || 0;
+      const priced = line.market_price_cents != null;
+      const lineValue = priced ? (line.market_price_cents * units) / 100 : 0;
+      addSealedBucket(sealedBySet, String(line.set_name || '').trim().toLowerCase(), line.set_name || '', units, lineValue, priced ? 0 : units);
+      addSealedBucket(sealedByType, line.product_type || 'other', line.product_type || 'other', units, lineValue, priced ? 0 : units);
+      if (!priced) continue;
+      const value = lineValue;
       const named = setIdByName.get(String(line.set_name || '').trim().toLowerCase());
       const key = (line.set_id && setCounts[line.set_id]) ? line.set_id : (named || `sealed:${line.set_id || line.set_name || line.id}`);
       if (!setCounts[key]) setCounts[key] = { name: line.set_name || 'Sealed', count: 0, value: 0 };
@@ -298,13 +365,15 @@ router.get('/stats', async (req, res) => {
     const recentAdditions = recentRows.map(row => ({ ...row, price_trend: resolveCardPrice(row) }));
 
     const avgCardValue = totalCards > 0 ? parseFloat((totalValue / totalCards).toFixed(2)) : 0.0;
-    // Sealed market value and remaining cost join the portfolio once. They are
-    // not collection rows, so a box is not also counted as the cards inside it.
-    // An unknown quote adds nothing. Cost is what is still sealed, not the
-    // original receipt after units have left the lot.
+    // Sealed market value is what is still on hand. Spent is the original lot
+    // cost, so opening a unit does not reduce total invested. Pulled cards
+    // carry no purchase price from that opening, and an unknown quote adds
+    // nothing to value.
     const sealedHoldings = await sealedFor(req.user.id, game);
+    const sealedSpend = await sealedInvestment(req.user.id, game);
+    const openingPerformance = await openingPerformanceFor(req.user.id, game);
     totalValue += sealedHoldings.marketValue;
-    totalSpent += sealedHoldings.cost;
+    totalSpent += sealedSpend.spent;
     const gainAbs = totalValue - totalSpent;
     const roi = {
       abs: parseFloat(gainAbs.toFixed(2)),
@@ -350,11 +419,17 @@ router.get('/stats', async (req, res) => {
         count: setCounts[id].count,
         value: parseFloat(setCounts[id].value.toFixed(2))
       })).sort((a, b) => b.value - a.value).slice(0, 8),
+      cardSets,
       locations: Object.keys(locationCounts).map(name => ({ name, value: locationCounts[name] })),
       topValuable,
       topSealed,
       recentAdditions,
-      setProgress: setProgress.slice(0, 4)
+      setProgress: setProgress.slice(0, 12),
+      sealedBreakdown: {
+        sets: [...sealedBySet.values()].map(row => ({ ...row, value: parseFloat(row.value.toFixed(2)) })).sort((a, b) => b.value - a.value || b.units - a.units),
+        types: [...sealedByType.values()].map(row => ({ ...row, value: parseFloat(row.value.toFixed(2)) })).sort((a, b) => b.value - a.value || b.units - a.units),
+      },
+      openingPerformance,
     });
   } catch (error) {
     console.error(error);
@@ -520,10 +595,14 @@ router.get('/stats/networth', async (req, res) => {
     }
 
     const sealedHoldings = await sealedFor(req.user.id, game);
+    const sealedSpend = await sealedInvestment(req.user.id, game);
     totalValue += sealedHoldings.marketValue;
-    totalSpent += sealedHoldings.cost;
+    totalSpent += sealedSpend.spent;
     if (sealedHoldings.marketValue > 0 || sealedHoldings.cost > 0) {
       for (const code of sealedHoldings.currencies) currencies.add(code);
+    }
+    if (sealedSpend.spent > 0) {
+      for (const code of sealedSpend.currencies) currencies.add(code);
     }
 
     const round = (n) => parseFloat(n.toFixed(2));
