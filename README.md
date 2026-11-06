@@ -427,7 +427,15 @@ Revoking is one click in the same panel; anything using the old key stops immedi
 
 A container set to **Custom** order files by hand rather than by a sort scheme. Drag a card from the Unsorted queue into a pocket to file it, drag a filed card to another pocket to move it (drop it on an occupied pocket and the two swap), and drag one back to the Unsorted queue to take it out of the binder.
 
-Dragging is mouse-only — on a phone a drag would fight the page-swipe, so touch files by tapping instead: turn on **Arrange**, tap the card, tap the pocket. Both routes go through the same placement rules, so a locked or full container refuses either way.
+On a phone, hold a card briefly and then drag it. A quick swipe still turns the page. **Arrange** is still there: tap the card, then tap the pocket. Both routes go through the same placement rules, so a locked or full container refuses either way.
+
+## Artwork inserts
+
+Open a binder page and choose **Artwork**. Upload a JPEG, PNG, or WebP (up to 12 MB). Drag the picture, set its width in millimetres, and rotate it if you want. One width is the only scale, so the picture keeps its own shape. Click a pocket to reserve it for a real card. The other pockets show the picture. **Two pages** places the same picture across the open spread. Changing the page layout later drops pockets that no longer exist and leaves the picture's size alone.
+
+**Preview** shows the page with your cards in the reserved pockets. **Print** lays out only the artwork pockets, each at its real size (63 × 88 mm for a card pocket, 76 × 102 mm for a toploader), with corner cut marks and a 50 mm calibration line. Choose A4 or Letter. A pocket that does not fit the sheet at actual size is left off rather than shrunk.
+
+Print at 100%. Turn off **Fit to page**, **Shrink to fit**, and any borderless scaling. On the printed sheet, the line marked 50 mm should measure 50 mm. Cut on the corner marks and slide each insert into its artwork pocket.
 
 ## Backup and restore
 

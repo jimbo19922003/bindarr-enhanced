@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { DndContext, DragOverlay, MouseSensor, useSensor, useSensors, useDraggable, useDroppable, pointerWithin } from '@dnd-kit/core';
-import { Plus, Minus, Trash2, X, MoreVertical, Settings, RefreshCw, Lock, LayoutGrid, List, MousePointerClick, ChevronDown, ChevronUp, Edit3, Upload } from 'lucide-react';
+import { DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable, pointerWithin } from '@dnd-kit/core';
+import { Plus, Minus, Trash2, X, MoreVertical, Settings, RefreshCw, Lock, LayoutGrid, List, MousePointerClick, ChevronDown, ChevronUp, Edit3, Upload, Image as ImageIcon } from 'lucide-react';
 import { sortCardsByOrder } from '../utils/cardSort';
 import { getFoilOverlayClass, getPrintingBadgeLabel, getPrintingBadgeStyle } from '../utils/cardPrinting';
 import { getCardRarityBorder, getRarityBadgeStyle, getRarityBadgeLabel } from '../utils/cardRarity';
@@ -13,6 +13,7 @@ import { SortBuilder, FilterBuilder } from './SortFilterBuilder';
 import CreateContainerModal from './CreateContainerModal';
 import PageColumnsSelect from './PageColumnsSelect';
 import CardImage from './CardImage';
+import BinderArtwork from './BinderArtwork';
 import { useBackGuard } from '../utils/useBackGuard';
 import { useT } from '../utils/i18n';
 
@@ -246,6 +247,7 @@ function LocationManager({ statsTrigger, onUpdate, showToast, selectedLocationId
   const focusNavRef = useRef(null); // focusEntryId already navigated to (run-once guard)
 
   const [activeCompartmentId, setActiveCompartmentId] = useState(null);
+  const [artworkOpen, setArtworkOpen] = useState(false);
   const [, setCoverflowActiveIndex] = useState(0); // value unused; setter drives filing-snap resets
 
   const handleTouchStart = (e) => {
@@ -785,10 +787,12 @@ function LocationManager({ statsTrigger, onUpdate, showToast, selectedLocationId
   // drop geometry to aim at.
   const [draggingCard, setDraggingCard] = useState(null);
   const dndEnabled = isBinderType && isCustom && !selectedLoc?.locked;
-  // ponytail: mouse only. A distance-activated touch drag would swallow the
-  // binder's page-swipe and the queue's scroll; touch still files by tapping
-  // under Arrange. Add a delay-activated TouchSensor if that proves too slow.
-  const dndSensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 8 } }));
+  // A short hold starts a touch drag. A quick swipe still turns the page,
+  // because the touch sensor waits and the page swipe is a short flick.
+  const dndSensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
+  );
 
   // Drag a filed card back out. The bulk endpoint with a null target is what the
   // Move-to-Unassigned action already uses, so unfiling has one implementation
@@ -1606,6 +1610,14 @@ function LocationManager({ statsTrigger, onUpdate, showToast, selectedLocationId
                 <button
                   type="button"
                   className="btn btn-secondary"
+                  onClick={() => setArtworkOpen(true)}
+                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                >
+                  <ImageIcon size={14} /> {t('binderArt.open')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
                   disabled={isMobile
                     ? activePageIndex >= compartments.length - 1
                     : binderSpread(activePageIndex).spread * 2 + 1 >= compartments.length}
@@ -2372,6 +2384,18 @@ function LocationManager({ statsTrigger, onUpdate, showToast, selectedLocationId
             )}
           </div>
         </div>
+      )}
+
+      {artworkOpen && selectedLoc && isBinderType && (
+        <BinderArtwork
+          location={selectedLoc}
+          compartments={compartments}
+          pageIndex={Math.min(activePageIndex, Math.max(compartments.length - 1, 0))}
+          cardsByCompartment={cardsByCompartment}
+          onClose={() => setArtworkOpen(false)}
+          showToast={showToast}
+          t={t}
+        />
       )}
 
       <CardInspectorModal

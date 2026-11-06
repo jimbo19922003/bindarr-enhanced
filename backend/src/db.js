@@ -1055,6 +1055,38 @@ async function initDb() {
     )
   `);
   await run(`CREATE INDEX IF NOT EXISTS idx_sealed_catalog_group ON sealed_catalog(category_id, group_id)`);
+  // Binder artwork is a picture owned by one user, not a card. A layer places
+  // that picture on a page in millimetres. Card pockets stay on collection.position.
+  await run(`
+    CREATE TABLE IF NOT EXISTS binder_artwork (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mime TEXT NOT NULL,
+      width INTEGER NOT NULL,
+      height INTEGER NOT NULL,
+      bytes INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_binder_artwork_user ON binder_artwork(user_id, id)`);
+  await run(`
+    CREATE TABLE IF NOT EXISTS binder_art_layer (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      location_id INTEGER NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+      compartment_id INTEGER NOT NULL REFERENCES compartments(id) ON DELETE CASCADE,
+      artwork_id INTEGER NOT NULL REFERENCES binder_artwork(id) ON DELETE CASCADE,
+      x_mm REAL NOT NULL,
+      y_mm REAL NOT NULL,
+      width_mm REAL NOT NULL,
+      rotation_deg REAL NOT NULL DEFAULT 0,
+      mask TEXT NOT NULL DEFAULT '[]',
+      spread INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_binder_art_layer_page ON binder_art_layer(user_id, compartment_id)`);
+
   await run(`
     CREATE TABLE IF NOT EXISTS sealed_catalog_meta (
       id INTEGER PRIMARY KEY CHECK (id = 1),
