@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Package } from 'lucide-react';
 
 const SORTS = ['name', 'cost', 'knownValue', 'openedValue', 'sinceOpen', 'difference', 'recoveryPercent'];
 
@@ -32,7 +31,7 @@ function OpenedPerformance({ performance, t, money }) {
   const reports = performance && Array.isArray(performance.reports) ? performance.reports : [];
   const [currency, setCurrency] = useState(reports[0] ? reports[0].currency : '');
   const [group, setGroup] = useState('set');
-  const [sort, setSort] = useState({ key: 'difference', dir: 'asc' });
+  const [sort, setSort] = useState({ key: 'recoveryPercent', dir: 'desc' });
   if (!reports.length) return null;
 
   const active = reports.find(report => report.currency === currency) || reports[0];
@@ -42,10 +41,10 @@ function OpenedPerformance({ performance, t, money }) {
     if (group === 'type') return t(`sealed.type.${row.name}`) === `sealed.type.${row.name}` ? row.name : t(`sealed.type.${row.name}`);
     return row.name || t('dash.openedUnspecified');
   };
-  const chartRows = (active.sets.length <= 12
-    ? active.sets
-    : active.sets.slice().sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference)).slice(0, 8)
-  ).map(row => ({ name: row.name || t('dash.openedUnspecified'), difference: row.difference }));
+  const ranked = active.sets.slice().sort((a, b) => b.difference - a.difference || (b.recoveryPercent || 0) - (a.recoveryPercent || 0));
+  const best = ranked[0];
+  const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
+  const chartRows = ranked.slice(0, 8).map(row => ({ name: row.name || t('dash.openedUnspecified'), difference: row.difference }));
 
   const toggle = (key) => {
     setSort(current => current.key === key
@@ -56,15 +55,9 @@ function OpenedPerformance({ performance, t, money }) {
   const up = overall.difference >= 0;
 
   return (
-    <section style={{ marginBottom: '1.5rem' }} aria-label={t('dash.openedTitle')}>
+    <section aria-label={t('dash.openedTitle')}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: '0.85rem' }}>
-        <div>
-          <h3 className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-            <Package size={18} style={{ color: 'var(--accent-yellow)' }} />
-            {t('dash.openedTitle')}
-          </h3>
-          <p style={{ margin: '0.35rem 0 0', color: 'var(--text-secondary)', fontSize: '0.8rem', maxWidth: '46rem' }}>{t('dash.openedHint')}</p>
-        </div>
+        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem', maxWidth: '40rem' }}>{t('dash.openedHint')}</p>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           {reports.length > 1 && (
             <div className="sub-nav-tabs" style={{ margin: 0 }}>
@@ -107,6 +100,23 @@ function OpenedPerformance({ performance, t, money }) {
         </div>
       </div>
 
+      {best && worst && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(14rem, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+          <div className="glass-panel" style={{ padding: '0.9rem 1.1rem' }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('dash.openedBest')}</div>
+            <div style={{ color: 'var(--text-strong)', fontWeight: 700, marginTop: '0.25rem' }}>{best.name || t('dash.openedUnspecified')}</div>
+            <div style={{ color: tone(best.difference), fontWeight: 800 }}>{signed(active.currency, best.difference, money)}</div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{best.recoveryPercent == null ? '—' : t('dash.openedRecovery', { pct: best.recoveryPercent })}</div>
+          </div>
+          <div className="glass-panel" style={{ padding: '0.9rem 1.1rem' }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('dash.openedWorst')}</div>
+            <div style={{ color: 'var(--text-strong)', fontWeight: 700, marginTop: '0.25rem' }}>{worst.name || t('dash.openedUnspecified')}</div>
+            <div style={{ color: tone(worst.difference), fontWeight: 800 }}>{signed(active.currency, worst.difference, money)}</div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{worst.recoveryPercent == null ? '—' : t('dash.openedRecovery', { pct: worst.recoveryPercent })}</div>
+          </div>
+        </div>
+      )}
+
       {(overall.emptyOpenings > 0 || overall.incompleteEntries > 0 || overall.unpricedPulls > 0) && (
         <p style={{ margin: '0 0 1rem', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
           {overall.emptyOpenings > 0 && <span>{t('dash.openedEmpty', { count: overall.emptyOpenings })} </span>}
@@ -119,14 +129,14 @@ function OpenedPerformance({ performance, t, money }) {
         <div className="glass-panel">
           <h3 className="chart-title">{t('dash.openedChart')}</h3>
           <p style={{ margin: '-0.35rem 0 0.75rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{t('dash.openedChartHint')}</p>
-          <div className="chart-container">
+          <div className="chart-container" style={{ height: Math.max(140, chartRows.length * 42) }}>
             {chartRows.length === 0 ? (
               <div className="chart-empty">{t('dash.openedNoRows')}</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartRows} layout="vertical" margin={{ left: 10, right: 30, top: 10, bottom: 10 }}>
                   <XAxis type="number" stroke="var(--text-secondary)" tickFormatter={(value) => `${value}`} />
-                  <YAxis dataKey="name" type="category" width={120} stroke="var(--text-secondary)" tickLine={false} axisLine={false} style={{ fontSize: '0.8rem' }} />
+                  <YAxis dataKey="name" type="category" width={120} stroke="var(--text-secondary)" tickLine={false} axisLine={false} style={{ fontSize: '0.8rem' }} reversed />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-glass)' }}
                     labelStyle={{ color: 'var(--text-primary)' }}

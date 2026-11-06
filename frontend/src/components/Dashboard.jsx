@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
-import { TrendingUp, Coins, Library, Trophy, Plus, ArrowUpRight, Package } from 'lucide-react';
+import { TrendingUp, Coins, Library, Trophy, Plus, ArrowUpRight, Package, Zap } from 'lucide-react';
 import { getCardDisplayName } from '../utils/langHelper';
 import { priceText, currencySymbol } from '../utils/formatPrice';
 import { getPrintingBadgeLabel, getPrintingBadgeStyle } from '../utils/cardPrinting';
@@ -50,6 +50,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [timePeriod, setTimePeriod] = useState('30d');
+  const [view, setView] = useState('executive');
   // '' | 'pokemon' | 'mtg'. Collapses to the only visible game when the other is
   // hidden in Settings, so the totals never include cards the user cannot see.
   const [gameFilter, setGameFilter] = useState(() => defaultGameFilter());
@@ -167,7 +168,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
     );
   }
 
-  const { summary, types, rarities, sets, topValuable, topSealed = [], recentAdditions = [], setProgress } = stats;
+  const { summary, types, rarities, sets, cardSets = [], topValuable, topSealed = [], recentAdditions = [], setProgress, locations = [] } = stats;
 
   // Match type name to its color case-insensitively; fall back to a distinct
   // palette color by index so slices are never all the same gray.
@@ -184,6 +185,23 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
     <div>
       {renderGameTabs()}
 
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.25rem' }}>
+        <div className="sub-nav-tabs" style={{ width: '100%', maxWidth: '720px', margin: 0 }}>
+          {[
+            ['executive', TrendingUp, t('dash.tabExecutive')],
+            ['sealed', Package, t('dash.tabSealed')],
+            ['rips', Zap, t('dash.tabRips')],
+            ['cards', Library, t('dash.tabCards')],
+          ].map(([id, Icon, label]) => (
+            <button key={id} type="button" className={`sub-nav-tab ${view === id ? 'active' : ''}`} onClick={() => setView(id)}>
+              <Icon size={16} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {view === 'executive' && (<>
       {/* Metrics Summary Grid */}
       <div className="metrics-grid">
         {/* Net Worth Card with historical switcher */}
@@ -282,10 +300,6 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
               </div>
               <div className="metric-footer">
                 <span>{roi.pct === null ? t('dash.roiUnset') : t('dash.roiVsCost', { pct: `${isPositive ? '+' : ''}${roi.pct}` })}</span>
-                {openedReports.length === 1 && (
-                  <div>{t('dash.openedOnGain', { value: `${openedReports[0].overall.difference < 0 ? '−' : '+'}${openedReports[0].currency} ${money(Math.abs(openedReports[0].overall.difference))}` })}</div>
-                )}
-                {openedReports.length > 1 && <div>{t('dash.openedOnGainMixed')}</div>}
               </div>
             </div>
           );
@@ -303,8 +317,6 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
           </div>
         </div>
       </div>
-
-      <OpenedPerformance performance={stats.openingPerformance} t={t} money={money} />
 
       {/* Net Worth History Timeline Chart */}
       <div className="glass-panel" style={{ marginBottom: '1.5rem', padding: '1.5rem 1.75rem' }}>
@@ -342,21 +354,194 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
         </div>
       </div>
 
+      <div className="dashboard-details">
+        <div className="glass-panel">
+          <h3 className="chart-title">{t('dash.mixTitle')}</h3>
+          <div className="chart-container" style={{ height: '220px' }}>
+            {summary.totalValue <= 0 ? (
+              <div className="chart-empty">{t('dash.mixEmpty')}</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: t('dash.mixCards'), value: Math.max(0, parseFloat((summary.totalValue - (summary.sealed ? summary.sealed.marketValue : 0)).toFixed(2))) },
+                      { name: t('dash.mixSealed'), value: summary.sealed ? summary.sealed.marketValue : 0 },
+                    ].filter(row => row.value > 0)}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {[
+                      { name: t('dash.mixCards'), value: Math.max(0, parseFloat((summary.totalValue - (summary.sealed ? summary.sealed.marketValue : 0)).toFixed(2))) },
+                      { name: t('dash.mixSealed'), value: summary.sealed ? summary.sealed.marketValue : 0 },
+                    ].filter(row => row.value > 0).map(row => (
+                      <Cell key={row.name} fill={row.name === t('dash.mixSealed') ? 'var(--accent-yellow)' : 'var(--accent-blue)'} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-glass)' }}
+                    formatter={(v) => [`${currencySymbol()}${money(v)}`, t('dash.value')]}
+                  />
+                  <Legend verticalAlign="bottom" height={36} iconSize={10} formatter={(value) => <span style={{ color: 'var(--text-secondary)' }}>{value}</span>} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+        <div className="glass-panel">
+          <h3 className="chart-title">{t('dash.valueBySet')}</h3>
+          <p style={{ margin: '-0.35rem 0 0.75rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{t('dash.valueBySetHint')}</p>
+          <div className="chart-container">
+            {sets.length === 0 ? <div className="chart-empty">{t('dash.noSetData')}</div> : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={sets} layout="vertical" margin={{ left: 10, right: 30, top: 10, bottom: 10 }}>
+                  <XAxis type="number" stroke="var(--text-secondary)" tickFormatter={(v) => `${currencySymbol()}${v}`} />
+                  <YAxis dataKey="name" type="category" width={120} stroke="var(--text-secondary)" tickLine={false} axisLine={false} style={{ fontSize: '0.8rem' }} />
+                  <Tooltip contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-glass)' }} formatter={(v) => [`${currencySymbol()}${v}`, t('dash.value')]} />
+                  <Bar dataKey="value" fill="var(--accent-red)" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      </div>
+      </>)}
+
+      {view === 'sealed' && (
+        summary.sealed && summary.sealed.remainingUnits > 0 ? (
+          <>
+            <div className="metrics-grid">
+              <div className="glass-panel metric-card accent-cards">
+                <div className="metric-header"><span>{t('dash.sealedTitle')}</span><span className="metric-icon"><Package size={18} /></span></div>
+                <div className="metric-value">{summary.sealed.remainingUnits}</div>
+                <div className="metric-footer">{t('dash.sealedOnHand', { count: summary.sealed.remainingUnits })}</div>
+              </div>
+              <div className="glass-panel metric-card accent-networth">
+                <div className="metric-header"><span>{t('dash.marketValue')}</span></div>
+                <div className="metric-value">{currencySymbol()}{money(summary.sealed.marketValue)}</div>
+                <div className="metric-footer">{summary.sealed.unpricedUnits > 0 ? t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits }) : t('dash.valuationComplete')}</div>
+              </div>
+              <div className="glass-panel metric-card accent-invested">
+                <div className="metric-header"><span>{t('dash.sealedCost')}</span></div>
+                <div className="metric-value">{currencySymbol()}{money(summary.sealed.cost)}</div>
+              </div>
+              <div className={`glass-panel metric-card ${(summary.sealed.marketValue - summary.sealed.cost) >= 0 ? 'accent-gain-up' : 'accent-gain-down'}`}>
+                <div className="metric-header"><span>{t('dash.sealedGain')}</span></div>
+                <div className="metric-value" style={{ color: (summary.sealed.marketValue - summary.sealed.cost) >= 0 ? '#22c55e' : '#ef4444' }}>
+                  {(summary.sealed.marketValue - summary.sealed.cost) >= 0 ? '+' : '−'}{currencySymbol()}{money(Math.abs(summary.sealed.marketValue - summary.sealed.cost))}
+                </div>
+              </div>
+            </div>
+            <div className="dashboard-details">
+              <div className="glass-panel">
+                <h3 className="chart-title">{t('dash.sealedBySet')}</h3>
+                <div className="chart-container" style={{ height: Math.max(160, (stats.sealedBreakdown?.sets || []).length * 42) }}>
+                  {(stats.sealedBreakdown?.sets || []).length === 0 ? <div className="chart-empty">{t('dash.noSetData')}</div> : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={stats.sealedBreakdown.sets.map(row => ({ ...row, name: row.name || t('dash.openedUnspecified') }))} layout="vertical" margin={{ left: 10, right: 24, top: 8, bottom: 8 }}>
+                        <XAxis type="number" stroke="var(--text-secondary)" tickFormatter={(v) => `${currencySymbol()}${v}`} />
+                        <YAxis dataKey="name" type="category" width={120} stroke="var(--text-secondary)" tickLine={false} axisLine={false} style={{ fontSize: '0.8rem' }} />
+                        <Tooltip contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-glass)' }} formatter={(v) => [`${currencySymbol()}${money(v)}`, t('dash.value')]} />
+                        <Bar dataKey="value" fill="var(--accent-yellow)" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+              <div className="glass-panel">
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center' }}>
+                  <h3 className="chart-title" style={{ margin: 0 }}>{t('dash.topSealed')}</h3>
+                  <button className="btn btn-secondary" type="button" onClick={() => onNavigate && onNavigate('sealed')}>{t('dash.openSealed')}</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '1rem' }}>
+                  {(stats.sealedBreakdown?.types || []).map(row => (
+                    <div key={row.name} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                      <span style={{ color: 'var(--text-strong)', fontWeight: 650 }}>{t(`sealed.type.${row.name}`) === `sealed.type.${row.name}` ? row.name : t(`sealed.type.${row.name}`)}</span>
+                      <span>{t('dash.sealedUnits', { count: row.units })} · {currencySymbol()}{money(row.value)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1.25rem' }}>
+                  {topSealed.map(product => (
+                    <div key={product.id} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)' }}>
+                      {product.image_url ? (
+                        <img src={product.image_url} alt="" style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '5px' }} />
+                      ) : (
+                        <div style={{ width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Package size={22} /></div>
+                      )}
+                      <div style={{ flex: 1, overflow: 'hidden' }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{product.name}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{product.set_name}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--accent-yellow)', fontSize: '0.95rem' }}>{product.market_currency} {product.market_price}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('dash.sealedLine', { count: product.remaining, value: `${product.market_currency} ${product.line_value.toFixed(2)}` })}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+            <Package size={36} style={{ color: 'var(--accent-yellow)', marginBottom: '0.75rem' }} />
+            <p>{t('dash.sealedEmpty')}</p>
+            <button className="btn btn-secondary" type="button" onClick={() => onNavigate && onNavigate('sealed')}>{t('dash.openSealed')}</button>
+          </div>
+        )
+      )}
+
+      {view === 'rips' && (
+        openedReports.length > 0
+          ? <OpenedPerformance performance={stats.openingPerformance} t={t} money={money} />
+          : <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}><Zap size={36} style={{ color: 'var(--accent-yellow)', marginBottom: '0.75rem' }} /><p>{t('dash.ripEmpty')}</p></div>
+      )}
+
+      {view === 'cards' && (<>
+      <div className="glass-panel" style={{ marginBottom: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))', gap: '0.8rem' }}>
+        <div><div className="metric-header">{t('dash.uniqueCount', { count: summary.uniqueCards })}</div><div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{summary.totalCards > 0 ? t('dash.nearMint', { pct: summary.mintRate }) : '—'}</div></div>
+        <div><div className="metric-header">{t('dash.vintageShare', { pct: summary.vintageRatio })}</div></div>
+        <div><div className="metric-header">{t('dash.duplicates', { count: summary.duplicateCopies })}</div></div>
+        <div><div className="metric-header">{summary.unsortedCount > 0 ? t('dash.unsortedCount', { count: summary.unsortedCount }) : t('dash.whereCards')}</div></div>
+      </div>
       {/* Main Charts & Analytics Details */}
       <div className="dashboard-details">
         {/* Left Column: Charts */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          
+          {setProgress.length > 0 && (
+            <div className="glass-panel">
+              <h3 className="chart-title">{t('dash.setProgress')}</h3>
+              <div className="set-progress-grid" style={{ marginTop: '1rem' }}>
+                {setProgress.map((set, idx) => (
+                  <div key={idx} className="set-progress-item">
+                    <div className="set-progress-header">
+                      <span style={{ color: 'var(--text-strong)' }}>{set.setName}</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{set.ownedUnique} / {set.totalCards} ({set.percent}%)</span>
+                    </div>
+                    <div className="set-progress-bar-bg">
+                      <div className="set-progress-bar-fill" style={{ width: `${set.percent}%` }}></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Card Value by Set Chart */}
           <div className="glass-panel">
-            <h3 className="chart-title">{t('dash.valueBySet')}</h3>
-            <p style={{ margin: '-0.35rem 0 0.75rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{t('dash.valueBySetHint')}</p>
+            <h3 className="chart-title">{t('dash.cardValueBySet')}</h3>
+            <p style={{ margin: '-0.35rem 0 0.75rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{t('dash.cardValueHint')}</p>
             <div className="chart-container">
-              {sets.length === 0 ? (
+              {cardSets.length === 0 ? (
                 <div className="chart-empty">{t('dash.noSetData')}</div>
               ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={sets} layout="vertical" margin={{ left: 10, right: 30, top: 10, bottom: 10 }}>
+                <BarChart data={cardSets} layout="vertical" margin={{ left: 10, right: 30, top: 10, bottom: 10 }}>
                   <XAxis type="number" stroke="var(--text-secondary)" tickFormatter={(v) => `${currencySymbol()}${v}`} />
                   <YAxis dataKey="name" type="category" width={120} stroke="var(--text-secondary)" tickLine={false} axisLine={false} style={{ fontSize: '0.8rem' }} />
                   <Tooltip 
@@ -459,53 +644,6 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
 
         {/* Right Column: Mini Tables & Lists */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          
-          {summary.sealed && summary.sealed.remainingUnits > 0 && (
-            <div className="glass-panel" style={{ padding: '1rem 1.25rem' }}>
-              <h3 className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}>
-                <Package size={18} style={{ color: 'var(--accent-yellow)' }} />
-                {t('dash.sealedTitle')}
-              </h3>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                  <div>{t('dash.sealedOnHand', { count: summary.sealed.remainingUnits })}</div>
-                  <div>{t('dash.sealedMarket', { value: `${currencySymbol()}${money(summary.sealed.marketValue)}` })}</div>
-                  {summary.sealed.unpricedUnits > 0 && (
-                    <div>{t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits })}</div>
-                  )}
-                </div>
-                <button className="btn btn-secondary" type="button" onClick={() => onNavigate && onNavigate('sealed')}>{t('dash.openSealed')}</button>
-              </div>
-            </div>
-          )}
-
-          {topSealed.length > 0 && (
-            <div className="glass-panel" style={{ flex: 1 }}>
-              <h3 className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Package size={18} style={{ color: 'var(--accent-yellow)' }} />
-                {t('dash.topSealed')}
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1.25rem' }}>
-                {topSealed.map(product => (
-                  <div key={product.id} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)' }}>
-                    {product.image_url ? (
-                      <img src={product.image_url} alt="" style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '5px' }} />
-                    ) : (
-                      <div style={{ width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Package size={22} /></div>
-                    )}
-                    <div style={{ flex: 1, overflow: 'hidden' }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{product.name}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{product.set_name}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 800, color: 'var(--accent-yellow)', fontSize: '0.95rem' }}>{product.market_currency} {product.market_price}</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('dash.sealedLine', { count: product.remaining, value: `${product.market_currency} ${product.line_value.toFixed(2)}` })}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Top Valuable Cards */}
           <div className="glass-panel" style={{ flex: 1 }}>
@@ -595,20 +733,14 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
             </div>
           )}
 
-          {/* Set Completion progress tracker */}
-          {setProgress.length > 0 && (
+          {locations.length > 0 && (
             <div className="glass-panel">
-              <h3 className="chart-title">{t('dash.setProgress')}</h3>
-              <div className="set-progress-grid" style={{ marginTop: '1rem' }}>
-                {setProgress.map((set, idx) => (
-                  <div key={idx} className="set-progress-item">
-                    <div className="set-progress-header">
-                      <span style={{ color: 'var(--text-strong)' }}>{set.setName}</span>
-                      <span style={{ color: 'var(--text-secondary)' }}>{set.ownedUnique} / {set.totalCards} ({set.percent}%)</span>
-                    </div>
-                    <div className="set-progress-bar-bg">
-                      <div className="set-progress-bar-fill" style={{ width: `${set.percent}%` }}></div>
-                    </div>
+              <h3 className="chart-title">{t('dash.whereCards')}</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginTop: '0.8rem' }}>
+                {locations.map(row => (
+                  <div key={row.name} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.85rem' }}>
+                    <span style={{ color: 'var(--text-strong)' }}>{row.name}</span>
+                    <span style={{ color: 'var(--text-secondary)' }}>{row.value}</span>
                   </div>
                 ))}
               </div>
@@ -617,6 +749,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
 
         </div>
       </div>
+      </>)}
 
       {/* Card Inspector Modal Overlay */}
       <CardInspectorModal

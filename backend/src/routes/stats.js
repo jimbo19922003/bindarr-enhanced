@@ -186,16 +186,37 @@ router.get('/stats', async (req, res) => {
       locationCounts[loc] = (locationCounts[loc] || 0) + qty;
     });
 
+    const cardSets = Object.keys(setCounts).map(id => ({
+      id,
+      name: setCounts[id].name,
+      count: setCounts[id].count,
+      value: parseFloat(setCounts[id].value.toFixed(2)),
+    })).filter(row => row.count > 0).sort((a, b) => b.value - a.value).slice(0, 8);
+
     // Sealed value joins the set it names. A box is not a card, so the card
     // count on that set stays put and only the market value moves.
     const sealedLinesRows = await sealedLines(req.user.id, game);
+    const sealedBySet = new Map();
+    const sealedByType = new Map();
+    const addSealedBucket = (map, key, name, units, value, unpriced) => {
+      const row = map.get(key) || { name, units: 0, value: 0, unpriced: 0 };
+      row.units += units;
+      row.value += value;
+      row.unpriced += unpriced;
+      map.set(key, row);
+    };
     const setIdByName = new Map();
     for (const [id, bucket] of Object.entries(setCounts)) {
       setIdByName.set(String(bucket.name || '').trim().toLowerCase(), id);
     }
     for (const line of sealedLinesRows) {
-      if (line.market_price_cents == null) continue;
-      const value = (line.market_price_cents * line.remaining) / 100;
+      const units = line.remaining || 0;
+      const priced = line.market_price_cents != null;
+      const lineValue = priced ? (line.market_price_cents * units) / 100 : 0;
+      addSealedBucket(sealedBySet, String(line.set_name || '').trim().toLowerCase(), line.set_name || '', units, lineValue, priced ? 0 : units);
+      addSealedBucket(sealedByType, line.product_type || 'other', line.product_type || 'other', units, lineValue, priced ? 0 : units);
+      if (!priced) continue;
+      const value = lineValue;
       const named = setIdByName.get(String(line.set_name || '').trim().toLowerCase());
       const key = (line.set_id && setCounts[line.set_id]) ? line.set_id : (named || `sealed:${line.set_id || line.set_name || line.id}`);
       if (!setCounts[key]) setCounts[key] = { name: line.set_name || 'Sealed', count: 0, value: 0 };
@@ -370,11 +391,16 @@ router.get('/stats', async (req, res) => {
         count: setCounts[id].count,
         value: parseFloat(setCounts[id].value.toFixed(2))
       })).sort((a, b) => b.value - a.value).slice(0, 8),
+      cardSets,
       locations: Object.keys(locationCounts).map(name => ({ name, value: locationCounts[name] })),
       topValuable,
       topSealed,
       recentAdditions,
-      setProgress: setProgress.slice(0, 4),
+      setProgress: setProgress.slice(0, 12),
+      sealedBreakdown: {
+        sets: [...sealedBySet.values()].map(row => ({ ...row, value: parseFloat(row.value.toFixed(2)) })).sort((a, b) => b.value - a.value || b.units - a.units),
+        types: [...sealedByType.values()].map(row => ({ ...row, value: parseFloat(row.value.toFixed(2)) })).sort((a, b) => b.value - a.value || b.units - a.units),
+      },
       openingPerformance,
     });
   } catch (error) {
