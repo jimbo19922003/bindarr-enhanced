@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, ArchiveRestore, Check, Download, Package, Plus, Search } from 'lucide-react';
+import { Archive, ArchiveRestore, Check, Download, Package, Plus, Search, X } from 'lucide-react';
 import { useT } from '../utils/i18n';
 
 const TYPES = ['booster_box', 'booster_pack', 'etb', 'tin', 'collection_box', 'blister', 'other'];
@@ -50,6 +50,7 @@ function SealedInventory({ showToast }) {
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [pane, setPane] = useState('add');
   const [picked, setPicked] = useState({});
+  const [addOpen, setAddOpen] = useState(false);
   const [shared, setShared] = useState({ currency: 'USD', purchased_at: '', location_id: '' });
 
   const typeLabel = (value) => t(`sealed.type.${value}`);
@@ -224,15 +225,19 @@ function SealedInventory({ showToast }) {
 
   const togglePick = (result) => {
     const key = resultKey(result);
-    setPicked(current => {
-      if (current[key]) {
-        const next = { ...current };
-        delete next[key];
-        return next;
-      }
-      return { ...current, [key]: { result, quantity: '1', total_cost: '' } };
-    });
+    const removing = Boolean(picked[key]);
     setForm(null);
+    setPicked(current => {
+      if (!current[key]) return { ...current, [key]: { result, quantity: '1', total_cost: '' } };
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    if (removing) {
+      if (Object.keys(picked).length === 1) setAddOpen(false);
+    } else {
+      setAddOpen(true);
+    }
   };
 
   const saveSelected = async (event) => {
@@ -270,6 +275,7 @@ function SealedInventory({ showToast }) {
       return;
     }
     setPicked({});
+    setAddOpen(false);
     setPane('collection');
     showToast(t('sealed.saved'), 'success');
     refresh();
@@ -446,36 +452,87 @@ function SealedInventory({ showToast }) {
         </div>
       )}
 
-      {pickedList.length > 0 && (
-        <form className="glass-panel" style={{ padding: '1rem', display: 'grid', gap: '0.7rem', position: 'sticky', bottom: '0.5rem', zIndex: 30 }} onSubmit={saveSelected}>
-          <strong>{t('sealed.selectedCount', { count: pickedList.length })}</strong>
-          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{t('sealed.selectedHint')}</p>
-          {pickedList.map(([key, item]) => (
-            <div key={key} style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 1fr) 6rem 8rem', gap: '0.5rem', alignItems: 'center' }}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <strong>{item.result.name}</strong>
-                <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
-                  {item.result.market_price ? `${item.result.market_currency} ${item.result.market_price}` : t('sealed.marketUnknown')}
-                </span>
-              </span>
-              <input className="input-control" required type="number" min="1" value={item.quantity} onChange={e => setPicked(current => ({ ...current, [key]: { ...item, quantity: e.target.value } }))} aria-label={t('sealed.quantity')} />
-              <input className="input-control" required value={item.total_cost} onChange={e => setPicked(current => ({ ...current, [key]: { ...item, total_cost: e.target.value } }))} placeholder={t('sealed.cost')} aria-label={t('sealed.cost')} />
-            </div>
-          ))}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.6rem' }}>
-            <input className="input-control" required value={shared.currency} onChange={e => setShared({ ...shared, currency: e.target.value.toUpperCase() })} aria-label={t('sealed.currency')} maxLength={3} />
-            <input className="input-control" type="date" value={shared.purchased_at} onChange={e => setShared({ ...shared, purchased_at: e.target.value })} aria-label={t('sealed.purchased')} />
-            <select className="select-control" value={shared.location_id} onChange={e => setShared({ ...shared, location_id: e.target.value })} aria-label={t('sealed.location')}>
-              <option value="">{t('sealed.noLocation')}</option>
-              {locations.map(location => <option key={location.id} value={location.id}>{location.name}</option>)}
-            </select>
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button className="btn btn-primary" type="submit">{t('sealed.saveSelected')}</button>
-            <button className="btn btn-secondary" type="button" onClick={() => setPicked({})}>{t('sealed.clearSelected')}</button>
-          </div>
-        </form>
+      {pickedList.length > 0 && !addOpen && (
+        <div className="glass-panel" style={{ padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', position: 'sticky', bottom: '0.5rem', zIndex: 30 }}>
+          <strong style={{ flex: '1 1 auto' }}>{t('sealed.selectedCount', { count: pickedList.length })}</strong>
+          <button className="btn btn-secondary" type="button" onClick={() => { setPicked({}); setAddOpen(false); }}>{t('sealed.clearSelected')}</button>
+          <button className="btn btn-primary" type="button" onClick={() => setAddOpen(true)}>{t('sealed.addToInventory')}</button>
+        </div>
       )}
+
+      <div className={`drawer-backdrop ${addOpen ? 'open' : ''}`} onClick={() => setAddOpen(false)} />
+      <div className={`quick-add-drawer ${addOpen ? 'open' : ''}`} style={{ maxWidth: '720px' }}>
+        {addOpen && pickedList.length > 0 && (
+          <form onSubmit={saveSelected} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
+              <div style={{ minWidth: 0 }}>
+                <h3 style={{ color: 'var(--text-strong)', fontSize: '1.25rem', margin: 0 }}>{t('sealed.addProductsTitle')}</h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>{t('sealed.selectedHint')}</p>
+              </div>
+              <button className="btn btn-secondary btn-icon-only" type="button" onClick={() => setAddOpen(false)} style={{ borderRadius: '50%', flexShrink: 0 }} aria-label={t('common.cancel')}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '40vh', overflowY: 'auto' }}>
+              {pickedList.map(([key, item]) => (
+                <div key={key} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)' }}>
+                  {item.result.image_url ? (
+                    <img src={item.result.image_url} alt="" style={{ width: '72px', height: '72px', objectFit: 'contain', borderRadius: 'var(--radius-sm)', flexShrink: 0 }} />
+                  ) : (
+                    <div style={{ width: '72px', height: '72px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Package size={22} /></div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: 'var(--text-strong)' }}>{item.result.name}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                      {item.result.set_name || typeLabel(item.result.product_type)}
+                      {' · '}
+                      <span style={{ color: 'var(--accent-yellow)', fontWeight: 700 }}>
+                        {item.result.market_price ? `${item.result.market_currency} ${item.result.market_price}` : t('sealed.marketUnknown')}
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem' }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{t('card.quantity')}</label>
+                        <input className="input-control" required type="number" min="1" value={item.quantity} onChange={e => setPicked(current => ({ ...current, [key]: { ...item, quantity: e.target.value } }))} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>{t('sealed.cost')}</label>
+                        <input className="input-control" required value={item.total_cost} onChange={e => setPicked(current => ({ ...current, [key]: { ...item, total_cost: e.target.value } }))} placeholder="0.00" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>{t('sealed.currency')}</label>
+                <input className="input-control" required value={shared.currency} onChange={e => setShared({ ...shared, currency: e.target.value.toUpperCase() })} maxLength={3} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>{t('sealed.purchased')}</label>
+                <input className="input-control" type="date" value={shared.purchased_at} onChange={e => setShared({ ...shared, purchased_at: e.target.value })} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>{t('sealed.location')}</label>
+                <select className="select-control" value={shared.location_id} onChange={e => setShared({ ...shared, location_id: e.target.value })}>
+                  <option value="">{t('sealed.noLocation')}</option>
+                  {locations.map(location => <option key={location.id} value={location.id}>{location.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="quick-add-footer" style={{ marginTop: '0.25rem', paddingTop: '0.25rem' }}>
+              <div className="quick-add-footer-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setAddOpen(false)}>{t('common.cancel')}</button>
+                <button type="submit" className="btn btn-primary">{t('sealed.addToInventory')}</button>
+              </div>
+            </div>
+          </form>
+        )}
+      </div>
 
       <div>
         <button className="btn btn-secondary" type="button" onClick={() => { setForm(form ? null : emptyForm()); setPicked({}); }}>
