@@ -11,5 +11,6 @@
     "HTTPS_PORT": "",
     "ALLOW_REGISTRATION": "false"
   },
-  "postCreateCommand": "bash .devcontainer/setup.sh"
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "bash .devcontainer/start.sh --background"
 }

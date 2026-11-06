@@ -155,6 +155,7 @@ All optional.
 | `DEFAULT_ADMIN_PASSWORD` | — | Create the `admin` account with this password at startup instead of letting the first browser visit create the owner account. Only applied while the `users` table is empty — changing it later does nothing to an existing account. |
 | `POKEMON_TCG_API_KEY` | — | **Only for installs still on the pokemontcg.io provider.** Raises its rate limit from 1,000 to 20,000 requests/day. pokemontcg.io is deprecated: [new registrations are closed](https://dev.pokemontcg.io/) and existing keys stop working on **1 March 2027**. New installs default to TCGdex, which needs no key — leave this unset. |
 | `POKEMONTCGAPI_KEY` | unset | Server-side key for the optional [pokemontcgapi.com provider](#pokemon-data-providers). Setting a key alone does not enable it. |
+| `POKEWALLET_API_KEY` | unset | Server-side key for PokéWallet price lookups. When set, Admin → PokéWallet prices can fill English TCGdex cards that still have no positive price. Card ids are not changed, and a price already stored from another source is left alone. The key is never returned to the browser. |
 | `PUBLIC_BASE_URL` | — | External URL behind a proxy, e.g. `https://cards.example.com`. Used for share links and auto-allowed as a CORS origin, so proxied logins work with just this. Also editable in the Admin panel. |
 | `CORS_ORIGIN` | — | Extra allowed origins, comma-separated. Localhost and private-LAN origins are always allowed. |
 | `ALLOW_REGISTRATION` | unset | `true` allows self-registration. Unset means invite-only: admins create accounts. |
@@ -274,6 +275,15 @@ is unavailable, not automatic failover or a migration of existing cards.
 API contract and coverage: [documentation](https://pokemontcgapi.com/docs),
 [OpenAPI](https://pokemontcgapi.com/openapi.json),
 [regional coverage](https://pokemontcgapi.com/coverage).
+
+PokéWallet is a separate price lookup, not another catalogue. Set
+`POKEWALLET_API_KEY` on the server and restart, then use **Admin → PokéWallet
+prices**. It can fill an English TCGdex card that still has no positive price
+when the set, collector number, and name agree and the product is a single.
+Anything uncertain is listed for confirmation and does not change a price.
+Requests stay inside the key's hourly and daily allowance. Card ids stay as
+they are. TCGCSV is still called the same way; this does not try to get
+around a block on that service.
 
 ## Card scanning
 

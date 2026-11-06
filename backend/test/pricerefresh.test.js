@@ -41,6 +41,7 @@ const PROVIDERS = [
   ['tcgdex', 'tcgdex_prices_swept_at'],
   ['tcgcsv', 'tcgcsv_prices_swept_at'],
   ['lorcana', 'lorcana_prices_swept_at'],
+  ['pokewallet', 'pokewallet_prices_swept_at'],
 ];
 
 async function main() {

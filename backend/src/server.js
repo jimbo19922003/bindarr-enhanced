@@ -16,12 +16,30 @@ const db = require('./db');
 const tcgApi = require('./tcgApi');
 const scryfallApi = require('./scryfallApi');
 const lorcastApi = require('./lorcastApi');
+const { runSequential, PRICE_SWEEP_ORDER, safeErrorMessage } = require('./utils/priceSweep');
 
 // Which module owns the Pokémon `sets` table. Asked per call rather than resolved
 // once: the provider is a setting an admin can change while the server is up, and
 // the weekly refresh has to follow it without a restart.
 const pokemonSetSource = async () =>
   require('./utils/pokemonProvider').apiFor('English');
+
+// One function per sweep name. PokéWallet is last in PRICE_SWEEP_ORDER: it
+// fills TCGdex rows that still have no positive price and does not replace a
+// quote another writer managed to store.
+const PRICE_SWEEPS = {
+  pokemon: () => tcgApi.updateCollectionPrices(),
+  mtg: () => scryfallApi.updateCollectionPrices(),
+  lorcana: () => lorcastApi.updateCollectionPrices(),
+  tcgdex: () => require('./tcgdexApi').updateCollectionPrices(),
+  pokemontcgapi: () => require('./pokemontcgapi').updateCollectionPrices(),
+  tcgcsv: () => require('./tcgcsvApi').updateCollectionPrices(),
+  pokewallet: () => require('./pokewalletApi').updateCollectionPrices(),
+};
+
+function runPriceSweeps() {
+  return runSequential(PRICE_SWEEP_ORDER.map(name => ({ name, run: PRICE_SWEEPS[name] })));
+}
 
 // Say the provider deprecation out loud at boot, to the installs it applies to.
 //
@@ -319,6 +337,12 @@ db.initDb()
     // Prices. Hourly tick, and NOT forced — shouldSweepPrices decides whether
     // each provider is actually due, from the admin's price_refresh_days.
     //
+    // The writers run one after another. TCGCSV is ahead of PokéWallet so a
+    // quote it actually writes is already on the row when PokéWallet looks,
+    // and PokéWallet's update refuses to replace a positive price. A blocked
+    // TCGCSV run leaves those zeros for PokéWallet to fill. A tick that arrives
+    // while a pass is still going does not start a second one.
+    //
     // This used to tick daily and pass `force: true`, on the reasoning that the
     // timer was itself the right cadence. Two things came of that. The interval
     // could not be configured, which is a problem now that one selectable
@@ -331,34 +355,13 @@ db.initDb()
     // skips on any clock drift at all — "23h 59m elapsed" is not due, so the
     // refresh silently becomes every other day. An hourly tick that refuses in
     // one indexed read costs nothing and has no such edge.
-    setInterval(() => {
-      tcgApi.updateCollectionPrices();
-      scryfallApi.updateCollectionPrices();
-      lorcastApi.updateCollectionPrices();
-      // Non-English Pokémon cards: their ids 404 on pokemontcg.io, so tcgApi's
-      // sweep skips them and this is their only price refresh. No-op until the
-      // user actually owns one.
-      require('./tcgdexApi').updateCollectionPrices();
-      require('./pokemontcgapi').updateCollectionPrices();
-      // TCGCSV runs LAST of the Pokémon sweeps on purpose. It writes the same
-      // columns as the other two and is the better source — TCGplayer market
-      // prices in USD, and 97% coverage against TCGdex's 8% — so it should have
-      // the final say on any card it can place.
-      require('./tcgcsvApi').updateCollectionPrices();
-    }, 1000 * 60 * 60);
+    setInterval(() => { runPriceSweeps().catch(err => console.error(`Price sweep failed: ${safeErrorMessage(err)}`)); }, 1000 * 60 * 60);
 
     // Shortly after startup, catch up if the last sweep was over a day ago.
     // NOT forced: without that gate this re-ran on every restart, which under
     // nodemon meant a full sweep on every code edit — for data that cannot have
     // changed since the last one.
-    setTimeout(() => {
-      tcgApi.updateCollectionPrices();
-      scryfallApi.updateCollectionPrices();
-      lorcastApi.updateCollectionPrices();
-      require('./tcgdexApi').updateCollectionPrices();
-      require('./pokemontcgapi').updateCollectionPrices();
-      require('./tcgcsvApi').updateCollectionPrices();
-    }, 30000);
+    setTimeout(() => { runPriceSweeps().catch(err => console.error(`Price sweep failed: ${safeErrorMessage(err)}`)); }, 30000);
 
     // Periodically purge expired sessions so the table doesn't grow unbounded
     setInterval(() => {

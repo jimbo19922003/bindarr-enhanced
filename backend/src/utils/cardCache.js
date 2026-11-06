@@ -26,9 +26,27 @@ const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Nu
 // every column this list does NOT name is silently reset to its default — which
 // already cost price_1st_edition (written by tcgcsvApi, never by a provider) on every
 // re-cache, and would cost the English name learned below the same way.
+// A later catalogue refresh often has no market price (TCGdex returns nulls,
+// which normalize as 0). That refresh still updates the name and the artwork.
+// It must not wipe a PokéWallet quote that was matched onto this same card id.
+const PRESERVE_WHEN_POKEWALLET = new Set([
+  'price_trend', 'price_normal', 'price_holofoil', 'price_reverse_holofoil',
+  'price_avg1', 'price_avg7', 'price_avg30', 'price_currency', 'price_source',
+  'tcgplayer_url', 'cardmarket_url', 'tcgplayer_product_id',
+]);
+
 const SET_CLAUSE = COLUMNS
   .filter(c => c !== 'id' && c !== 'name')
-  .map(c => `${c} = excluded.${c}`)
+  .map(c => {
+    if (!PRESERVE_WHEN_POKEWALLET.has(c)) return `${c} = excluded.${c}`;
+    return `${c} = CASE
+      WHEN card_cache.price_source LIKE 'pokewallet%'
+       AND COALESCE(card_cache.price_trend, 0) > 0
+       AND COALESCE(excluded.price_trend, 0) <= 0
+      THEN card_cache.${c}
+      ELSE excluded.${c}
+    END`;
+  })
   .join(', ');
 
 // `name` is the one column an incoming row can be WORSE at. A non-English TCGdex

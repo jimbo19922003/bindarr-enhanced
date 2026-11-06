@@ -55,6 +55,9 @@ function summarizeOpening({ costCents, currency, pulls }) {
     recordedQuantity,
     unpricedQuantity,
     knownValueCents,
+    // True when every supplied pull has a known unit value. An empty list is
+    // therefore true: nothing supplied was unpriced. It does not mean the
+    // opener recorded every card that came out of the product.
     valuationComplete: unpricedQuantity === 0,
     valueDifferenceCents: knownValueCents - costCents,
     costRecoveryPercent: costCents === 0 ? null : knownValueCents / costCents * 100,

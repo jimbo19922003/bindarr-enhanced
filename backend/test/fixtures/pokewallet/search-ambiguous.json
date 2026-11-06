@@ -1,0 +1,35 @@
+{
+  "query": "Cubone 4",
+  "results": [
+    {
+      "id": "pk_cccccccccccccccccccccccccccccccc",
+      "card_info": {
+        "name": "Cubone",
+        "set_name": "Gem Pack",
+        "set_code": "CBB3C",
+        "card_number": "4",
+        "product_type": "card"
+      },
+      "tcgplayer": null,
+      "cardmarket": {
+        "product_url": "https://www.cardmarket.com/en/Pokemon/Products/Singles/Gem-Pack/Cubone-V1",
+        "prices": [{ "variant_type": "normal", "trend": 0.4, "avg": 0.37, "updated_at": "2026-11-02T00:00:00Z" }]
+      }
+    },
+    {
+      "id": "pk_dddddddddddddddddddddddddddddddd",
+      "card_info": {
+        "name": "Cubone",
+        "set_name": "Gem Pack",
+        "set_code": "CBB3C",
+        "card_number": "4",
+        "product_type": "card"
+      },
+      "tcgplayer": null,
+      "cardmarket": {
+        "prices": [{ "variant_type": "normal", "trend": 1.2, "updated_at": "2026-11-02T00:00:00Z" }]
+      }
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 2, "total_pages": 1 }
+}

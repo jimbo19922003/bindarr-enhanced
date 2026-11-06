@@ -223,6 +223,49 @@ router.put('/', requireAdmin, async (req, res) => {
   }
 });
 
+// PokéWallet is a price adapter for cards this install already has. It does not
+// change card ids and it does not take a key from the browser. Admins can see
+// whether the server has a key, refresh within the provider's limits, and
+// confirm a match the automatic pass refused to guess.
+router.get('/pokewallet', requireAdmin, async (req, res) => {
+  try {
+    res.json(await require('../pokewalletApi').status());
+  } catch (error) {
+    console.error(`PokéWallet status failed: ${error.message}`);
+    res.status(500).json({ error: 'Failed to read PokéWallet status' });
+  }
+});
+
+router.post('/pokewallet/refresh', requireAdmin, async (req, res) => {
+  try {
+    const report = await require('../pokewalletApi').updateCollectionPrices({ force: true });
+    res.json(report);
+  } catch (error) {
+    console.error(`PokéWallet refresh failed: ${error.message}`);
+    res.status(500).json({ error: 'PokéWallet refresh failed' });
+  }
+});
+
+router.post('/pokewallet/mappings', requireAdmin, async (req, res) => {
+  const body = req.body || {};
+  const cardId = typeof body.card_id === 'string' ? body.card_id : '';
+  if (!cardId.startsWith('tcgdex-')) {
+    return res.status(400).json({ error: 'card_id must be an existing TCGdex card id.' });
+  }
+  try {
+    const result = await require('../pokewalletApi').mapManually(
+      cardId,
+      typeof body.provider_card_id === 'string' ? body.provider_card_id : '',
+      body.clear === true
+    );
+    if (result.error) return res.status(result.statusCode || 400).json({ error: result.error });
+    res.json(result);
+  } catch (error) {
+    console.error(`PokéWallet mapping failed: ${error.message}`);
+    res.status(500).json({ error: 'Failed to update the PokéWallet mapping' });
+  }
+});
+
 module.exports = router;
 // Exported for tests.
 module.exports.isNewer = isNewer;

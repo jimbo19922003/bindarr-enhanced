@@ -1,0 +1,21 @@
+{
+  "id": "pk_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "card_info": {
+    "name": "Pikachu",
+    "set_name": "Celebrations",
+    "set_code": "CEL",
+    "card_number": "7",
+    "product_type": "card"
+  },
+  "tcgplayer": {
+    "url": "https://www.tcgplayer.com/product/245000",
+    "prices": [
+      { "sub_type_name": "Normal", "market_price": 1.25, "updated_at": "2026-11-03T00:00:00Z" },
+      { "sub_type_name": "Holofoil", "market_price": 4.5, "updated_at": "2026-11-03T00:00:00Z" }
+    ]
+  },
+  "cardmarket": {
+    "product_url": "https://www.cardmarket.com/en/Pokemon/Products/Singles/Celebrations/Pikachu",
+    "prices": [{ "variant_type": "normal", "trend": 2.1, "avg1": 2, "avg7": 2.05, "avg30": 1.9, "updated_at": "2026-11-03T00:00:00Z" }]
+  }
+}
