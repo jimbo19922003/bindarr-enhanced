@@ -19,21 +19,20 @@ runs every `backend/test/*.test.js`.
 ## Start and resume
 
 Creating the Codespace runs `bash .devcontainer/setup.sh` and then opens the
-editor. The editor does not wait for the app. After it connects, the terminal
-runs `bash .devcontainer/start.sh --ensure`. The server log is
-`.devcontainer/data/start.log`.
+editor. The editor does not wait for the app. After it connects, a terminal
+runs `bash .devcontainer/start.sh` and stays attached to the server. Leave
+that terminal open. Ctrl+C stops the app.
 
-A window that stays on "Opening remote..." was built from the previous
-container config, which waited for the app process before connecting. Stop or
-delete that Codespace at https://github.com/codespaces and create a new one
-from this branch. Resuming the stuck one uses the same startup command.
+The dev server has to ignore closed stdin. Nodemon otherwise treats
+end-of-file on stdin as a closed terminal and exits. Nothing is left
+listening, and the forwarded port answers HTTP 502.
 
-When the app is up, the terminal prints `http://localhost:3001` and the Ports
-panel lists port **3001** as **Bindarr test instance**. A preview of that port
-opens in the editor. Keep the port visibility private. The page and the API
-are the same origin: Express serves the built frontend. Codespaces presents
-that forwarded port over HTTPS, which is what the browser needs for the
-camera. The server itself listens with HTTP.
+When the terminal prints `Bindarr Server running on port 3001`, refresh port
+**3001** in the Ports panel. It is labeled **Bindarr test instance**. Keep
+the visibility private. The page and the API are the same origin: Express
+serves the built frontend. Codespaces presents that forwarded port over
+HTTPS, which is what the browser needs for the camera. The server itself
+listens with HTTP.
 
 To start it yourself in a terminal:
 

@@ -406,9 +406,10 @@ Node 18+ and npm 9+.
 ### GitHub Codespaces
 
 Create the Codespace from a branch that contains `.devcontainer/` (the pull
-request branch). The editor opens when dependency setup finishes, and the
-terminal then starts the app. Port **3001** shows up as **Bindarr test
-instance**. A Codespace created from `main` has no dev container: the file
+request branch). The editor opens when dependency setup finishes, and a terminal then stays
+attached to the app. Refresh port **3001** (**Bindarr test instance**) after
+that terminal says the server is running. A 502 on the forwarded host means
+the server is not listening yet. A Codespace created from `main` has no dev container: the file
 list has no `.devcontainer` folder, no server starts, and the Ports panel
 stays empty. Switching branches in that Codespace does not fix it until
 **Codespaces: Rebuild Container**, or until you create a new Codespace from
