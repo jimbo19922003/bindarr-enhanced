@@ -20,6 +20,11 @@ const emptyForm = () => ({
   purchased_at: '',
   location_id: '',
   notes: '',
+  provider: '',
+  provider_product_id: '',
+  catalog_category_id: null,
+  catalog_group_id: null,
+  market_source: '',
 });
 
 function moneyLabel(value, currency) {
@@ -27,7 +32,7 @@ function moneyLabel(value, currency) {
   return `${currency || ''} ${value}`.trim();
 }
 
-function SealedInventory({ showToast }) {
+function SealedInventory({ showToast, admin }) {
   const { t } = useT();
   const [products, setProducts] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -38,6 +43,12 @@ function SealedInventory({ showToast }) {
   const [form, setForm] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [csv, setCsv] = useState('');
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogResults, setCatalogResults] = useState([]);
+  const [catalogMeta, setCatalogMeta] = useState(null);
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncState, setSyncState] = useState(null);
 
   const typeLabel = (value) => t(`sealed.type.${value}`);
 
@@ -101,6 +112,11 @@ function SealedInventory({ showToast }) {
       market_price: form.market_price,
       market_currency: form.market_currency,
     };
+    if (form.provider) body.provider = form.provider;
+    if (form.provider_product_id) body.provider_product_id = form.provider_product_id;
+    if (form.catalog_category_id) body.catalog_category_id = form.catalog_category_id;
+    if (form.catalog_group_id) body.catalog_group_id = form.catalog_group_id;
+    if (form.market_source) body.market_source = form.market_source;
     if (form.withLot) {
       body.lot = {
         quantity: Number(form.quantity),
@@ -176,6 +192,82 @@ function SealedInventory({ showToast }) {
     refresh();
   };
 
+  const searchCatalog = async () => {
+    const q = catalogQuery.trim();
+    if (q.length < 3) {
+      showToast(t('sealed.catalogShort'));
+      return;
+    }
+    setCatalogBusy(true);
+    try {
+      const response = await fetch(`/api/sealed/catalog?q=${encodeURIComponent(q)}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || t('sealed.errCatalog'));
+      setCatalogResults(data.results || []);
+      setCatalogMeta(data);
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      setCatalogBusy(false);
+    }
+  };
+
+  const applyCatalogResult = (result) => {
+    setForm(current => ({
+      ...current,
+      name: result.name,
+      product_type: result.product_type,
+      language: result.language || 'English',
+      set_name: result.set_name || '',
+      image_url: result.image_url || '',
+      market_price: result.market_price || '',
+      market_currency: result.market_currency || 'USD',
+      market_source: result.market_price ? 'tcgcsv' : '',
+      provider: result.provider || '',
+      provider_product_id: result.provider_product_id || '',
+      catalog_category_id: result.catalog_category_id || null,
+      catalog_group_id: result.catalog_group_id || null,
+    }));
+  };
+
+  const refreshQuote = async (product) => {
+    const response = await fetch(`/api/sealed/products/${product.id}/quote`, { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) {
+      showToast(data.error || t('sealed.errSave'), 'error');
+      return;
+    }
+    showToast(t('sealed.saved'), 'success');
+    refresh();
+  };
+
+  const startCatalogSync = async () => {
+    setSyncing(true);
+    const response = await fetch('/api/sealed/catalog/sync', { method: 'POST' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setSyncing(false);
+      showToast(data.error || t('sealed.errCatalog'));
+      return;
+    }
+    setSyncState(data);
+    if (!data.running) setSyncing(false);
+  };
+
+  useEffect(() => {
+    if (!admin || !syncing) return undefined;
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch('/api/sealed/catalog/status');
+        const data = await response.json();
+        if (!response.ok) return;
+        setSyncState(data);
+        if (!data.running) setSyncing(false);
+      } catch { /* the next poll retries */ }
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [admin, syncing]);
+
   const setArchived = async (kind, id, archived) => {
     const path = kind === 'product'
       ? `/api/sealed/products/${id}/${archived ? 'archive' : 'restore'}`
@@ -237,7 +329,12 @@ function SealedInventory({ showToast }) {
           <button className="btn btn-secondary" type="button" onClick={exportCsv}>
             <Download size={16} /> {t('sealed.export')}
           </button>
-          <button className="btn btn-primary" type="button" onClick={() => { setForm(emptyForm()); setSelectedId(null); }}>
+          {admin && (
+            <button className="btn btn-secondary" type="button" onClick={startCatalogSync} disabled={syncing}>
+              <Download size={16} /> {syncing ? t('sealed.catalogSyncing', { done: syncState?.done || 0, total: syncState?.total || 0 }) : t('sealed.catalogSync')}
+            </button>
+          )}
+          <button className="btn btn-primary" type="button" onClick={() => { setForm(emptyForm()); setCatalogResults([]); setCatalogMeta(null); setSelectedId(null); }}>
             <Plus size={16} /> {t('sealed.add')}
           </button>
         </div>
@@ -265,7 +362,49 @@ function SealedInventory({ showToast }) {
       {form && (
         <form className="glass-panel" style={{ padding: '1rem', display: 'grid', gap: '0.6rem' }} onSubmit={saveProduct}>
           <strong>{t('sealed.add')}</strong>
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{t('sealed.catalogHint')}</p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <input className="input-control"
+              value={catalogQuery}
+              onChange={e => setCatalogQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); searchCatalog(); } }}
+              placeholder={t('sealed.catalogSearch')}
+              aria-label={t('sealed.catalogSearch')}
+              style={{ flex: '1 1 16rem' }}
+            />
+            <button className="btn btn-secondary" type="button" onClick={searchCatalog} disabled={catalogBusy}>
+              {catalogBusy ? t('sealed.catalogSearching') : t('sealed.catalogSearch')}
+            </button>
+          </div>
+          {catalogMeta && catalogResults.length === 0 && (
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              {catalogMeta.needsSet ? t('sealed.catalogNeedsSet') : t('sealed.catalogEmpty')}
+              {catalogMeta.limited ? ` ${t('sealed.catalogLimited')}` : ''}
+            </p>
+          )}
+          {catalogResults.length > 0 && (
+            <div style={{ display: 'grid', gap: '0.4rem' }}>
+              {catalogResults.map(result => (
+                <button
+                  key={`${result.provider}-${result.provider_product_id}`}
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => applyCatalogResult(result)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  {result.image_url && <img src={result.image_url} alt="" width="44" height="44" style={{ objectFit: 'contain' }} />}
+                  <span>
+                    <strong>{result.name}</strong>
+                    <span style={{ display: 'block', color: 'var(--text-secondary)' }}>
+                      {typeLabel(result.product_type)} · {result.set_name || result.language} · {result.market_price ? `${result.market_currency} ${result.market_price}` : t('sealed.marketUnknown')}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(12rem, 1fr))', gap: '0.6rem' }}>
+            {form.image_url && <img src={form.image_url} alt={form.name || ''} style={{ width: '5.5rem', height: '5.5rem', objectFit: 'contain' }} />}
             <input className="input-control" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder={t('sealed.name')} aria-label={t('sealed.name')} />
             <select className="select-control" value={form.product_type} onChange={e => setForm({ ...form, product_type: e.target.value })} aria-label={t('sealed.type')}>
               {TYPES.map(value => <option key={value} value={value}>{typeLabel(value)}</option>)}
@@ -273,7 +412,7 @@ function SealedInventory({ showToast }) {
             <input className="input-control" value={form.language} onChange={e => setForm({ ...form, language: e.target.value })} placeholder={t('sealed.language')} aria-label={t('sealed.language')} />
             <input className="input-control" value={form.set_name} onChange={e => setForm({ ...form, set_name: e.target.value })} placeholder={t('sealed.set')} aria-label={t('sealed.set')} />
             <input className="input-control" value={form.image_url} onChange={e => setForm({ ...form, image_url: e.target.value })} placeholder={t('sealed.image')} aria-label={t('sealed.image')} />
-            <input className="input-control" value={form.market_price} onChange={e => setForm({ ...form, market_price: e.target.value })} placeholder={t('sealed.market')} aria-label={t('sealed.market')} />
+            <input className="input-control" value={form.market_price} onChange={e => setForm({ ...form, market_price: e.target.value, market_source: '' })} placeholder={t('sealed.market')} aria-label={t('sealed.market')} />
             <input className="input-control" value={form.market_currency} onChange={e => setForm({ ...form, market_currency: e.target.value.toUpperCase() })} placeholder={t('sealed.currency')} aria-label={t('sealed.marketCurrency')} maxLength={3} />
           </div>
           <label style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
@@ -313,10 +452,13 @@ function SealedInventory({ showToast }) {
               onClick={() => setSelectedId(selectedId === product.id ? null : product.id)}
               style={{ all: 'unset', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: '1rem', width: '100%', alignItems: 'center' }}
             >
-              <span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+                {product.image_url && <img src={product.image_url} alt="" width="48" height="48" style={{ objectFit: 'contain', borderRadius: '4px' }} />}
+                <span>
                 <strong style={{ color: 'var(--text-strong)' }}>{product.name}</strong>
                 <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
                   {typeLabel(product.product_type)} · {product.language}{product.set_name ? ` · ${product.set_name}` : ''}
+                </span>
                 </span>
               </span>
               <span style={{ color: 'var(--text-secondary)', textAlign: 'right' }}>
@@ -335,6 +477,7 @@ function SealedInventory({ showToast }) {
                 onAddLot={lot => addLot(product.id, lot)}
                 onUpdateLot={updateLot}
                 onArchiveLot={(lot, archived) => setArchived('lot', lot.id, archived)}
+                onRefreshQuote={() => refreshQuote(product)}
               />
             )}
           </article>
@@ -359,7 +502,7 @@ function SealedInventory({ showToast }) {
   );
 }
 
-function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, onUpdateLot, onArchiveLot }) {
+function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, onUpdateLot, onArchiveLot, onRefreshQuote }) {
   const [market, setMarket] = useState(product.market_price || '');
   const [marketCurrency, setMarketCurrency] = useState(product.market_currency || 'USD');
   const [lot, setLot] = useState({ quantity: '1', remaining_quantity: '', total_cost: '', currency: 'USD', purchased_at: '', location_id: '', notes: '' });
@@ -371,10 +514,14 @@ function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, on
 
   return (
     <div style={{ marginTop: '0.8rem', display: 'grid', gap: '0.7rem' }}>
+      {product.image_url && <img src={product.image_url} alt={product.name} style={{ width: '6rem', height: '6rem', objectFit: 'contain' }} />}
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
         <input className="input-control" value={market} onChange={e => setMarket(e.target.value)} aria-label={t('sealed.market')} placeholder={t('sealed.market')} style={{ width: '7rem' }} />
         <input className="input-control" value={marketCurrency} onChange={e => setMarketCurrency(e.target.value.toUpperCase())} aria-label={t('sealed.marketCurrency')} maxLength={3} style={{ width: '4.5rem' }} />
         <button className="btn btn-secondary" type="button" onClick={() => onQuote(market, marketCurrency)}>{t('sealed.saveQuote')}</button>
+        {product.provider === 'tcgcsv' && (
+          <button className="btn btn-secondary" type="button" onClick={onRefreshQuote}>{t('sealed.updateQuote')}</button>
+        )}
         <button className="btn btn-secondary" type="button" onClick={onArchive}>
           {product.archived_at ? <ArchiveRestore size={14} /> : <Archive size={14} />}
           {product.archived_at ? t('sealed.restore') : t('sealed.archive')}

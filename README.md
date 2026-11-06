@@ -308,6 +308,14 @@ product and linking the pulls is not part of this screen. Import and export
 use CSV from the Sealed tab. A location name in the file must already exist
 for that user.
 
+Adding a product can search TCGplayer's sealed catalogue through TCGCSV, the
+same mirror that prices single cards. A match fills the name, the product
+image, and the USD market price. English listings come from category 3 and
+Japanese listings from category 85. The copy is kept locally and a set is
+downloaded again only after a day. An admin can download every set from the
+Sealed tab. A product the catalogue does not have is still entered by hand,
+and a missing market price stays unknown.
+
 ## Card scanning
 
 Scanning is image-only — no OCR, no typing. Two things have to be in place, and

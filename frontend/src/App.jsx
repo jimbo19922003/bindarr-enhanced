@@ -429,7 +429,7 @@ function App() {
       case 'deckbuilder':
         return <DeckBuilder showToast={showToast} />;
       case 'sealed':
-        return <SealedInventory showToast={showToast} />;
+        return <SealedInventory showToast={showToast} admin={user?.role === 'admin'} />;
       case 'notes':
         return <Notes showToast={showToast} />;
       case 'settings':

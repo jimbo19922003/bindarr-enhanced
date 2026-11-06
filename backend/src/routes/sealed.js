@@ -2,7 +2,9 @@
 
 const express = require('express');
 const db = require('../db');
+const { requireAdmin } = require('../middleware/auth');
 const sealed = require('../utils/sealedInventory');
+const catalog = require('../utils/sealedCatalog');
 
 const router = express.Router();
 
@@ -46,6 +48,8 @@ function presentProduct(row, lots) {
     market_currency: row.market_currency,
     market_quoted_at: row.market_quoted_at,
     market_source: row.market_source || '',
+    catalog_category_id: row.catalog_category_id || null,
+    catalog_group_id: row.catalog_group_id || null,
     archived_at: row.archived_at,
     remaining_quantity: active.reduce((sum, lot) => sum + lot.remaining_quantity, 0),
     lots: lots || [],
@@ -84,6 +88,41 @@ async function locationFor(userId, locationId) {
 function likeTerm(value) {
   return `%${String(value).replace(/[\\%_]/g, ch => `\\${ch}`)}%`;
 }
+
+function optionalCatalogId(value) {
+  if (value == null || value === '') return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new TypeError('Catalog id is not valid');
+  return parsed;
+}
+
+// A price typed by hand is manual. A price that arrived with a catalog pick
+// stays marked as the catalog, so a later refresh knows it may replace it.
+function quoteSource(body, product) {
+  if (product.market_price_cents == null) return '';
+  return body && body.market_source === 'tcgcsv' && product.provider === 'tcgcsv' && product.provider_product_id
+    ? 'tcgcsv'
+    : 'manual';
+}
+
+router.get('/sealed/catalog', async (req, res) => {
+  try {
+    const found = await catalog.search(req.query.q || '');
+    res.json(found);
+  } catch (err) {
+    if (err instanceof TypeError || err instanceof RangeError) return fail(res, 400, err.message);
+    console.error('Failed to search the sealed catalog', err);
+    fail(res, 500, 'Failed to search the sealed catalog');
+  }
+});
+
+router.post('/sealed/catalog/sync', requireAdmin, (req, res) => {
+  res.status(202).json(catalog.startSync({ force: req.query.force === '1' }));
+});
+
+router.get('/sealed/catalog/status', requireAdmin, (_req, res) => {
+  res.json(catalog.status());
+});
 
 router.get('/sealed/products', async (req, res) => {
   try {
@@ -133,24 +172,61 @@ router.get('/sealed/products/:id', async (req, res) => {
 
 router.post('/sealed/products', async (req, res) => {
   try {
-    const product = sealed.normalizeProduct(req.body || {});
-    const lotInput = req.body && req.body.lot;
+    const body = req.body || {};
+    const product = sealed.normalizeProduct(body);
+    const lotInput = body.lot;
     const lot = lotInput ? sealed.normalizeLot(lotInput) : null;
+    const categoryId = optionalCatalogId(body.catalog_category_id);
+    const groupId = optionalCatalogId(body.catalog_group_id);
+    const source = quoteSource(body, product);
+    const quotedAt = product.market_price_cents == null ? null : new Date().toISOString();
     if (lot && lot.location_id && !(await locationFor(req.user.id, lot.location_id))) {
       return fail(res, 400, 'Storage location not found');
+    }
+    if (product.provider && product.provider_product_id) {
+      const existing = await db.get(
+        `SELECT * FROM sealed_product WHERE user_id = ? AND provider = ? AND provider_product_id = ?`,
+        [req.user.id, product.provider, product.provider_product_id]
+      );
+      if (existing) {
+        await db.withTransaction(async () => {
+          if (lot) await insertLot(req.user.id, existing.id, lot);
+          if (existing.market_source !== 'manual') {
+            await db.run(
+              `UPDATE sealed_product
+                  SET image_url = ?, catalog_category_id = ?, catalog_group_id = ?,
+                      market_price_cents = ?, market_currency = ?, market_quoted_at = ?, market_source = ?,
+                      updated_at = datetime('now')
+                WHERE id = ? AND user_id = ?`,
+              [
+                product.image_url || existing.image_url, categoryId, groupId,
+                product.market_price_cents, product.market_currency, quotedAt, source,
+                existing.id, req.user.id,
+              ]
+            );
+          } else if (product.image_url) {
+            await db.run(
+              `UPDATE sealed_product SET image_url = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+              [product.image_url, existing.id, req.user.id]
+            );
+          }
+        });
+        const stored = await ownedProduct(req.user.id, existing.id);
+        const lots = await lotsFor(req.user.id, [existing.id]);
+        return res.status(200).json({ product: presentProduct(stored, lots.get(existing.id) || []), existed: true });
+      }
     }
     const id = await db.withTransaction(async () => {
       const created = await db.run(
         `INSERT INTO sealed_product (
            user_id, name, product_type, language, set_id, set_name, image_url,
            provider, provider_product_id, market_price_cents, market_currency,
-           market_quoted_at, market_source
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           market_quoted_at, market_source, catalog_category_id, catalog_group_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           req.user.id, product.name, product.product_type, product.language, product.set_id, product.set_name,
           product.image_url, product.provider, product.provider_product_id, product.market_price_cents,
-          product.market_currency, product.market_price_cents == null ? null : new Date().toISOString(),
-          product.market_price_cents == null ? '' : 'manual',
+          product.market_currency, quotedAt, source, categoryId, groupId,
         ]
       );
       if (lot) await insertLot(req.user.id, created.lastID, lot);
@@ -188,11 +264,14 @@ router.put('/sealed/products/:id', async (req, res) => {
         ? body.market_currency
         : existing.market_currency,
     });
+    const priceChanged = product.market_price_cents !== existing.market_price_cents
+      || product.market_currency !== existing.market_currency;
     const quotedAt = product.market_price_cents == null
       ? null
-      : (product.market_price_cents === existing.market_price_cents && product.market_currency === existing.market_currency
-        ? existing.market_quoted_at
-        : new Date().toISOString());
+      : (priceChanged ? new Date().toISOString() : existing.market_quoted_at);
+    const source = product.market_price_cents == null
+      ? ''
+      : (priceChanged ? 'manual' : (existing.market_source || 'manual'));
     await db.run(
       `UPDATE sealed_product
           SET name = ?, product_type = ?, language = ?, set_id = ?, set_name = ?, image_url = ?,
@@ -202,7 +281,7 @@ router.put('/sealed/products/:id', async (req, res) => {
       [
         product.name, product.product_type, product.language, product.set_id, product.set_name, product.image_url,
         product.provider, product.provider_product_id, product.market_price_cents, product.market_currency, quotedAt,
-        product.market_price_cents == null ? '' : (existing.market_source || 'manual'),
+        source,
         existing.id, req.user.id,
       ]
     );
@@ -214,6 +293,35 @@ router.put('/sealed/products/:id', async (req, res) => {
     if (String(err.message || '').includes('UNIQUE')) return fail(res, 409, 'A product with that provider id already exists');
     console.error('Failed to update sealed product', err);
     fail(res, 500, 'Failed to update sealed product');
+  }
+});
+
+router.post('/sealed/products/:id/quote', async (req, res) => {
+  try {
+    const existing = await ownedProduct(req.user.id, req.params.id);
+    if (!existing) return fail(res, 404, 'Sealed product not found');
+    const quote = await catalog.refreshOwned(existing);
+    if (!quote) return fail(res, 404, 'This product is no longer in the sealed catalog');
+    const cents = quote.market_price == null ? null : sealed.moneyToCents(quote.market_price, 'Market price');
+    await db.run(
+      `UPDATE sealed_product
+          SET image_url = CASE WHEN ? != '' THEN ? ELSE image_url END,
+              market_price_cents = ?, market_currency = ?, market_quoted_at = ?, market_source = ?,
+              updated_at = datetime('now')
+        WHERE id = ? AND user_id = ?`,
+      [
+        quote.image_url, quote.image_url, cents, cents == null ? null : quote.market_currency,
+        cents == null ? null : new Date().toISOString(), cents == null ? '' : 'tcgcsv',
+        existing.id, req.user.id,
+      ]
+    );
+    const stored = await ownedProduct(req.user.id, existing.id);
+    const lots = await lotsFor(req.user.id, [existing.id]);
+    res.json({ product: presentProduct(stored, lots.get(existing.id) || []) });
+  } catch (err) {
+    if (err instanceof TypeError || err instanceof RangeError) return fail(res, 400, err.message);
+    console.error('Failed to refresh sealed quote', err);
+    fail(res, 500, 'Failed to refresh the market quote');
   }
 });
 

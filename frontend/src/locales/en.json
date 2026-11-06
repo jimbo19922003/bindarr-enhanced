@@ -1573,5 +1573,17 @@
   "sealed.type.tin": "Tin",
   "sealed.type.collection_box": "Collection box",
   "sealed.type.blister": "Blister",
-  "sealed.type.other": "Other"
+  "sealed.type.other": "Other",
+  "sealed.catalogSearch": "Search the catalog",
+  "sealed.catalogHint": "Search by set and product, the same way you search for a card. A match fills in the name, image, and market price. You can still type a product the catalog does not have.",
+  "sealed.catalogSearching": "Searching…",
+  "sealed.catalogShort": "Enter at least 3 characters.",
+  "sealed.catalogEmpty": "No sealed product matched. Try the set name plus the product, or type it in below.",
+  "sealed.catalogNeedsSet": "Nothing is stored for that search yet. Include the set name, such as Surging Sparks Elite Trainer Box, or download the catalog.",
+  "sealed.catalogLimited": "Only matches already stored could be shown.",
+  "sealed.catalogSync": "Download catalog",
+  "sealed.catalogSyncing": "Downloading {done}/{total}",
+  "sealed.marketUnknown": "No market price",
+  "sealed.updateQuote": "Update market quote",
+  "sealed.errCatalog": "Could not search the sealed catalog."
 }

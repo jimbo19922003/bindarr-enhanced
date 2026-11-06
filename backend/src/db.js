@@ -927,6 +927,56 @@ async function initDb() {
   `);
   await run(`CREATE INDEX IF NOT EXISTS idx_sealed_lot_user ON sealed_lot(user_id, product_id)`);
 
+  // Which TCGCSV group a picked product came from, so a later quote refresh
+  // knows the one set to download. Null on a product typed in by hand.
+  const sealedCols = await all(`PRAGMA table_info(sealed_product)`);
+  if (!sealedCols.some(column => column.name === 'catalog_category_id')) {
+    await run(`ALTER TABLE sealed_product ADD COLUMN catalog_category_id INTEGER`);
+  }
+  if (!sealedCols.some(column => column.name === 'catalog_group_id')) {
+    await run(`ALTER TABLE sealed_product ADD COLUMN catalog_group_id INTEGER`);
+  }
+
+  // Local copy of sealed TCGplayer products. Search reads this. The upstream
+  // file changes once a day, so a group is downloaded again only after that.
+  await run(`
+    CREATE TABLE IF NOT EXISTS sealed_catalog_group (
+      category_id INTEGER NOT NULL,
+      group_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      abbreviation TEXT NOT NULL DEFAULT '',
+      products_fetched_at TEXT,
+      PRIMARY KEY (category_id, group_id)
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS sealed_catalog (
+      provider TEXT NOT NULL,
+      provider_product_id TEXT NOT NULL,
+      category_id INTEGER NOT NULL,
+      group_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      product_type TEXT NOT NULL,
+      language TEXT NOT NULL,
+      set_id TEXT NOT NULL DEFAULT '',
+      set_name TEXT NOT NULL DEFAULT '',
+      image_url TEXT NOT NULL DEFAULT '',
+      market_price_cents INTEGER,
+      market_currency TEXT,
+      fetched_at TEXT NOT NULL,
+      PRIMARY KEY (provider, provider_product_id)
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_sealed_catalog_group ON sealed_catalog(category_id, group_id)`);
+  await run(`
+    CREATE TABLE IF NOT EXISTS sealed_catalog_meta (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      groups_fetched_at TEXT,
+      full_sync_at TEXT,
+      last_remote_update TEXT
+    )
+  `);
+
   // --- PERFORMANCE INDEXES ---
   // `user_id` first, because it is the predicate on essentially every read in the
   // app — every collection query, every stats aggregate — and nothing indexed it.
