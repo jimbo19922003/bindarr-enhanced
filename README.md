@@ -305,8 +305,7 @@ converted.
 The dashboard net worth adds the known market value of units still sealed,
 and total invested adds their remaining cost. The set chart adds that market
 value onto the set with the same name. Top sealed products are listed beside
-top cards. A sealed unit is not counted as a card. Opening a product and
-linking the pulls is not part of this screen. Import and export use CSV from
+top cards. A sealed unit is not counted as a card. Import and export use CSV from
 the Collection side of the Sealed tab. A location name in the file must
 already exist for that user.
 
@@ -317,6 +316,17 @@ The picture is
 TCGplayer's public product image for the id PokéWallet already returned. The
 search needs the PokéWallet key saved in Settings. A missing market price
 stays unknown. A product the search does not list is still entered by hand.
+
+Open one unit at a time from a lot. That opening keeps the share of the lot
+cost allocated to it. Pulls recorded on it have their own current value, and
+an optional value from the day it was opened. A blank price is missing, not
+zero. The difference between known current value and opening cost is an
+estimate of unrealized value, not realized profit. Amounts in another
+currency are not converted. A bulk line can record one quantity and one total
+instead of every card. If a per-card cost is wanted later, the opening cost
+is split by quantity across the pulls, with the leftover cent on the last
+pull, and it is not copied onto every pull or onto a collection purchase
+price. Removing an opening puts that unit and its cost back on the lot.
 
 Adding a Pokémon card prices it from PokéWallet when the catalog has no
 market price, so the copy is not stored as zero. The card list, pictures, and

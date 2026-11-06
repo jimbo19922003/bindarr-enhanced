@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Archive, ArchiveRestore, Download, Package, Plus, Search, X } from 'lucide-react';
 import { useT } from '../utils/i18n';
+import SealedOpenings from './SealedOpenings';
 
 const TYPES = ['booster_box', 'booster_pack', 'etb', 'tin', 'collection_box', 'blister', 'other'];
 
@@ -619,6 +620,8 @@ function SealedInventory({ showToast }) {
                 onUpdateLot={updateLot}
                 onArchiveLot={(lot, archived) => setArchived('lot', lot.id, archived)}
                 onRefreshQuote={() => refreshQuote(product)}
+                showToast={showToast}
+                onChanged={refresh}
               />
             )}
           </article>
@@ -644,7 +647,7 @@ function SealedInventory({ showToast }) {
   );
 }
 
-function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, onUpdateLot, onArchiveLot, onRefreshQuote }) {
+function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, onUpdateLot, onArchiveLot, onRefreshQuote, showToast, onChanged }) {
   const [market, setMarket] = useState(product.market_price || '');
   const [marketCurrency, setMarketCurrency] = useState(product.market_currency || 'USD');
   const [lot, setLot] = useState({ quantity: '1', remaining_quantity: '', total_cost: '', currency: 'USD', purchased_at: '', location_id: '', notes: '' });
@@ -697,6 +700,7 @@ function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, on
           {t('sealed.addLot')}
         </button>
       </div>
+      <SealedOpenings product={product} showToast={showToast} onChanged={onChanged} />
     </div>
   );
 }

@@ -927,6 +927,49 @@ async function initDb() {
   `);
   await run(`CREATE INDEX IF NOT EXISTS idx_sealed_lot_user ON sealed_lot(user_id, product_id)`);
 
+  // One row is one physical unit opened from a lot. The cost is the share of
+  // that lot allocated at opening time and does not change when quotes do.
+  // Pulls belong to that opening. A snapshot is optional and stays put when
+  // the current value changes. Neither value is written onto a collection card.
+  await run(`
+    CREATE TABLE IF NOT EXISTS sealed_opening (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES sealed_product(id) ON DELETE CASCADE,
+      lot_id INTEGER NOT NULL REFERENCES sealed_lot(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL,
+      cost_cents INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      opened_at TEXT,
+      notes TEXT NOT NULL DEFAULT '',
+      entry_complete INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_sealed_opening_user ON sealed_opening(user_id, product_id, id)`);
+  await run(`
+    CREATE TABLE IF NOT EXISTS sealed_pull (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      opening_id INTEGER NOT NULL REFERENCES sealed_opening(id) ON DELETE CASCADE,
+      card_id TEXT,
+      collection_id INTEGER REFERENCES collection(id) ON DELETE SET NULL,
+      name TEXT NOT NULL,
+      set_name TEXT NOT NULL DEFAULT '',
+      number TEXT NOT NULL DEFAULT '',
+      image_url TEXT NOT NULL DEFAULT '',
+      quantity INTEGER NOT NULL,
+      current_unit_cents INTEGER,
+      current_line_cents INTEGER,
+      opened_unit_cents INTEGER,
+      opened_line_cents INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_sealed_pull_opening ON sealed_pull(opening_id, id)`);
+
   // Which TCGCSV group a picked product came from, so a later quote refresh
   // knows the one set to download. Null on a product typed in by hand.
   const sealedCols = await all(`PRAGMA table_info(sealed_product)`);
