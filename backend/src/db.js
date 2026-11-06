@@ -964,11 +964,55 @@ async function initDb() {
       current_line_cents INTEGER,
       opened_unit_cents INTEGER,
       opened_line_cents INTEGER,
+      filed_ids TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
   await run(`CREATE INDEX IF NOT EXISTS idx_sealed_pull_opening ON sealed_pull(opening_id, id)`);
+  const pullCols = await all(`PRAGMA table_info(sealed_pull)`);
+  if (!pullCols.some(column => column.name === 'filed_ids')) {
+    await run(`ALTER TABLE sealed_pull ADD COLUMN filed_ids TEXT NOT NULL DEFAULT ''`);
+  }
+  // A pull filed by an opening created its collection rows in the same moment.
+  // Remember those ids so removing the opening can remove the copies. A card
+  // the user already owned and only linked has an older added_at and is left.
+  const untracked = await all(`
+    SELECT id, user_id, card_id, collection_id, quantity, created_at
+      FROM sealed_pull
+     WHERE collection_id IS NOT NULL AND IFNULL(filed_ids, '') = ''
+  `);
+  for (const pull of untracked) {
+    const anchor = await get(
+      `SELECT id FROM collection
+        WHERE id = ? AND user_id = ? AND IFNULL(purchase_price, 0) = 0
+          AND strftime('%s', added_at) = strftime('%s', ?)`,
+      [pull.collection_id, pull.user_id, pull.created_at]
+    );
+    if (!anchor) continue;
+    const ids = [anchor.id];
+    const wanted = Math.max(0, Number(pull.quantity) - 1);
+    if (pull.card_id && wanted > 0) {
+      const extras = await all(
+        `SELECT c.id FROM collection c
+          WHERE c.user_id = ? AND c.card_id = ? AND IFNULL(c.purchase_price, 0) = 0 AND c.id != ?
+            AND strftime('%s', c.added_at) = strftime('%s', ?)
+            AND NOT EXISTS (
+              SELECT 1 FROM sealed_pull other
+               WHERE other.id != ?
+                 AND (
+                   other.collection_id = c.id
+                   OR (',' || IFNULL(other.filed_ids, '') || ',') LIKE ('%,' || c.id || ',%')
+                 )
+            )
+          ORDER BY c.id
+          LIMIT ?`,
+        [pull.user_id, pull.card_id, anchor.id, pull.created_at, pull.id, wanted]
+      );
+      for (const extra of extras) ids.push(extra.id);
+    }
+    await run(`UPDATE sealed_pull SET filed_ids = ? WHERE id = ? AND IFNULL(filed_ids, '') = ''`, [ids.join(','), pull.id]);
+  }
 
   // Which TCGCSV group a picked product came from, so a later quote refresh
   // knows the one set to download. Null on a product typed in by hand.

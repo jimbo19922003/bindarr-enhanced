@@ -274,6 +274,50 @@ async function main() {
   const over = await send(port, 'POST', `/api/sealed/lots/${lotId}/openings`, admin.id, {});
   assert.strictEqual(over.status, 400);
 
+  const tracked = await db.get(`SELECT filed_ids FROM sealed_pull WHERE id = ?`, [fresh.id]);
+  assert.strictEqual(tracked.filed_ids, String(fresh.collection_id));
+  await db.run(`UPDATE sealed_pull SET filed_ids = '' WHERE id = ?`, [fresh.id]);
+  await db.initDb();
+  const remembered = await db.get(`SELECT filed_ids FROM sealed_pull WHERE id = ?`, [fresh.id]);
+  assert.strictEqual(remembered.filed_ids, String(fresh.collection_id));
+  const linkedRow = await db.get(`SELECT filed_ids FROM sealed_pull WHERE collection_id = ?`, [copy.lastID]);
+  assert.strictEqual(linkedRow.filed_ids, '');
+  const dropped = await send(port, 'DELETE', `/api/sealed/openings/${opening.id}/pulls/${fresh.id}`, admin.id);
+  assert.strictEqual(dropped.status, 200, JSON.stringify(dropped.body));
+  const afterPull = await db.get(
+    `SELECT COUNT(*) AS n FROM collection WHERE user_id = ? AND card_id = ?`,
+    [admin.id, 'tcgdex-en-open-hit']
+  );
+  assert.strictEqual(afterPull.n, 1);
+
+  const pair = await send(port, 'POST', `/api/sealed/openings/${opening.id}/pulls`, admin.id, {
+    card_id: 'tcgdex-en-open-hit',
+    quantity: 2,
+  });
+  assert.strictEqual(pair.status, 201, JSON.stringify(pair.body));
+  const pairPull = pair.body.opening.pulls.find(pull => pull.quantity === 2 && pull.card_id === 'tcgdex-en-open-hit');
+  const pairRow = await db.get(`SELECT filed_ids FROM sealed_pull WHERE id = ?`, [pairPull.id]);
+  assert.strictEqual(pairRow.filed_ids.split(',').length, 2);
+  const paired = await db.get(
+    `SELECT COUNT(*) AS n FROM collection WHERE user_id = ? AND card_id = ?`,
+    [admin.id, 'tcgdex-en-open-hit']
+  );
+  assert.strictEqual(paired.n, 3);
+
+  const undone = await send(port, 'DELETE', `/api/sealed/openings/${opening.id}`, admin.id);
+  assert.strictEqual(undone.status, 200, JSON.stringify(undone.body));
+  const kept = await db.get(`SELECT purchase_price FROM collection WHERE id = ?`, [copy.lastID]);
+  assert.strictEqual(kept.purchase_price, 4);
+  const left = await db.get(
+    `SELECT COUNT(*) AS n FROM collection WHERE user_id = ? AND card_id = ?`,
+    [admin.id, 'tcgdex-en-open-hit']
+  );
+  assert.strictEqual(left.n, 1);
+  const foreignGone = await db.get(`SELECT id FROM collection WHERE id = ?`, [skipped.collection_id]);
+  assert.strictEqual(foreignGone, undefined);
+  const sealedAgain = await send(port, 'GET', `/api/sealed/products/${productId}`, admin.id);
+  assert.strictEqual(sealedAgain.body.product.lots[0].remaining_quantity, 1);
+
   await new Promise(resolve => server.close(resolve));
   for (const suffix of ['', '-wal', '-shm']) {
     try { fs.unlinkSync(dbPath + suffix); } catch { /* already gone */ }

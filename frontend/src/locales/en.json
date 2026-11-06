@@ -1698,7 +1698,7 @@
   "sealed.markComplete": "The pull list is complete",
   "sealed.markIncomplete": "Mark entry incomplete",
   "sealed.removeOpening": "Remove opening",
-  "sealed.removeOpeningConfirm": "Put this unit back in the lot",
+  "sealed.removeOpeningConfirm": "Put this unit back and remove the cards it added",
   "sealed.removePull": "Remove",
   "sealed.findCard": "Find card",
   "sealed.noCardMatch": "No saved card matched. The name you typed is kept.",

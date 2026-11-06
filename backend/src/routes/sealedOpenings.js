@@ -125,15 +125,32 @@ async function resolvePull(user, raw, currency, fillPrice) {
   }
 }
 
+function filedIdsOf(row) {
+  return String((row && row.filed_ids) || '')
+    .split(',')
+    .map(part => Number(part))
+    .filter(id => Number.isSafeInteger(id) && id > 0);
+}
+
+async function releaseFiled(userId, rows) {
+  const ids = [];
+  for (const row of rows || []) ids.push(...filedIdsOf(row));
+  await forgetFiled(userId, ids);
+}
+
 async function insertPull(userId, openingId, pull) {
+  const filed = Array.isArray(pull.filedIds)
+    ? pull.filedIds.filter(id => Number.isSafeInteger(id) && id > 0)
+    : [];
   await db.run(
     `INSERT INTO sealed_pull (
        user_id, opening_id, card_id, collection_id, name, set_name, number, image_url, quantity,
-       current_unit_cents, current_line_cents, opened_unit_cents, opened_line_cents
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       current_unit_cents, current_line_cents, opened_unit_cents, opened_line_cents, filed_ids
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       userId, openingId, pull.cardId || null, pull.collectionId, pull.name, pull.setName, pull.number,
       pull.imageUrl, pull.quantity, pull.currentUnit, pull.currentLine, pull.openedUnit, pull.openedLine,
+      filed.join(','),
     ]
   );
 }
@@ -389,6 +406,11 @@ router.delete('/sealed/openings/:id', async (req, res) => {
         conflict.status = 409;
         throw conflict;
       }
+      const filed = await db.all(
+        `SELECT filed_ids FROM sealed_pull WHERE opening_id = ? AND user_id = ?`,
+        [opening.id, req.user.id]
+      );
+      await releaseFiled(req.user.id, filed);
       await db.run(
         `UPDATE sealed_lot
             SET remaining_quantity = ?, remaining_cost_cents = ?, updated_at = datetime('now')
@@ -467,11 +489,18 @@ router.put('/sealed/openings/:id/pulls/:pullId', async (req, res) => {
 
 router.delete('/sealed/openings/:id/pulls/:pullId', async (req, res) => {
   try {
-    const result = await db.run(
-      `DELETE FROM sealed_pull WHERE id = ? AND opening_id = ? AND user_id = ?`,
+    const existing = await db.get(
+      `SELECT id, filed_ids FROM sealed_pull WHERE id = ? AND opening_id = ? AND user_id = ?`,
       [req.params.pullId, req.params.id, req.user.id]
     );
-    if (!result.changes) return fail(res, 404, 'Pull not found');
+    if (!existing) return fail(res, 404, 'Pull not found');
+    await db.withTransaction(async () => {
+      await releaseFiled(req.user.id, [existing]);
+      await db.run(
+        `DELETE FROM sealed_pull WHERE id = ? AND opening_id = ? AND user_id = ?`,
+        [existing.id, req.params.id, req.user.id]
+      );
+    });
     const opening = await presentOwned(req.user.id, req.params.id);
     if (!opening) return fail(res, 404, 'Opening not found');
     res.json({ opening });
