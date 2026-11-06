@@ -1,8 +1,48 @@
 const express = require('express');
 const db = require('../db');
 const { resolveCardPrice, isVintageSet, parseSqliteUtc } = require('../utils/priceHelpers');
+const { summarizeHoldings, emptyHoldings, centsToMoney } = require('../utils/sealedInventory');
 
 const router = express.Router();
+
+// Remaining sealed stock for this user. Archived products and lots are out,
+// and a missing market quote stays null so it is not added as zero.
+async function sealedHoldingRows(userId) {
+  return db.all(
+    `SELECT l.remaining_quantity AS remainingQuantity,
+            l.remaining_cost_cents AS remainingCostCents,
+            l.currency AS currency,
+            p.market_price_cents AS marketPriceCents,
+            p.market_currency AS marketCurrency
+       FROM sealed_lot l
+       JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
+      WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL`,
+    [userId]
+  );
+}
+
+async function sealedFor(userId, game) {
+  if (game && game !== 'pokemon') return emptyHoldings();
+  return summarizeHoldings(await sealedHoldingRows(userId));
+}
+
+// One row per sealed product still on hand. Market cents stay null when the
+// quote is unknown so a missing price is not added as zero.
+async function sealedLines(userId, game) {
+  if (game && game !== 'pokemon') return [];
+  return db.all(
+    `SELECT p.id, p.name, p.set_id, p.set_name, p.image_url, p.product_type,
+            p.market_price_cents, p.market_currency,
+            SUM(l.remaining_quantity) AS remaining
+       FROM sealed_lot l
+       JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
+      WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL
+        AND l.remaining_quantity > 0
+      GROUP BY p.id
+      ORDER BY p.name`,
+    [userId]
+  );
+}
 
 // 7. Get Collection Statistics & Analytics
 router.get('/stats', async (req, res) => {
@@ -127,6 +167,37 @@ router.get('/stats', async (req, res) => {
       locationCounts[loc] = (locationCounts[loc] || 0) + qty;
     });
 
+    // Sealed value joins the set it names. A box is not a card, so the card
+    // count on that set stays put and only the market value moves.
+    const sealedLinesRows = await sealedLines(req.user.id, game);
+    const setIdByName = new Map();
+    for (const [id, bucket] of Object.entries(setCounts)) {
+      setIdByName.set(String(bucket.name || '').trim().toLowerCase(), id);
+    }
+    for (const line of sealedLinesRows) {
+      if (line.market_price_cents == null) continue;
+      const value = (line.market_price_cents * line.remaining) / 100;
+      const named = setIdByName.get(String(line.set_name || '').trim().toLowerCase());
+      const key = (line.set_id && setCounts[line.set_id]) ? line.set_id : (named || `sealed:${line.set_id || line.set_name || line.id}`);
+      if (!setCounts[key]) setCounts[key] = { name: line.set_name || 'Sealed', count: 0, value: 0 };
+      setCounts[key].value += value;
+    }
+    const topSealed = sealedLinesRows
+      .filter(line => line.market_price_cents != null && line.remaining > 0)
+      .map(line => ({
+        id: line.id,
+        name: line.name,
+        set_name: line.set_name || '',
+        image_url: line.image_url || '',
+        product_type: line.product_type,
+        market_price: centsToMoney(line.market_price_cents),
+        market_currency: line.market_currency || 'USD',
+        remaining: line.remaining,
+        line_value: parseFloat(((line.market_price_cents * line.remaining) / 100).toFixed(2)),
+      }))
+      .sort((a, b) => b.line_value - a.line_value)
+      .slice(0, 6);
+
     // Get top most valuable cards (scoped to user)
     const topValuableQuery = `
       SELECT
@@ -226,12 +297,19 @@ router.get('/stats', async (req, res) => {
     `, statsParams);
     const recentAdditions = recentRows.map(row => ({ ...row, price_trend: resolveCardPrice(row) }));
 
+    const avgCardValue = totalCards > 0 ? parseFloat((totalValue / totalCards).toFixed(2)) : 0.0;
+    // Sealed market value and remaining cost join the portfolio once. They are
+    // not collection rows, so a box is not also counted as the cards inside it.
+    // An unknown quote adds nothing. Cost is what is still sealed, not the
+    // original receipt after units have left the lot.
+    const sealedHoldings = await sealedFor(req.user.id, game);
+    totalValue += sealedHoldings.marketValue;
+    totalSpent += sealedHoldings.cost;
     const gainAbs = totalValue - totalSpent;
     const roi = {
       abs: parseFloat(gainAbs.toFixed(2)),
       pct: totalSpent > 0 ? parseFloat(((gainAbs / totalSpent) * 100).toFixed(1)) : null
     };
-    const avgCardValue = totalCards > 0 ? parseFloat((totalValue / totalCards).toFixed(2)) : 0.0;
 
     res.json({
       summary: {
@@ -261,7 +339,8 @@ router.get('/stats', async (req, res) => {
           pct: parseFloat((((valueNowFor30d - value30dAgo) / value30dAgo) * 100).toFixed(1))
         } : { available: false, abs: null, pct: null },
         change1y: { available: false, abs: null, pct: null },
-        change5y: { available: false, abs: null, pct: null }
+        change5y: { available: false, abs: null, pct: null },
+        sealed: sealedHoldings
       },
       types: Object.keys(typeCounts).map(name => ({ name, value: typeCounts[name] })),
       rarities: Object.keys(rarityCounts).map(name => ({ name, value: rarityCounts[name] })),
@@ -273,6 +352,7 @@ router.get('/stats', async (req, res) => {
       })).sort((a, b) => b.value - a.value).slice(0, 8),
       locations: Object.keys(locationCounts).map(name => ({ name, value: locationCounts[name] })),
       topValuable,
+      topSealed,
       recentAdditions,
       setProgress: setProgress.slice(0, 4)
     });
@@ -439,6 +519,13 @@ router.get('/stats/networth', async (req, res) => {
       byGame[g].value += value;
     }
 
+    const sealedHoldings = await sealedFor(req.user.id, game);
+    totalValue += sealedHoldings.marketValue;
+    totalSpent += sealedHoldings.cost;
+    if (sealedHoldings.marketValue > 0 || sealedHoldings.cost > 0) {
+      for (const code of sealedHoldings.currencies) currencies.add(code);
+    }
+
     const round = (n) => parseFloat(n.toFixed(2));
     res.json({
       totalValue: round(totalValue),
@@ -456,6 +543,7 @@ router.get('/stats/networth', async (req, res) => {
       // the same arithmetic the dashboard has always done. More than one entry
       // here means the total is mixed, which a consumer converting it needs to know.
       currencies: [...currencies].sort(),
+      sealed: sealedHoldings,
       asOf: new Date().toISOString(),
     });
   } catch (error) {

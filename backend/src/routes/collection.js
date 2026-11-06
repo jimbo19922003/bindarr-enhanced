@@ -11,6 +11,8 @@ const pokemonProvider = require('../utils/pokemonProvider');
 const psaApi = require('../psaApi');
 const gradedPrices = require('../gradedPrices');
 const cardApi = require('../utils/cardApi');
+const pokewallet = require('../pokewalletApi');
+const { matchSearchResults, extractQuote } = require('../utils/pokewalletMatch');
 const { searchLimiter } = require('../middleware/auth');
 const { resolveCardPrice, parseCardRow, recordPrice } = require('../utils/priceHelpers');
 const { parseSetList } = require('../utils/setQuery');
@@ -24,6 +26,36 @@ const router = express.Router();
 // Stamp each result with how many copies the user already owns, so browsing a
 // set shows what is already in the binder instead of inviting duplicate adds.
 // A collection-scope search already reports owned_qty from its own join.
+// One PokéWallet search for the words the person typed. Prices land on the
+// cards whose name, number, and set already agree. The search itself still
+// comes from the card catalog, so a PokéWallet miss still returns the cards.
+async function overlayPokewalletPrices(cards, query) {
+  if (!Array.isArray(cards) || cards.length === 0) return;
+  let fetched;
+  try {
+    fetched = await pokewallet.searchCatalog(query);
+  } catch {
+    return;
+  }
+  const results = fetched && fetched.body && Array.isArray(fetched.body.results) ? fetched.body.results : [];
+  const cardsOnly = results.filter(result => result && result.card_info && result.card_info.product_type === 'card');
+  if (cardsOnly.length === 0) return;
+  for (const card of cards) {
+    if (card.price_source && String(card.price_source).startsWith('pokewallet') && Number(card.price_trend) > 0) continue;
+    const decision = matchSearchResults(card, cardsOnly, cardsOnly.length);
+    if (decision.status !== 'matched') continue;
+    const quote = extractQuote(decision.matches[0]);
+    if (!quote.ok || !(quote.price_trend > 0)) continue;
+    card.price_trend = quote.price_trend;
+    card.price_normal = quote.price_normal;
+    card.price_holofoil = quote.price_holofoil;
+    card.price_reverse_holofoil = quote.price_reverse_holofoil;
+    card.price_1st_edition = quote.price_1st_edition;
+    card.price_currency = quote.currency;
+    card.price_source = quote.source;
+  }
+}
+
 async function attachOwnedQty(cards, userId) {
   if (!Array.isArray(cards) || cards.length === 0 || !userId) return;
   const ids = cards.map(c => c.id).filter(Boolean);
@@ -140,6 +172,10 @@ router.all('/search', searchLimiter, async (req, res) => {
     }
 
     await attachOwnedQty(cards, req.user.id);
+    if (game === 'pokemon' && !image) {
+      const overlayQuery = [name, set].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      if (overlayQuery.length >= 2) await overlayPokewalletPrices(cards, overlayQuery);
+    }
     // Header, not the body: every existing caller expects a bare array here.
     if (total != null) {
       res.set('X-Total-Count', String(total));
@@ -729,6 +765,19 @@ async function addCardToCollection(user, body) {
     // per language). Learn it here so the collection stays searchable in English
     // while displaying the name the card is actually printed with.
     card = await tcgdexApi.learnEnglishName(card);
+
+    // TCGdex often has no market price, so a card added from search was stored
+    // at zero until a later refresh. Ask PokéWallet once here, while the card
+    // is still the row we are about to file. A miss leaves the price unknown.
+    if (card.game === 'pokemon' || String(card.id || '').startsWith('tcgdex-')) {
+      try {
+        await pokewallet.priceUnpricedCard(card);
+        const refreshed = await db.get(`SELECT * FROM card_cache WHERE id = ?`, [card.id]);
+        if (refreshed) card = refreshed;
+      } catch (err) {
+        console.warn(`PokéWallet price on add skipped for ${card.id}: ${err.code || err.message}`);
+      }
+    }
 
     const effectiveGame = (req.body.game && req.body.game !== 'pokemon')
       ? req.body.game

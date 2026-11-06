@@ -286,9 +286,42 @@ empty set search may be followed by one name-only search for that same card.
 Anything uncertain is listed for confirmation and does not change a price.
 Requests stay inside the key's hourly and daily allowance, and one pass
 asks for at most 25 cards. An admin can save the key in Admin or Settings;
-a saved key is used instead of `POKEWALLET_API_KEY`. Card ids stay as
-they are. TCGCSV is still called the same way; this does not try to get
-around a block on that service.
+a saved key is used instead of `POKEWALLET_API_KEY`.
+
+## Sealed inventory
+
+Sealed products are a catalog, separate from the purchase lots that record
+what you actually bought. The same product can have several lots, each with
+its own quantity, purchase date, currency, and total cost in integer cents.
+The current market quote is stored on the product and does not overwrite the
+cost. A missing quote is unknown, not zero. Archive hides a product or a lot
+from the portfolio without deleting it.
+
+Remaining cost is the share of the original total still sealed. Integer
+division leaves the leftover cent on the units that are still there, so the
+cents add back to the original total. Costs in different currencies are not
+converted.
+
+The dashboard net worth adds the known market value of units still sealed,
+and total invested adds their remaining cost. The set chart adds that market
+value onto the set with the same name. Top sealed products are listed beside
+top cards. A sealed unit is not counted as a card. Opening a product and
+linking the pulls is not part of this screen. Import and export use CSV from
+the Collection side of the Sealed tab. A location name in the file must
+already exist for that user.
+
+Add and Collection are separate tabs. A search returns sealed products only.
+Click a product to open the add dialog, then enter that lot's quantity and
+cost. The results stay on screen, so the next product does not search again.
+The picture is
+TCGplayer's public product image for the id PokéWallet already returned. The
+search needs the PokéWallet key saved in Settings. A missing market price
+stays unknown. A product the search does not list is still entered by hand.
+
+Adding a Pokémon card prices it from PokéWallet when the catalog has no
+market price, so the copy is not stored as zero. The card list, pictures, and
+set names still come from the card catalog. One extra PokéWallet search fills
+prices on that result page when a key is saved. Magic and Lorcana are unchanged.
 
 ## Card scanning
 
