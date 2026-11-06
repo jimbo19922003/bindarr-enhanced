@@ -390,6 +390,26 @@ async function main() {
     assert.strictEqual(restored.price_source, 'tcgdex');
     assert.strictEqual(restored.price_trend, null);
 
+    await db.run(
+      `INSERT INTO card_cache (id, name, set_id, set_name, number, game, language, price_trend, price_currency, price_source)
+       VALUES ('tcgdex-en-30th-add', 'Mewtwo', '30th', 'Celebrations: Classic Collection', '003', 'pokemon', 'English', 0, 'EUR', 'tcgdex')`
+    );
+    hits.n = 0;
+    hits.queries = [];
+    const onAdd = await api.priceUnpricedCard(await db.get(`SELECT * FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-add']));
+    assert.strictEqual(onAdd.updated, 1);
+    assert.strictEqual((await db.get(`SELECT price_trend, price_source FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-add'])).price_trend, 12.5);
+    const already = await api.priceUnpricedCard(await db.get(`SELECT * FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-add']));
+    assert.strictEqual(already, null);
+    const savedKey = process.env.POKEWALLET_API_KEY;
+    process.env.POKEWALLET_API_KEY = '';
+    await db.run(`UPDATE card_cache SET price_trend = 0, price_holofoil = NULL, price_normal = NULL, price_reverse_holofoil = NULL, price_1st_edition = NULL, price_source = 'tcgdex' WHERE id = ?`, ['tcgdex-en-30th-add']);
+    const storedKey = await db.get(`SELECT pokewallet_api_key FROM app_settings WHERE id = 1`);
+    await db.run(`UPDATE app_settings SET pokewallet_api_key = '' WHERE id = 1`);
+    assert.strictEqual(await api.priceUnpricedCard(await db.get(`SELECT * FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-add'])), null);
+    process.env.POKEWALLET_API_KEY = savedKey;
+    await db.run(`UPDATE app_settings SET pokewallet_api_key = ? WHERE id = 1`, [storedKey.pokewallet_api_key || '']);
+
     const express = require('express');
     const { authenticateToken } = require('../src/middleware/auth');
     const app = express();

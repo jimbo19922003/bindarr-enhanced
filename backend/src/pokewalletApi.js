@@ -713,9 +713,44 @@ async function mapManually(cardId, providerCardId, clear) {
   }
 }
 
+// One card, at the moment it is added. A missing key or a rate limit leaves
+// the card unpriced instead of failing the add. The hourly and daily caps are
+// the same ones the collection refresh uses.
+async function priceUnpricedCard(card) {
+  if (!card) return null;
+  if (card.game && card.game !== 'pokemon' && !String(card.id || '').startsWith('tcgdex-')) return null;
+  if (hasPositivePrice(card)) return null;
+  if (!(await activeKey()).key) return null;
+  const report = emptyReport();
+  try {
+    await priceOne(card, report, false);
+  } catch (err) {
+    if (err && (err.code === 'rate_limited' || err.code === 'key_missing' || err.code === 'key_rejected' || err.code === 'plan_required')) {
+      return null;
+    }
+    throw err;
+  }
+  return report;
+}
+
 function resetForTests() {
   inflight = false;
   pending.clear();
+}
+
+// One documented search. Results include singles and sealed products; the
+// caller keeps the sealed ones. This shares the card-pricing cache and the
+// local hourly and daily caps, and it does not log the key.
+async function searchCatalog(query) {
+  const q = String(query || '').replace(/\s+/g, ' ').trim();
+  if (q.length < 2 || q.length > 100) throw fail('query_short');
+  return request('/search', { q, limit: 30, page: 1 });
+}
+
+async function fetchProduct(id) {
+  const text = String(id || '');
+  if (!/^(pk_[a-f0-9]{16,128}|[a-f0-9]{32,128})$/i.test(text)) throw fail('not_found');
+  return request(`/cards/${encodeURIComponent(text)}`);
 }
 
 module.exports = {
@@ -727,5 +762,8 @@ module.exports = {
   updateCollectionPrices,
   status,
   mapManually,
+  searchCatalog,
+  fetchProduct,
+  priceUnpricedCard,
   resetForTests,
 };
