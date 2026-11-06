@@ -713,6 +713,26 @@ async function mapManually(cardId, providerCardId, clear) {
   }
 }
 
+// One card, at the moment it is added. A missing key or a rate limit leaves
+// the card unpriced instead of failing the add. The hourly and daily caps are
+// the same ones the collection refresh uses.
+async function priceUnpricedCard(card) {
+  if (!card) return null;
+  if (card.game && card.game !== 'pokemon' && !String(card.id || '').startsWith('tcgdex-')) return null;
+  if (hasPositivePrice(card)) return null;
+  if (!(await activeKey()).key) return null;
+  const report = emptyReport();
+  try {
+    await priceOne(card, report, false);
+  } catch (err) {
+    if (err && (err.code === 'rate_limited' || err.code === 'key_missing' || err.code === 'key_rejected' || err.code === 'plan_required')) {
+      return null;
+    }
+    throw err;
+  }
+  return report;
+}
+
 function resetForTests() {
   inflight = false;
   pending.clear();
@@ -744,5 +764,6 @@ module.exports = {
   mapManually,
   searchCatalog,
   fetchProduct,
+  priceUnpricedCard,
   resetForTests,
 };

@@ -173,76 +173,117 @@ router.get('/sealed/products/:id', async (req, res) => {
   }
 });
 
+// Writes one product and its lot. The caller owns the transaction, so a batch
+// of products bought together either all land or none of them do.
+async function writeProduct(userId, body) {
+  const product = sealed.normalizeProduct(body);
+  const lot = body.lot ? sealed.normalizeLot(body.lot) : null;
+  const categoryId = optionalCatalogId(body.catalog_category_id);
+  const groupId = optionalCatalogId(body.catalog_group_id);
+  const source = quoteSource(body, product);
+  const quotedAt = product.market_price_cents == null ? null : new Date().toISOString();
+  if (lot && lot.location_id && !(await locationFor(userId, lot.location_id))) {
+    throw new TypeError('Storage location not found');
+  }
+  if (product.provider && product.provider_product_id) {
+    const existing = await db.get(
+      `SELECT * FROM sealed_product WHERE user_id = ? AND provider = ? AND provider_product_id = ?`,
+      [userId, product.provider, product.provider_product_id]
+    );
+    if (existing) {
+      if (lot) await insertLot(userId, existing.id, lot);
+      if (existing.market_source !== 'manual') {
+        await db.run(
+          `UPDATE sealed_product
+              SET image_url = ?, catalog_category_id = ?, catalog_group_id = ?,
+                  market_price_cents = ?, market_currency = ?, market_quoted_at = ?, market_source = ?,
+                  updated_at = datetime('now')
+            WHERE id = ? AND user_id = ?`,
+          [
+            product.image_url || existing.image_url, categoryId, groupId,
+            product.market_price_cents, product.market_currency, quotedAt, source,
+            existing.id, userId,
+          ]
+        );
+      } else if (product.image_url) {
+        await db.run(
+          `UPDATE sealed_product SET image_url = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+          [product.image_url, existing.id, userId]
+        );
+      }
+      return existing.id;
+    }
+  }
+  const created = await db.run(
+    `INSERT INTO sealed_product (
+       user_id, name, product_type, language, set_id, set_name, image_url,
+       provider, provider_product_id, market_price_cents, market_currency,
+       market_quoted_at, market_source, catalog_category_id, catalog_group_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId, product.name, product.product_type, product.language, product.set_id, product.set_name,
+      product.image_url, product.provider, product.provider_product_id, product.market_price_cents,
+      product.market_currency, quotedAt, source, categoryId, groupId,
+    ]
+  );
+  if (lot) await insertLot(userId, created.lastID, lot);
+  return created.lastID;
+}
+
+async function presentOwned(userId, id) {
+  const stored = await ownedProduct(userId, id);
+  const lots = await lotsFor(userId, [id]);
+  return presentProduct(stored, lots.get(id) || []);
+}
+
 router.post('/sealed/products', async (req, res) => {
   try {
-    const body = req.body || {};
-    const product = sealed.normalizeProduct(body);
-    const lotInput = body.lot;
-    const lot = lotInput ? sealed.normalizeLot(lotInput) : null;
-    const categoryId = optionalCatalogId(body.catalog_category_id);
-    const groupId = optionalCatalogId(body.catalog_group_id);
-    const source = quoteSource(body, product);
-    const quotedAt = product.market_price_cents == null ? null : new Date().toISOString();
-    if (lot && lot.location_id && !(await locationFor(req.user.id, lot.location_id))) {
-      return fail(res, 400, 'Storage location not found');
-    }
-    if (product.provider && product.provider_product_id) {
-      const existing = await db.get(
-        `SELECT * FROM sealed_product WHERE user_id = ? AND provider = ? AND provider_product_id = ?`,
-        [req.user.id, product.provider, product.provider_product_id]
-      );
-      if (existing) {
-        await db.withTransaction(async () => {
-          if (lot) await insertLot(req.user.id, existing.id, lot);
-          if (existing.market_source !== 'manual') {
-            await db.run(
-              `UPDATE sealed_product
-                  SET image_url = ?, catalog_category_id = ?, catalog_group_id = ?,
-                      market_price_cents = ?, market_currency = ?, market_quoted_at = ?, market_source = ?,
-                      updated_at = datetime('now')
-                WHERE id = ? AND user_id = ?`,
-              [
-                product.image_url || existing.image_url, categoryId, groupId,
-                product.market_price_cents, product.market_currency, quotedAt, source,
-                existing.id, req.user.id,
-              ]
-            );
-          } else if (product.image_url) {
-            await db.run(
-              `UPDATE sealed_product SET image_url = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
-              [product.image_url, existing.id, req.user.id]
-            );
-          }
-        });
-        const stored = await ownedProduct(req.user.id, existing.id);
-        const lots = await lotsFor(req.user.id, [existing.id]);
-        return res.status(200).json({ product: presentProduct(stored, lots.get(existing.id) || []), existed: true });
-      }
-    }
-    const id = await db.withTransaction(async () => {
-      const created = await db.run(
-        `INSERT INTO sealed_product (
-           user_id, name, product_type, language, set_id, set_name, image_url,
-           provider, provider_product_id, market_price_cents, market_currency,
-           market_quoted_at, market_source, catalog_category_id, catalog_group_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          req.user.id, product.name, product.product_type, product.language, product.set_id, product.set_name,
-          product.image_url, product.provider, product.provider_product_id, product.market_price_cents,
-          product.market_currency, quotedAt, source, categoryId, groupId,
-        ]
-      );
-      if (lot) await insertLot(req.user.id, created.lastID, lot);
-      return created.lastID;
-    });
-    const stored = await ownedProduct(req.user.id, id);
-    const lots = await lotsFor(req.user.id, [id]);
-    res.status(201).json({ product: presentProduct(stored, lots.get(id) || []) });
+    const id = await db.withTransaction(() => writeProduct(req.user.id, req.body || {}));
+    const product = await presentOwned(req.user.id, id);
+    const existed = product.lots.length > ((req.body && req.body.lot) ? 1 : 0);
+    res.status(existed ? 200 : 201).json({ product, existed });
   } catch (err) {
     if (err instanceof TypeError || err instanceof RangeError) return fail(res, 400, err.message);
     if (String(err.message || '').includes('UNIQUE')) return fail(res, 409, 'A product with that provider id already exists');
     console.error('Failed to create sealed product', err);
     fail(res, 500, 'Failed to create sealed product');
+  }
+});
+
+// Several products from one search. Shared purchase date, currency, and
+// location apply to every line. Each line keeps its own quantity and cost.
+router.post('/sealed/products/batch', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const items = body.items;
+    if (!Array.isArray(items) || items.length === 0) return fail(res, 400, 'Choose at least one product');
+    if (items.length > 30) return fail(res, 400, 'Save at most 30 products at a time');
+    const shared = body.shared || {};
+    const ids = await db.withTransaction(async () => {
+      const written = [];
+      for (const item of items) {
+        written.push(await writeProduct(req.user.id, {
+          ...item,
+          lot: {
+            quantity: item.quantity,
+            total_cost: item.total_cost,
+            currency: item.currency || shared.currency,
+            purchased_at: item.purchased_at || shared.purchased_at,
+            location_id: item.location_id == null || item.location_id === '' ? shared.location_id : item.location_id,
+            notes: item.notes || '',
+          },
+        }));
+      }
+      return written;
+    });
+    const products = [];
+    for (const id of ids) products.push(await presentOwned(req.user.id, id));
+    res.status(201).json({ products });
+  } catch (err) {
+    if (err instanceof TypeError || err instanceof RangeError) return fail(res, 400, err.message);
+    if (String(err.message || '').includes('UNIQUE')) return fail(res, 409, 'A product with that provider id already exists');
+    console.error('Failed to save sealed products', err);
+    fail(res, 500, 'Failed to save sealed products');
   }
 });
 

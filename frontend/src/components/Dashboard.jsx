@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
-import { TrendingUp, Coins, Library, Trophy, Plus, ArrowUpRight } from 'lucide-react';
+import { TrendingUp, Coins, Library, Trophy, Plus, ArrowUpRight, Package } from 'lucide-react';
 import { getCardDisplayName } from '../utils/langHelper';
 import { priceText, currencySymbol } from '../utils/formatPrice';
 import { getPrintingBadgeLabel, getPrintingBadgeStyle } from '../utils/cardPrinting';
@@ -165,7 +165,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
     );
   }
 
-  const { summary, types, rarities, sets, topValuable, recentAdditions = [], setProgress } = stats;
+  const { summary, types, rarities, sets, topValuable, topSealed = [], recentAdditions = [], setProgress } = stats;
 
   // Match type name to its color case-insensitively; fall back to a distinct
   // palette color by index so slices are never all the same gray.
@@ -342,6 +342,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
           {/* Card Value by Set Chart */}
           <div className="glass-panel">
             <h3 className="chart-title">{t('dash.valueBySet')}</h3>
+            <p style={{ margin: '-0.35rem 0 0.75rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{t('dash.valueBySetHint')}</p>
             <div className="chart-container">
               {sets.length === 0 ? (
                 <div className="chart-empty">{t('dash.noSetData')}</div>
@@ -451,6 +452,53 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
         {/* Right Column: Mini Tables & Lists */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           
+          {summary.sealed && summary.sealed.remainingUnits > 0 && (
+            <div className="glass-panel" style={{ padding: '1rem 1.25rem' }}>
+              <h3 className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}>
+                <Package size={18} style={{ color: 'var(--accent-yellow)' }} />
+                {t('dash.sealedTitle')}
+              </h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  <div>{t('dash.sealedOnHand', { count: summary.sealed.remainingUnits })}</div>
+                  <div>{t('dash.sealedMarket', { value: `${currencySymbol()}${money(summary.sealed.marketValue)}` })}</div>
+                  {summary.sealed.unpricedUnits > 0 && (
+                    <div>{t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits })}</div>
+                  )}
+                </div>
+                <button className="btn btn-secondary" type="button" onClick={() => onNavigate && onNavigate('sealed')}>{t('dash.openSealed')}</button>
+              </div>
+            </div>
+          )}
+
+          {topSealed.length > 0 && (
+            <div className="glass-panel" style={{ flex: 1 }}>
+              <h3 className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Package size={18} style={{ color: 'var(--accent-yellow)' }} />
+                {t('dash.topSealed')}
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1.25rem' }}>
+                {topSealed.map(product => (
+                  <div key={product.id} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)' }}>
+                    {product.image_url ? (
+                      <img src={product.image_url} alt="" style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '5px' }} />
+                    ) : (
+                      <div style={{ width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Package size={22} /></div>
+                    )}
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{product.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{product.set_name}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: 800, color: 'var(--accent-yellow)', fontSize: '0.95rem' }}>{product.market_currency} {product.market_price}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('dash.sealedLine', { count: product.remaining, value: `${product.market_currency} ${product.line_value.toFixed(2)}` })}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Top Valuable Cards */}
           <div className="glass-panel" style={{ flex: 1 }}>
             <h3 className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

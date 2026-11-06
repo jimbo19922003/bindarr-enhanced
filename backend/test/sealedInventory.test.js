@@ -173,6 +173,28 @@ async function main() {
   assert.strictEqual(worth.body.sealed.remainingUnits, 3);
   assert.strictEqual(worth.body.totalCards, 1);
 
+  const portfolio = await send(port, 'GET', '/api/stats', admin.id);
+  assert.strictEqual(portfolio.status, 200);
+  const prismatic = portfolio.body.sets.find(row => row.name === 'Prismatic Evolutions');
+  assert.ok(prismatic, JSON.stringify(portfolio.body.sets));
+  assert.strictEqual(prismatic.value, 76.02);
+  assert.strictEqual(portfolio.body.topSealed.length, 1);
+  assert.strictEqual(portfolio.body.topSealed[0].name, 'Prismatic Evolutions ETB');
+  assert.strictEqual(portfolio.body.topSealed[0].remaining, 2);
+  assert.strictEqual(portfolio.body.topSealed[0].line_value, 76.02);
+  assert.ok(!portfolio.body.topSealed.some(row => row.name === 'Booster box'));
+
+  const beforeBatch = (await send(port, 'GET', '/api/sealed/products', admin.id)).body.products.length;
+  const rolledBack = await send(port, 'POST', '/api/sealed/products/batch', admin.id, {
+    shared: { currency: 'USD', purchased_at: '2026-11-03' },
+    items: [
+      { name: 'Kept tin', product_type: 'tin', quantity: 1, total_cost: '5.00' },
+      { name: '', product_type: 'tin', quantity: 1, total_cost: '5.00' },
+    ],
+  });
+  assert.strictEqual(rolledBack.status, 400);
+  assert.strictEqual((await send(port, 'GET', '/api/sealed/products', admin.id)).body.products.length, beforeBatch);
+
   const stats = await send(port, 'GET', '/api/stats?game=mtg', admin.id);
   assert.strictEqual(stats.status, 200);
   assert.strictEqual(stats.body.summary.sealed.remainingUnits, 0);
@@ -183,6 +205,18 @@ async function main() {
   // ETB quotes leave the portfolio. The unpriced box remains, still unpriced.
   assert.strictEqual(afterArchive.body.sealed.remainingUnits, 1);
   assert.strictEqual(afterArchive.body.totalValue, 10);
+
+  const batch = await send(port, 'POST', '/api/sealed/products/batch', admin.id, {
+    shared: { currency: 'USD', purchased_at: '2026-11-03' },
+    items: [
+      { name: 'Hidden Fates Tin', product_type: 'tin', set_name: 'Hidden Fates', quantity: 1, total_cost: '10.00', market_price: '12.00', market_currency: 'USD' },
+      { name: 'Hidden Fates Tin Display', product_type: 'other', set_name: 'Hidden Fates', quantity: 2, total_cost: '20.00', market_price: '30.00', market_currency: 'USD' },
+    ],
+  });
+  assert.strictEqual(batch.status, 201, JSON.stringify(batch.body));
+  assert.strictEqual(batch.body.products.length, 2);
+  assert.strictEqual(batch.body.products[0].lots[0].purchased_at, '2026-11-03');
+  assert.strictEqual(batch.body.products[1].lots[0].total_cost, '20.00');
 
   const csv = [
     'name,product_type,language,set_name,quantity,total_cost,currency,market_price,market_currency',

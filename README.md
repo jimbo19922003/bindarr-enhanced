@@ -303,17 +303,24 @@ cents add back to the original total. Costs in different currencies are not
 converted.
 
 The dashboard net worth adds the known market value of units still sealed,
-and total invested adds their remaining cost. Cards are unchanged. Opening a
-product and linking the pulls is not part of this screen. Import and export
-use CSV from the Sealed tab. A location name in the file must already exist
-for that user.
+and total invested adds their remaining cost. The set chart adds that market
+value onto the set with the same name. Top sealed products are listed beside
+top cards. A sealed unit is not counted as a card. Opening a product and
+linking the pulls is not part of this screen. Import and export use CSV from
+the Collection side of the Sealed tab. A location name in the file must
+already exist for that user.
 
-Adding a product searches PokéWallet the same way a card search does, and
-keeps only sealed products. A match shows the picture and the USD market
-price, then Quick Add records the purchase lot. The picture is TCGplayer's
-public product image for the id PokéWallet already returned. The search needs
-the PokéWallet key saved in Settings. A missing market price stays unknown.
-A product the search does not list is still entered by hand.
+Add and Collection are separate tabs. A search returns sealed products only.
+Select every product from that search, enter each lot's quantity and cost,
+and save them together. That is still one PokéWallet search. The picture is
+TCGplayer's public product image for the id PokéWallet already returned. The
+search needs the PokéWallet key saved in Settings. A missing market price
+stays unknown. A product the search does not list is still entered by hand.
+
+Adding a Pokémon card prices it from PokéWallet when the catalog has no
+market price, so the copy is not stored as zero. The card list, pictures, and
+set names still come from the card catalog. One extra PokéWallet search fills
+prices on that result page when a key is saved. Magic and Lorcana are unchanged.
 
 ## Card scanning
 

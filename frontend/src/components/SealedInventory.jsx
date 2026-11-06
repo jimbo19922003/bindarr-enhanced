@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, ArchiveRestore, Download, Package, Plus, Search } from 'lucide-react';
+import { Archive, ArchiveRestore, Check, Download, Package, Plus, Search } from 'lucide-react';
 import { useT } from '../utils/i18n';
 
 const TYPES = ['booster_box', 'booster_pack', 'etb', 'tin', 'collection_box', 'blister', 'other'];
@@ -48,8 +48,9 @@ function SealedInventory({ showToast }) {
   const [catalogResults, setCatalogResults] = useState([]);
   const [catalogError, setCatalogError] = useState('');
   const [catalogBusy, setCatalogBusy] = useState(false);
-  const [pick, setPick] = useState(null);
-  const [quick, setQuick] = useState({ quantity: '1', total_cost: '', currency: 'USD', purchased_at: '', location_id: '' });
+  const [pane, setPane] = useState('add');
+  const [picked, setPicked] = useState({});
+  const [shared, setShared] = useState({ currency: 'USD', purchased_at: '', location_id: '' });
 
   const typeLabel = (value) => t(`sealed.type.${value}`);
 
@@ -219,49 +220,62 @@ function SealedInventory({ showToast }) {
     }
   };
 
-  const chooseProduct = (result) => {
-    setPick(result);
-    setQuick({ quantity: '1', total_cost: '', currency: 'USD', purchased_at: '', location_id: '' });
+  const resultKey = (result) => `${result.provider}:${result.provider_product_id}`;
+
+  const togglePick = (result) => {
+    const key = resultKey(result);
+    setPicked(current => {
+      if (current[key]) {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return { ...current, [key]: { result, quantity: '1', total_cost: '' } };
+    });
     setForm(null);
   };
 
-  const savePick = async (event) => {
+  const saveSelected = async (event) => {
     event.preventDefault();
-    const body = {
-      name: pick.name,
-      product_type: pick.product_type,
-      language: pick.language || 'English',
-      set_id: pick.set_id || '',
-      set_name: pick.set_name || '',
-      image_url: pick.image_url || '',
-      market_price: pick.market_price || '',
-      market_currency: pick.market_currency || 'USD',
-      market_source: pick.market_source || '',
-      provider: pick.provider || '',
-      provider_product_id: pick.provider_product_id || '',
-      lot: {
-        quantity: Number(quick.quantity),
-        total_cost: quick.total_cost,
-        currency: quick.currency,
-        purchased_at: quick.purchased_at,
-        location_id: quick.location_id === '' ? null : Number(quick.location_id),
-      },
-    };
-    const response = await fetch('/api/sealed/products', {
+    const items = Object.values(picked).map(item => ({
+      name: item.result.name,
+      product_type: item.result.product_type,
+      language: item.result.language || 'English',
+      set_id: item.result.set_id || '',
+      set_name: item.result.set_name || '',
+      image_url: item.result.image_url || '',
+      market_price: item.result.market_price || '',
+      market_currency: item.result.market_currency || 'USD',
+      market_source: item.result.market_source || '',
+      provider: item.result.provider || '',
+      provider_product_id: item.result.provider_product_id || '',
+      quantity: Number(item.quantity),
+      total_cost: item.total_cost,
+    }));
+    const response = await fetch('/api/sealed/products/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        shared: {
+          currency: shared.currency,
+          purchased_at: shared.purchased_at,
+          location_id: shared.location_id === '' ? null : Number(shared.location_id),
+        },
+        items,
+      }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       showToast(data.error || t('sealed.errSave'), 'error');
       return;
     }
-    setPick(null);
-    setSelectedId(data.product.id);
+    setPicked({});
+    setPane('collection');
     showToast(t('sealed.saved'), 'success');
     refresh();
   };
+
+  const pickedList = Object.entries(picked);
 
   const refreshQuote = async (product) => {
     const response = await fetch(`/api/sealed/products/${product.id}/quote`, { method: 'POST' });
@@ -331,15 +345,22 @@ function SealedInventory({ showToast }) {
           </h2>
           <p style={{ margin: '0.35rem 0 0', color: 'var(--text-secondary)', maxWidth: '40rem' }}>{t('sealed.intro')}</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="btn btn-secondary" type="button" onClick={exportCsv}>
-            <Download size={16} /> {t('sealed.export')}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div className="sub-nav-tabs" style={{ width: '100%', maxWidth: '420px', margin: 0 }}>
+          <button type="button" className={`sub-nav-tab ${pane === 'add' ? 'active' : ''}`} onClick={() => setPane('add')}>
+            <Search size={18} />
+            <span>{t('sealed.tabAdd')}</span>
           </button>
-          <button className="btn btn-primary" type="button" onClick={() => { setForm(emptyForm()); setPick(null); setSelectedId(null); }}>
-            <Plus size={16} /> {t('sealed.add')}
+          <button type="button" className={`sub-nav-tab ${pane === 'collection' ? 'active' : ''}`} onClick={() => setPane('collection')}>
+            <Package size={18} />
+            <span>{t('sealed.tabCollection')}</span>
           </button>
         </div>
       </div>
+
+      {pane === 'add' && (<>
 
       <div className="glass-panel" style={{ padding: '1.25rem' }}>
         <form onSubmit={searchCatalog} style={{ display: 'grid', gap: '0.75rem' }}>
@@ -377,6 +398,7 @@ function SealedInventory({ showToast }) {
           </button>
         </form>
         <p style={{ margin: '0.75rem 0 0', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.catalogHint')}</p>
+        <p style={{ margin: '0.35rem 0 0', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.selectHint')}</p>
       </div>
 
       {catalogError && (
@@ -387,13 +409,16 @@ function SealedInventory({ showToast }) {
 
       {catalogResults.length > 0 && (
         <div className="card-grid">
-          {catalogResults.map(result => (
+          {catalogResults.map(result => {
+            const key = resultKey(result);
+            const chosen = Boolean(picked[key]);
+            return (
             <div
-              key={`${result.provider}-${result.provider_product_id}`}
+              key={key}
               className="tcg-card"
-              onClick={() => chooseProduct(result)}
+              onClick={() => togglePick(result)}
             >
-              <div className="tcg-card-inner">
+              <div className="tcg-card-inner" style={chosen ? { outline: '3px solid var(--accent-red)', outlineOffset: '2px' } : undefined}>
                 {result.image_url ? (
                   <img src={result.image_url} alt="" className="tcg-card-image" style={{ objectFit: 'contain', background: 'var(--bg-secondary)' }} />
                 ) : (
@@ -401,9 +426,11 @@ function SealedInventory({ showToast }) {
                     <Package size={28} />
                   </div>
                 )}
+                <div style={{ position: 'absolute', top: '8px', left: '8px', width: '22px', height: '22px', borderRadius: '50%', background: chosen ? 'var(--accent-red)' : 'rgba(0,0,0,0.6)', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+                  {chosen ? <Check size={12} /> : null}
+                </div>
                 <div style={{ position: 'absolute', bottom: '8px', right: '8px', background: 'rgba(0,0,0,0.85)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border-glass-hover)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Plus size={10} style={{ color: 'var(--accent-red)' }} />
-                  <span style={{ fontSize: '0.65rem', fontWeight: 700 }}>{t('search.quickAdd')}</span>
+                  <span style={{ fontSize: '0.65rem', fontWeight: 700 }}>{chosen ? t('sealed.selected') : t('sealed.select')}</span>
                 </div>
               </div>
               <div className="tcg-card-info">
@@ -414,57 +441,46 @@ function SealedInventory({ showToast }) {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {pick && (
-        <form className="glass-panel" style={{ padding: '1rem', display: 'grid', gap: '0.7rem' }} onSubmit={savePick}>
-          <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
-            {pick.image_url && <img src={pick.image_url} alt="" style={{ width: '4.5rem', height: '4.5rem', objectFit: 'contain' }} />}
-            <div>
-              <strong>{pick.name}</strong>
-              <div style={{ color: 'var(--text-secondary)' }}>
-                {typeLabel(pick.product_type)}{pick.set_name ? ` · ${pick.set_name}` : ''}
-                {' · '}
-                {pick.market_price ? `${pick.market_currency} ${pick.market_price}` : t('sealed.marketUnknown')}
-              </div>
+      {pickedList.length > 0 && (
+        <form className="glass-panel" style={{ padding: '1rem', display: 'grid', gap: '0.7rem', position: 'sticky', bottom: '0.5rem', zIndex: 30 }} onSubmit={saveSelected}>
+          <strong>{t('sealed.selectedCount', { count: pickedList.length })}</strong>
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{t('sealed.selectedHint')}</p>
+          {pickedList.map(([key, item]) => (
+            <div key={key} style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 1fr) 6rem 8rem', gap: '0.5rem', alignItems: 'center' }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <strong>{item.result.name}</strong>
+                <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                  {item.result.market_price ? `${item.result.market_currency} ${item.result.market_price}` : t('sealed.marketUnknown')}
+                </span>
+              </span>
+              <input className="input-control" required type="number" min="1" value={item.quantity} onChange={e => setPicked(current => ({ ...current, [key]: { ...item, quantity: e.target.value } }))} aria-label={t('sealed.quantity')} />
+              <input className="input-control" required value={item.total_cost} onChange={e => setPicked(current => ({ ...current, [key]: { ...item, total_cost: e.target.value } }))} placeholder={t('sealed.cost')} aria-label={t('sealed.cost')} />
             </div>
-          </div>
+          ))}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.6rem' }}>
-            <input className="input-control" required type="number" min="1" value={quick.quantity} onChange={e => setQuick({ ...quick, quantity: e.target.value })} aria-label={t('sealed.quantity')} />
-            <input className="input-control" required value={quick.total_cost} onChange={e => setQuick({ ...quick, total_cost: e.target.value })} placeholder={t('sealed.cost')} aria-label={t('sealed.cost')} />
-            <input className="input-control" required value={quick.currency} onChange={e => setQuick({ ...quick, currency: e.target.value.toUpperCase() })} aria-label={t('sealed.currency')} maxLength={3} />
-            <input className="input-control" type="date" value={quick.purchased_at} onChange={e => setQuick({ ...quick, purchased_at: e.target.value })} aria-label={t('sealed.purchased')} />
-            <select className="select-control" value={quick.location_id} onChange={e => setQuick({ ...quick, location_id: e.target.value })} aria-label={t('sealed.location')}>
+            <input className="input-control" required value={shared.currency} onChange={e => setShared({ ...shared, currency: e.target.value.toUpperCase() })} aria-label={t('sealed.currency')} maxLength={3} />
+            <input className="input-control" type="date" value={shared.purchased_at} onChange={e => setShared({ ...shared, purchased_at: e.target.value })} aria-label={t('sealed.purchased')} />
+            <select className="select-control" value={shared.location_id} onChange={e => setShared({ ...shared, location_id: e.target.value })} aria-label={t('sealed.location')}>
               <option value="">{t('sealed.noLocation')}</option>
               {locations.map(location => <option key={location.id} value={location.id}>{location.name}</option>)}
             </select>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button className="btn btn-primary" type="submit">{t('sealed.save')}</button>
-            <button className="btn btn-secondary" type="button" onClick={() => setPick(null)}>{t('sealed.cancel')}</button>
+            <button className="btn btn-primary" type="submit">{t('sealed.saveSelected')}</button>
+            <button className="btn btn-secondary" type="button" onClick={() => setPicked({})}>{t('sealed.clearSelected')}</button>
           </div>
         </form>
       )}
 
-      <div className="glass-panel" style={{ padding: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <input className="input-control"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') refresh({ query }); }}
-          placeholder={t('sealed.search')}
-          aria-label={t('sealed.search')}
-          style={{ flex: '1 1 12rem' }}
-        />
-        <select className="select-control" value={type} onChange={e => { setType(e.target.value); refresh({ type: e.target.value }); }} aria-label={t('sealed.type')}>
-          <option value="">{t('sealed.allTypes')}</option>
-          {TYPES.map(value => <option key={value} value={value}>{typeLabel(value)}</option>)}
-        </select>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-secondary)' }}>
-          <input type="checkbox" checked={showArchived} onChange={e => { setShowArchived(e.target.checked); refresh({ showArchived: e.target.checked }); }} />
-          {t('sealed.showArchived')}
-        </label>
+      <div>
+        <button className="btn btn-secondary" type="button" onClick={() => { setForm(form ? null : emptyForm()); setPicked({}); }}>
+          <Plus size={16} /> {t('sealed.add')}
+        </button>
       </div>
 
       {form && (
@@ -507,8 +523,34 @@ function SealedInventory({ showToast }) {
           </div>
         </form>
       )}
+      </>)}
 
-      {products.length === 0 && !form && (
+      {pane === 'collection' && (<>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-secondary" type="button" onClick={exportCsv}>
+          <Download size={16} /> {t('sealed.export')}
+        </button>
+      </div>
+      <div className="glass-panel" style={{ padding: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <input className="input-control"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') refresh({ query }); }}
+          placeholder={t('sealed.search')}
+          aria-label={t('sealed.search')}
+          style={{ flex: '1 1 12rem' }}
+        />
+        <select className="select-control" value={type} onChange={e => { setType(e.target.value); refresh({ type: e.target.value }); }} aria-label={t('sealed.type')}>
+          <option value="">{t('sealed.allTypes')}</option>
+          {TYPES.map(value => <option key={value} value={value}>{typeLabel(value)}</option>)}
+        </select>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-secondary)' }}>
+          <input type="checkbox" checked={showArchived} onChange={e => { setShowArchived(e.target.checked); refresh({ showArchived: e.target.checked }); }} />
+          {t('sealed.showArchived')}
+        </label>
+      </div>
+
+      {products.length === 0 && (
         <div className="glass-panel" style={{ padding: '1.5rem', color: 'var(--text-secondary)' }}>{t('sealed.empty')}</div>
       )}
 
@@ -566,6 +608,7 @@ function SealedInventory({ showToast }) {
           <button className="btn btn-secondary" type="button" onClick={importCsv} disabled={!csv.trim()}>{t('sealed.import')}</button>
         </div>
       </div>
+      </>)}
     </div>
   );
 }
