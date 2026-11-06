@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
 
 const SORTS = ['name', 'cost', 'knownValue', 'openedValue', 'sinceOpen', 'difference', 'recoveryPercent'];
 
@@ -11,6 +11,17 @@ function signed(currency, amount, money) {
 
 function tone(amount) {
   return (Number(amount) || 0) >= 0 ? 'var(--type-grass)' : '#ef4444';
+}
+
+function returnPercent(row) {
+  if (!row || !(row.cost > 0) || row.difference == null) return null;
+  return parseFloat(((row.difference / row.cost) * 100).toFixed(1));
+}
+
+function signedPct(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return `${n < 0 ? '−' : '+'}${Math.abs(n).toFixed(1)}%`;
 }
 
 function compareRows(sort) {
@@ -32,6 +43,7 @@ function OpenedPerformance({ performance, t, money }) {
   const [currency, setCurrency] = useState(reports[0] ? reports[0].currency : '');
   const [group, setGroup] = useState('set');
   const [sort, setSort] = useState({ key: 'recoveryPercent', dir: 'desc' });
+  const [measure, setMeasure] = useState('percent');
   if (!reports.length) return null;
 
   const active = reports.find(report => report.currency === currency) || reports[0];
@@ -41,10 +53,23 @@ function OpenedPerformance({ performance, t, money }) {
     if (group === 'type') return t(`sealed.type.${row.name}`) === `sealed.type.${row.name}` ? row.name : t(`sealed.type.${row.name}`);
     return row.name || t('dash.openedUnspecified');
   };
-  const ranked = active.sets.slice().sort((a, b) => b.difference - a.difference || (b.recoveryPercent || 0) - (a.recoveryPercent || 0));
-  const best = ranked[0];
-  const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
-  const chartRows = ranked.slice(0, 8).map(row => ({ name: row.name || t('dash.openedUnspecified'), difference: row.difference }));
+  const score = (row) => (measure === 'percent' ? returnPercent(row) : row.difference);
+  const ranked = active.sets.slice().sort((a, b) => {
+    const left = score(a);
+    const right = score(b);
+    if (left == null && right == null) return (a.name || '').localeCompare(b.name || '');
+    if (left == null) return 1;
+    if (right == null) return -1;
+    return right - left || (a.name || '').localeCompare(b.name || '');
+  });
+  const scored = ranked.filter(row => score(row) != null);
+  const best = scored[0];
+  const worst = scored.length > 1 ? scored[scored.length - 1] : null;
+  const chartRows = scored.slice(0, 8).map(row => ({
+    name: row.name || t('dash.openedUnspecified'),
+    value: score(row),
+  }));
+  const formatChart = (value) => (measure === 'percent' ? signedPct(value) : signed(active.currency, value, money));
 
   const toggle = (key) => {
     setSort(current => current.key === key
@@ -105,14 +130,14 @@ function OpenedPerformance({ performance, t, money }) {
           <div className="glass-panel" style={{ padding: '0.9rem 1.1rem' }}>
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('dash.openedBest')}</div>
             <div style={{ color: 'var(--text-strong)', fontWeight: 700, marginTop: '0.25rem' }}>{best.name || t('dash.openedUnspecified')}</div>
-            <div style={{ color: tone(best.difference), fontWeight: 800 }}>{signed(active.currency, best.difference, money)}</div>
-            <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{best.recoveryPercent == null ? '—' : t('dash.openedRecovery', { pct: best.recoveryPercent })}</div>
+            <div style={{ color: tone(score(best)), fontWeight: 800 }}>{formatChart(score(best))}</div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{measure === 'percent' ? signed(active.currency, best.difference, money) : (best.recoveryPercent == null ? '—' : t('dash.openedRecovery', { pct: best.recoveryPercent }))}</div>
           </div>
           <div className="glass-panel" style={{ padding: '0.9rem 1.1rem' }}>
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('dash.openedWorst')}</div>
             <div style={{ color: 'var(--text-strong)', fontWeight: 700, marginTop: '0.25rem' }}>{worst.name || t('dash.openedUnspecified')}</div>
-            <div style={{ color: tone(worst.difference), fontWeight: 800 }}>{signed(active.currency, worst.difference, money)}</div>
-            <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{worst.recoveryPercent == null ? '—' : t('dash.openedRecovery', { pct: worst.recoveryPercent })}</div>
+            <div style={{ color: tone(score(worst)), fontWeight: 800 }}>{formatChart(score(worst))}</div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{measure === 'percent' ? signed(active.currency, worst.difference, money) : (worst.recoveryPercent == null ? '—' : t('dash.openedRecovery', { pct: worst.recoveryPercent }))}</div>
           </div>
         </div>
       )}
@@ -127,24 +152,33 @@ function OpenedPerformance({ performance, t, money }) {
 
       <div style={{ display: 'grid', gap: '1.5rem' }}>
         <div className="glass-panel">
-          <h3 className="chart-title">{t('dash.openedChart')}</h3>
-          <p style={{ margin: '-0.35rem 0 0.75rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{t('dash.openedChartHint')}</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div>
+              <h3 className="chart-title">{t('dash.openedChart')}</h3>
+              <p style={{ margin: '-0.35rem 0 0.75rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{measure === 'percent' ? t('dash.openedChartHintPct') : t('dash.openedChartHint')}</p>
+            </div>
+            <div className="sub-nav-tabs" style={{ margin: 0, width: 'auto', flex: '0 0 auto' }}>
+              <button type="button" className={`sub-nav-tab ${measure === 'percent' ? 'active' : ''}`} style={{ flex: '0 0 auto', padding: '0.35rem 0.85rem', fontSize: '0.75rem' }} onClick={() => setMeasure('percent')}>{t('dash.openedChartPercent')}</button>
+              <button type="button" className={`sub-nav-tab ${measure === 'dollars' ? 'active' : ''}`} style={{ flex: '0 0 auto', padding: '0.35rem 0.85rem', fontSize: '0.75rem' }} onClick={() => setMeasure('dollars')}>{t('dash.openedChartDollars')}</button>
+            </div>
+          </div>
           <div className="chart-container" style={{ height: Math.max(140, chartRows.length * 42) }}>
             {chartRows.length === 0 ? (
               <div className="chart-empty">{t('dash.openedNoRows')}</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartRows} layout="vertical" margin={{ left: 10, right: 30, top: 10, bottom: 10 }}>
-                  <XAxis type="number" stroke="var(--text-secondary)" tickFormatter={(value) => `${value}`} />
+                  <XAxis type="number" stroke="var(--text-secondary)" tickFormatter={(value) => (measure === 'percent' ? `${value}%` : `${value}`)} />
                   <YAxis dataKey="name" type="category" width={120} stroke="var(--text-secondary)" tickLine={false} axisLine={false} style={{ fontSize: '0.8rem' }} reversed />
+                  <ReferenceLine x={0} stroke="var(--text-muted)" />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-glass)' }}
                     labelStyle={{ color: 'var(--text-primary)' }}
-                    formatter={(value) => [signed(active.currency, value, money), t('dash.openedDifference')]}
+                    formatter={(value) => [formatChart(value), t('dash.openedDifference')]}
                   />
-                  <Bar dataKey="difference" radius={[0, 4, 4, 0]}>
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                     {chartRows.map(row => (
-                      <Cell key={row.name} fill={row.difference >= 0 ? 'var(--type-grass)' : 'var(--accent-red)'} />
+                      <Cell key={row.name} fill={row.value >= 0 ? 'var(--type-grass)' : 'var(--accent-red)'} />
                     ))}
                   </Bar>
                 </BarChart>
