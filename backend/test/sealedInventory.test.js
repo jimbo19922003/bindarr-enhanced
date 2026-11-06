@@ -166,9 +166,10 @@ async function main() {
   const worth = await send(port, 'GET', '/api/stats/networth', admin.id);
   assert.strictEqual(worth.status, 200);
   // Card market 10 plus two ETB quotes of 38.01. The unpriced box adds nothing.
-  // Card cost 4 plus ETB lots 45 and 60 plus half of the 90 box (45 still sealed).
+  // Card cost 4 plus the ETB lots (45 and 60) plus the full 90 box. Opening
+  // half of that box leaves 45 still sealed, and the spent total stays 199.
   assert.strictEqual(worth.body.totalValue, 86.02);
-  assert.strictEqual(worth.body.totalSpent, 154);
+  assert.strictEqual(worth.body.totalSpent, 199);
   assert.strictEqual(worth.body.sealed.unpricedUnits, 1);
   assert.strictEqual(worth.body.sealed.remainingUnits, 3);
   assert.strictEqual(worth.body.totalCards, 1);

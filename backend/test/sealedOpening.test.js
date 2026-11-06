@@ -139,6 +139,9 @@ async function main() {
   assert.ok(Math.abs(opening.analytics.cost_recovery_percent - 54.54545454545454) < 1e-10);
   const performance = await send(port, 'GET', '/api/stats', admin.id);
   assert.strictEqual(performance.status, 200, JSON.stringify(performance.body && performance.body.error));
+  // The $4 card plus the $110 lot. Opening one $55 unit does not reduce it.
+  assert.strictEqual(performance.body.summary.totalSpent, 114);
+  assert.strictEqual(performance.body.summary.sealed.cost, 55);
   const hobby = performance.body.openingPerformance.reports.find(item => item.currency === 'USD');
   assert.strictEqual(hobby.overall.cost, 55);
   assert.strictEqual(hobby.overall.knownValue, 30);

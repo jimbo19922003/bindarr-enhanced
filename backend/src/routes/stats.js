@@ -45,6 +45,33 @@ async function sealedFor(userId, game) {
   return summarizeHoldings(await sealedHoldingRows(userId));
 }
 
+// What was paid for sealed product, including units that have since been
+// opened. Remaining cost is a stock figure. This is the receipt. Archived
+// lots leave the portfolio. A lot that is fully opened stays, so ripping a
+// pack does not erase what it cost. Pulled cards are not given that cost as
+// a purchase price, so this is not added a second time through the collection.
+async function sealedInvestment(userId, game) {
+  if (game && game !== 'pokemon') return { spent: 0, currencies: [] };
+  const rows = await db.all(
+    `SELECT l.total_cost_cents AS totalCostCents, l.currency AS currency
+       FROM sealed_lot l
+       JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
+      WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL`,
+    [userId]
+  );
+  let cents = 0;
+  const currencies = new Set();
+  for (const row of rows) {
+    const line = Number(row.totalCostCents) || 0;
+    if (!Number.isSafeInteger(line) || !Number.isSafeInteger(cents + line)) {
+      throw new RangeError('Sealed spend is too large');
+    }
+    cents += line;
+    if (row.currency) currencies.add(row.currency);
+  }
+  return { spent: parseFloat((cents / 100).toFixed(2)), currencies: [...currencies].sort() };
+}
+
 // One row per sealed product still on hand. Market cents stay null when the
 // quote is unknown so a missing price is not added as zero.
 async function sealedLines(userId, game) {
@@ -338,14 +365,15 @@ router.get('/stats', async (req, res) => {
     const recentAdditions = recentRows.map(row => ({ ...row, price_trend: resolveCardPrice(row) }));
 
     const avgCardValue = totalCards > 0 ? parseFloat((totalValue / totalCards).toFixed(2)) : 0.0;
-    // Sealed market value and remaining cost join the portfolio once. They are
-    // not collection rows, so a box is not also counted as the cards inside it.
-    // An unknown quote adds nothing. Cost is what is still sealed, not the
-    // original receipt after units have left the lot.
+    // Sealed market value is what is still on hand. Spent is the original lot
+    // cost, so opening a unit does not reduce total invested. Pulled cards
+    // carry no purchase price from that opening, and an unknown quote adds
+    // nothing to value.
     const sealedHoldings = await sealedFor(req.user.id, game);
+    const sealedSpend = await sealedInvestment(req.user.id, game);
     const openingPerformance = await openingPerformanceFor(req.user.id, game);
     totalValue += sealedHoldings.marketValue;
-    totalSpent += sealedHoldings.cost;
+    totalSpent += sealedSpend.spent;
     const gainAbs = totalValue - totalSpent;
     const roi = {
       abs: parseFloat(gainAbs.toFixed(2)),
@@ -567,10 +595,14 @@ router.get('/stats/networth', async (req, res) => {
     }
 
     const sealedHoldings = await sealedFor(req.user.id, game);
+    const sealedSpend = await sealedInvestment(req.user.id, game);
     totalValue += sealedHoldings.marketValue;
-    totalSpent += sealedHoldings.cost;
+    totalSpent += sealedSpend.spent;
     if (sealedHoldings.marketValue > 0 || sealedHoldings.cost > 0) {
       for (const code of sealedHoldings.currencies) currencies.add(code);
+    }
+    if (sealedSpend.spent > 0) {
+      for (const code of sealedSpend.currencies) currencies.add(code);
     }
 
     const round = (n) => parseFloat(n.toFixed(2));

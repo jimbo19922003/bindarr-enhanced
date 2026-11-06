@@ -81,6 +81,7 @@
   "dash.netWorth": "Net Worth",
   "dash.noPriceHistory": "Not enough price history yet for this range",
   "dash.totalInvested": "Total Invested",
+  "dash.investedHint": "Card purchases plus sealed product. Opening a unit does not remove what it cost.",
   "dash.avgPerCard": "Avg {price} / card",
   "dash.unrealizedGain": "Unrealized Gain",
   "dash.roiUnset": "Set purchase prices to track ROI",

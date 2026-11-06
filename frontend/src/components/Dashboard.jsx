@@ -282,6 +282,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
             {summary.totalCards > 0 && (
               <span>{t('dash.avgPerCard', { price: priceText(summary.avgCardValue) })}</span>
             )}
+            <div>{t('dash.investedHint')}</div>
           </div>
         </div>
 
