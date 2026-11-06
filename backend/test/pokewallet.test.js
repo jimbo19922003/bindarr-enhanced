@@ -69,7 +69,7 @@ async function reset() {
   await db.run(`DELETE FROM pokewallet_budget`);
   await db.run(`DELETE FROM price_history`);
   await db.run(`DELETE FROM card_cache`);
-  await db.run(`UPDATE app_settings SET price_refresh_days = 1, pokewallet_prices_swept_at = NULL, pokewallet_last_report = NULL WHERE id = 1`);
+  await db.run(`UPDATE app_settings SET price_refresh_days = 1, pokewallet_prices_swept_at = NULL, pokewallet_last_report = NULL, pokewallet_api_key = '' WHERE id = 1`);
   process.env.POKEWALLET_API_KEY = KEY;
 }
 
@@ -333,10 +333,29 @@ async function main() {
       assert.strictEqual(adminStatus.status, 200);
       const adminBody = await adminStatus.json();
       assert.strictEqual(adminBody.configured, true);
+      assert.strictEqual(adminBody.key_source, 'environment');
+      assert.strictEqual(adminBody.api_key, '');
       assertNoSecret(adminBody);
+      const memberSettings = await call('member-token', 'GET', '/api/settings');
+      assert.strictEqual(memberSettings.status, 200);
+      assertNoSecret(await memberSettings.json());
+      assert.strictEqual((await call('member-token', 'PUT', '/api/settings', { pokewallet_api_key: 'pk_test_MEMBER' })).status, 403);
+      const rejected = await call('admin-token', 'PUT', '/api/settings', { pokewallet_api_key: 'not a key' });
+      assert.strictEqual(rejected.status, 400);
+      const saved = await call('admin-token', 'PUT', '/api/settings', { pokewallet_api_key: 'pk_test_STORED_KEY_abc' });
+      assert.strictEqual(saved.status, 200);
+      assertNoSecret(await saved.json());
+      const storedStatus = await call('admin-token', 'GET', '/api/settings/pokewallet');
+      const storedBody = await storedStatus.json();
+      assert.strictEqual(storedBody.api_key, 'pk_test_STORED_KEY_abc');
+      assert.strictEqual(storedBody.key_source, 'database');
+      assert.ok(!JSON.stringify(await (await call('member-token', 'GET', '/api/settings')).json()).includes('STORED_KEY'));
+      hits.keys = [];
       const adminRefresh = await call('admin-token', 'POST', '/api/settings/pokewallet/refresh', { user_id: 999 });
       assert.strictEqual(adminRefresh.status, 200);
       assertNoSecret(await adminRefresh.json());
+      assert.ok(hits.keys.includes('pk_test_STORED_KEY_abc'), `stored key was not sent: ${hits.keys.join(',')}`);
+      assert.ok(!hits.keys.includes(KEY));
       assert.strictEqual((await db.get(`SELECT user_id FROM collection WHERE card_id = ?`, ['tcgdex-en-cel-7'])).user_id, memberId);
     } finally {
       await new Promise(resolve => web.close(resolve));

@@ -118,7 +118,15 @@ router.put('/', requireAdmin, async (req, res) => {
     scan_exclude_promos,
     scan_exclude_digital,
     setup_complete,
+    pokewallet_api_key,
   } = req.body;
+
+  if (pokewallet_api_key !== undefined) {
+    const candidate = String(pokewallet_api_key == null ? '' : pokewallet_api_key).trim();
+    if (candidate.length > 256 || /\s/.test(candidate)) {
+      return res.status(400).json({ error: 'PokéWallet API key must be a single token, at most 256 characters.' });
+    }
+  }
 
   // Validated before anything is written, so a bad value cannot leave the other
   // fields of the same save half-applied. Rejected rather than coerced (unlike
@@ -145,6 +153,18 @@ router.put('/', requireAdmin, async (req, res) => {
       }
     } catch (error) {
       console.error('Failed to save MTG price source:', error);
+      return res.status(500).json({ error: 'Failed to update settings' });
+    }
+  }
+
+  if (pokewallet_api_key !== undefined) {
+    try {
+      await require('../pokewalletApi').saveStoredKey(pokewallet_api_key);
+    } catch (error) {
+      if (error.code === 'invalid_key') {
+        return res.status(400).json({ error: 'PokéWallet API key must be a single token, at most 256 characters.' });
+      }
+      console.error('Failed to save PokéWallet key');
       return res.status(500).json({ error: 'Failed to update settings' });
     }
   }
@@ -224,9 +244,9 @@ router.put('/', requireAdmin, async (req, res) => {
 });
 
 // PokéWallet is a price adapter for cards this install already has. It does not
-// change card ids and it does not take a key from the browser. Admins can see
-// whether the server has a key, refresh within the provider's limits, and
-// confirm a match the automatic pass refused to guess.
+// change card ids. Admins save the key with the other instance settings. The
+// status payload includes that saved key for the admin form and never the
+// environment fallback.
 router.get('/pokewallet', requireAdmin, async (req, res) => {
   try {
     res.json(await require('../pokewalletApi').status());

@@ -63,6 +63,8 @@ function Settings({ user, onUpdateUser, showToast }) {
   const [tcgApiKey, setTcgApiKey] = useState(user?.tcg_api_key || '');
   const [psaToken, setPsaToken] = useState(user?.psa_api_token || '');
   const [gradedKey, setGradedKey] = useState(user?.graded_price_api_key || '');
+  const [pokewalletKey, setPokewalletKey] = useState('');
+  const [pokewalletKeyLoaded, setPokewalletKeyLoaded] = useState(false);
   const [keysLoading, setKeysLoading] = useState(false);
   const [accessKey, setAccessKey] = useState(user?.api_key || '');
   const [showAccessKey, setShowAccessKey] = useState(false);
@@ -87,6 +89,20 @@ function Settings({ user, onUpdateUser, showToast }) {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (user?.role !== 'admin') return undefined;
+    let cancelled = false;
+    fetch('/api/settings/pokewallet')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (cancelled || !data) return;
+        setPokewalletKey(data.api_key || '');
+        setPokewalletKeyLoaded(true);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.role]);
 
   // The build stamps its own version in, so Settings can always state what it
   // is even with the backend down. The call below only adds the SERVER's
@@ -397,12 +413,24 @@ function Settings({ user, onUpdateUser, showToast }) {
         })
       });
       const data = await response.json().catch(() => null);
-      if (response.ok) {
-        onUpdateUser(data.user);
-        showToast(t('settings.keysUpdated'));
-      } else {
+      if (!response.ok) {
         showToast(data?.error || t('settings.errKeys'));
+        return;
       }
+      onUpdateUser(data.user);
+      if (user?.role === 'admin' && pokewalletKeyLoaded) {
+        const keyResponse = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pokewallet_api_key: pokewalletKey }),
+        });
+        const keyData = await keyResponse.json().catch(() => null);
+        if (!keyResponse.ok) {
+          showToast(keyData?.error || t('settings.errKeys'));
+          return;
+        }
+      }
+      showToast(t('settings.keysUpdated'));
     } catch (err) {
       console.error(err);
       showToast(t('settings.errKeys'));
@@ -757,6 +785,13 @@ function Settings({ user, onUpdateUser, showToast }) {
               link="https://www.pokemonpricetracker.com/api" linkLabel={t('settings.gradedKeyGetOne')}
               value={gradedKey} onChange={setGradedKey} disabled={keysLoading} t={t}
             />
+            {user?.role === 'admin' && (
+              <KeyField
+                id="settings-pokewallet-key" label={t('settings.pokewalletKeyTitle')} hint={t('settings.pokewalletKeyIntro')}
+                link="https://pokewallet.io/api-docs" linkLabel={t('settings.pokewalletKeyGetOne')}
+                value={pokewalletKey} onChange={setPokewalletKey} disabled={keysLoading || !pokewalletKeyLoaded} t={t}
+              />
+            )}
 
             <button
               type="submit"

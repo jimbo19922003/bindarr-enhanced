@@ -470,6 +470,13 @@ async function initDb() {
   if (!appSettingsCols.some(c => c.name === 'pokewallet_last_report')) {
     await run(`ALTER TABLE app_settings ADD COLUMN pokewallet_last_report TEXT`);
   }
+  // The install-wide PokéWallet key. Empty means "use POKEWALLET_API_KEY from
+  // the environment", so a Codespaces secret still works until an admin saves
+  // one here. The value is not copied into logs or into the settings payload
+  // that every signed-in user can read.
+  if (!appSettingsCols.some(c => c.name === 'pokewallet_api_key')) {
+    await run(`ALTER TABLE app_settings ADD COLUMN pokewallet_api_key TEXT NOT NULL DEFAULT ''`);
+  }
   await run(`CREATE TABLE IF NOT EXISTS pokewallet_map (
     card_id TEXT PRIMARY KEY,
     provider_card_id TEXT,

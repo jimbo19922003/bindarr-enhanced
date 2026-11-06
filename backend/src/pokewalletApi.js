@@ -50,7 +50,30 @@ const client = axios.create({
 const pending = new Map();
 let inflight = false;
 
-const hasKey = () => !!(process.env.POKEWALLET_API_KEY || '').trim();
+// A saved install key wins. The environment variable is the fallback for a
+// Codespace secret or a host that does not want the key in the database.
+async function activeKey() {
+  let stored = '';
+  try {
+    const row = await db.get(`SELECT pokewallet_api_key FROM app_settings WHERE id = 1`);
+    stored = row && typeof row.pokewallet_api_key === 'string' ? row.pokewallet_api_key.trim() : '';
+  } catch {
+    stored = '';
+  }
+  if (stored) return { key: stored, source: 'database', stored };
+  const env = (process.env.POKEWALLET_API_KEY || '').trim();
+  if (env) return { key: env, source: 'environment', stored: '' };
+  return { key: '', source: 'none', stored: '' };
+}
+
+async function saveStoredKey(value) {
+  const key = String(value == null ? '' : value).trim();
+  if (key.length > 256 || /\s/.test(key)) {
+    throw fail('invalid_key');
+  }
+  await db.run(`UPDATE app_settings SET pokewallet_api_key = ? WHERE id = 1`, [key]);
+  return activeKey();
+}
 
 function fail(code) {
   const err = new Error(code);
@@ -158,7 +181,7 @@ async function pauseFor(ms) {
 }
 
 async function request(path, params) {
-  const key = (process.env.POKEWALLET_API_KEY || '').trim();
+  const key = (await activeKey()).key;
   if (!key) throw fail('key_missing');
   const cacheKey = cacheKeyFor(key, path, params);
   if (pending.has(cacheKey)) return pending.get(cacheKey);
@@ -470,8 +493,8 @@ async function saveReport(report) {
 }
 
 async function runRefresh(force) {
-  if (!hasKey()) {
-    console.log('Skipping PokéWallet price update: POKEWALLET_API_KEY is not set.');
+  if (!(await activeKey()).key) {
+    console.log('Skipping PokéWallet price update: no PokéWallet API key is configured.');
     const report = emptyReport();
     report.status = 'key_missing';
     if (force) await saveReport(report);
@@ -583,8 +606,13 @@ async function status() {
   try { last = row && row.pokewallet_last_report ? JSON.parse(row.pokewallet_last_report) : null; }
   catch { last = null; }
   if (last && last.issues) delete last.issues;
+  const active = await activeKey();
   return {
-    configured: hasKey(),
+    configured: !!active.key,
+    key_source: active.source,
+    // The saved key only. The environment variable is not copied into the
+    // browser just because it is currently the fallback.
+    api_key: active.stored,
     automatic_enabled: days !== 0,
     paused_until: budget && budget.paused_until && budget.paused_until > Date.now()
       ? new Date(budget.paused_until).toISOString() : null,
@@ -618,7 +646,7 @@ async function mapManually(cardId, providerCardId, clear) {
     if (!match.isProviderCardId(providerCardId)) {
       return { error: 'provider_card_id must be a PokéWallet card id.', statusCode: 400 };
     }
-    if (!hasKey()) return { error: 'POKEWALLET_API_KEY is not set on the server.', statusCode: 400 };
+    if (!(await activeKey()).key) return { error: 'No PokéWallet API key is configured.', statusCode: 400 };
     if (hasPositivePrice(card) && !ownedByPokewallet(card)) {
       return { error: 'This card already has a price from another source. It was left unchanged.', statusCode: 409 };
     }
@@ -673,7 +701,8 @@ module.exports = {
   BASE,
   MAX_REQUESTS_PER_RUN,
   client,
-  hasKey,
+  activeKey,
+  saveStoredKey,
   updateCollectionPrices,
   status,
   mapManually,

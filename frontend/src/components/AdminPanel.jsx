@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Shield, UserPlus, Key, Trash2, ToggleLeft, ToggleRight, Search, Users, Globe, HardDriveDownload, Download, Sparkles } from 'lucide-react';
+import { Shield, UserPlus, Key, Trash2, ToggleLeft, ToggleRight, Search, Users, Globe, HardDriveDownload, Download, Sparkles, Eye, EyeOff } from 'lucide-react';
 import { useBackGuard } from '../utils/useBackGuard';
 import CatalogPanel from './CatalogPanel';
 import SetupWizard from './SetupWizard';
@@ -39,6 +39,9 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
   const [priceRefreshDays, setPriceRefreshDays] = useState(1);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [pokewallet, setPokewallet] = useState(null);
+  const [pokewalletKey, setPokewalletKey] = useState('');
+  const [pokewalletKeyLoaded, setPokewalletKeyLoaded] = useState(false);
+  const [showPokewalletKey, setShowPokewalletKey] = useState(false);
   const [pokewalletLoading, setPokewalletLoading] = useState(false);
   const mountedRef = useRef(true);
 
@@ -182,7 +185,10 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
       const response = await fetch('/api/settings/pokewallet');
       if (!response.ok) return;
       const data = await response.json();
-      if (mountedRef.current) setPokewallet(data);
+      if (!mountedRef.current) return;
+      setPokewallet(data);
+      setPokewalletKey(data.api_key || '');
+      setPokewalletKeyLoaded(true);
     } catch (err) {
       console.error(err);
     }
@@ -246,6 +252,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
           pokemon_provider: pokemonProvider,
           mtg_price_source: mtgPriceSource,
           price_refresh_days: Number(priceRefreshDays),
+          ...(pokewalletKeyLoaded ? { pokewallet_api_key: pokewalletKey } : {}),
         })
       });
 
@@ -255,6 +262,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
         setPokemonProvider(data.pokemon_provider || 'pokemontcg');
         setMtgPriceSource(data.mtg_price_source || 'tcgplayer');
         setPriceRefreshDays(data.price_refresh_days ?? 1);
+        await fetchPokewallet();
         showToast(t('admin.settingsUpdated'));
       } else {
         const data = await response.json();
@@ -542,6 +550,44 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
                 {t(pokemonProvider === 'pokemontcgapi' ? 'admin.pokemontcgapiHint' : 'admin.pokemonProviderHint')}
               </p>
             </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label htmlFor="admin-pokewallet-key">{t('admin.pokewalletKey')}</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="admin-pokewallet-key"
+                  type={showPokewalletKey ? 'text' : 'password'}
+                  name="pokewallet-api-key"
+                  autoComplete="off"
+                  className="input-control"
+                  placeholder={t('admin.pokewalletKeyPlaceholder')}
+                  value={pokewalletKey}
+                  onChange={(e) => setPokewalletKey(e.target.value)}
+                  disabled={settingsLoading || !pokewalletKeyLoaded}
+                  style={{ fontFamily: 'monospace', paddingRight: '2.4rem', width: '100%' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPokewalletKey(v => !v)}
+                  aria-label={t(showPokewalletKey ? 'settings.hideApiKey' : 'settings.showApiKey')}
+                  title={t(showPokewalletKey ? 'settings.hideApiKey' : 'settings.showApiKey')}
+                  style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}
+                >
+                  {showPokewalletKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <p style={{ margin: '0.4rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                {t('admin.pokewalletKeyHint')}
+                {' '}
+                <a href="https://pokewallet.io/api-docs" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-yellow)', fontWeight: 600 }}>
+                  {t('admin.pokewalletKeyLink')}
+                </a>
+              </p>
+              <p style={{ margin: '0.35rem 0 0', fontSize: '0.75rem', color: 'var(--text-strong)' }}>
+                {pokewallet?.key_source === 'database' ? t('admin.pokewalletKeySaved')
+                  : pokewallet?.key_source === 'environment' ? t('admin.pokewalletKeyEnvironment')
+                    : t('admin.pokewalletKeyMissing')}
+              </p>
+            </div>
             {/* Which marketplace Magic prices are read from first (#93). Scryfall
                 quotes TCGplayer in USD and Cardmarket in EUR; reading USD first left
                 European collections a mix of the two, summed as one number on the
@@ -594,12 +640,10 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
               {settingsLoading ? <div className="spinner" style={{ width: '14px', height: '14px', margin: 0, borderWidth: '2px' }}></div> : t('admin.saveSettings')}
             </button>
           </form>
-        </div>
-
-        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
-          <h3 style={{ color: 'var(--text-strong)', fontSize: '1.1rem', borderBottom: '1px solid var(--border-glass)', paddingBottom: '0.5rem' }}>
-            {t('admin.pokewalletTitle')}
-          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', borderTop: '1px solid var(--border-glass)', paddingTop: '0.9rem' }}>
+            <h3 style={{ color: 'var(--text-strong)', fontSize: '1rem', margin: 0 }}>
+              {t('admin.pokewalletTitle')}
+            </h3>
           <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: 1.45 }}>
             {t('admin.pokewalletHint')}
           </p>
@@ -657,7 +701,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
           ))}
           {(pokewallet?.recent || []).length > 0 && (
             <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '0.6rem' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 650, color: 'var(--text-strong)' }}>{t('admin.pokewalletRecent')}</div>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-strong)' }}>{t('admin.pokewalletRecent')}</div>
               {pokewallet.recent.map(row => (
                 <div key={row.card_id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center', marginTop: '0.4rem' }}>
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
@@ -675,6 +719,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
               ))}
             </div>
           )}
+          </div>
         </div>
 
         {/* Scan catalogs. One build per game+language: download the cards, then index
