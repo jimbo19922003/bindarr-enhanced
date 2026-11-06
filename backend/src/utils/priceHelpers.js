@@ -132,6 +132,9 @@ const SWEEP_COLUMN = {
   tcgdex: 'tcgdex_prices_swept_at',
   pokemontcgapi: 'pokemontcgapi_prices_swept_at',
   tcgcsv: 'tcgcsv_prices_swept_at',
+  // Gap-fills TCGdex cards that still have no positive quote. Same gate as the
+  // others, so price_refresh_days = 0 turns this sweep off too.
+  pokewallet: 'pokewallet_prices_swept_at',
   // Lorcana was the next one to go quiet exactly as the paragraph above
   // predicts. lorcastApi has asked for 'lorcana' since it was written and
   // db.js has had the column since then too, but this map never got the key --

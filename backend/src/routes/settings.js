@@ -118,7 +118,15 @@ router.put('/', requireAdmin, async (req, res) => {
     scan_exclude_promos,
     scan_exclude_digital,
     setup_complete,
+    pokewallet_api_key,
   } = req.body;
+
+  if (pokewallet_api_key !== undefined) {
+    const candidate = String(pokewallet_api_key == null ? '' : pokewallet_api_key).trim();
+    if (candidate.length > 256 || /\s/.test(candidate)) {
+      return res.status(400).json({ error: 'PokéWallet API key must be a single token, at most 256 characters.' });
+    }
+  }
 
   // Validated before anything is written, so a bad value cannot leave the other
   // fields of the same save half-applied. Rejected rather than coerced (unlike
@@ -145,6 +153,18 @@ router.put('/', requireAdmin, async (req, res) => {
       }
     } catch (error) {
       console.error('Failed to save MTG price source:', error);
+      return res.status(500).json({ error: 'Failed to update settings' });
+    }
+  }
+
+  if (pokewallet_api_key !== undefined) {
+    try {
+      await require('../pokewalletApi').saveStoredKey(pokewallet_api_key);
+    } catch (error) {
+      if (error.code === 'invalid_key') {
+        return res.status(400).json({ error: 'PokéWallet API key must be a single token, at most 256 characters.' });
+      }
+      console.error('Failed to save PokéWallet key');
       return res.status(500).json({ error: 'Failed to update settings' });
     }
   }
@@ -220,6 +240,49 @@ router.put('/', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+// PokéWallet is a price adapter for cards this install already has. It does not
+// change card ids. Admins save the key with the other instance settings. The
+// status payload includes that saved key for the admin form and never the
+// environment fallback.
+router.get('/pokewallet', requireAdmin, async (req, res) => {
+  try {
+    res.json(await require('../pokewalletApi').status());
+  } catch (error) {
+    console.error(`PokéWallet status failed: ${error.message}`);
+    res.status(500).json({ error: 'Failed to read PokéWallet status' });
+  }
+});
+
+router.post('/pokewallet/refresh', requireAdmin, async (req, res) => {
+  try {
+    const report = await require('../pokewalletApi').updateCollectionPrices({ force: true });
+    res.json(report);
+  } catch (error) {
+    console.error(`PokéWallet refresh failed: ${error.message}`);
+    res.status(500).json({ error: 'PokéWallet refresh failed' });
+  }
+});
+
+router.post('/pokewallet/mappings', requireAdmin, async (req, res) => {
+  const body = req.body || {};
+  const cardId = typeof body.card_id === 'string' ? body.card_id : '';
+  if (!cardId.startsWith('tcgdex-')) {
+    return res.status(400).json({ error: 'card_id must be an existing TCGdex card id.' });
+  }
+  try {
+    const result = await require('../pokewalletApi').mapManually(
+      cardId,
+      typeof body.provider_card_id === 'string' ? body.provider_card_id : '',
+      body.clear === true
+    );
+    if (result.error) return res.status(result.statusCode || 400).json({ error: result.error });
+    res.json(result);
+  } catch (error) {
+    console.error(`PokéWallet mapping failed: ${error.message}`);
+    res.status(500).json({ error: 'Failed to update the PokéWallet mapping' });
   }
 });
 

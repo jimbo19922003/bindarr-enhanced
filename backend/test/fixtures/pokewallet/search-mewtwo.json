@@ -1,0 +1,46 @@
+{
+  "query": "Mewtwo 003",
+  "results": [
+    {
+      "id": "pk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "card_info": {
+        "name": "Mewtwo",
+        "clean_name": "Mewtwo",
+        "set_name": "Celebrations: Classic Collection",
+        "set_code": "30th",
+        "set_id": "24680",
+        "card_number": "3/102",
+        "product_type": "card"
+      },
+      "tcgplayer": {
+        "url": "https://www.tcgplayer.com/product/246890",
+        "prices": [
+          {
+            "sub_type_name": "Holofoil",
+            "low_price": 9.5,
+            "mid_price": 11,
+            "market_price": 12.5,
+            "updated_at": "2026-11-01T00:00:00Z"
+          }
+        ]
+      },
+      "cardmarket": null
+    },
+    {
+      "id": "pk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "card_info": {
+        "name": "Mewtwo Elite Trainer Box",
+        "set_name": "Celebrations: Classic Collection",
+        "set_code": "30th",
+        "card_number": "3",
+        "product_type": "sealed"
+      },
+      "tcgplayer": {
+        "url": "https://www.tcgplayer.com/product/999999",
+        "prices": [{ "sub_type_name": "Normal", "market_price": 89.99, "updated_at": "2026-11-01T00:00:00Z" }]
+      },
+      "cardmarket": null
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 2, "total_pages": 1 }
+}

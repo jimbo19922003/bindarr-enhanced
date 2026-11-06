@@ -155,6 +155,7 @@ All optional.
 | `DEFAULT_ADMIN_PASSWORD` | — | Create the `admin` account with this password at startup instead of letting the first browser visit create the owner account. Only applied while the `users` table is empty — changing it later does nothing to an existing account. |
 | `POKEMON_TCG_API_KEY` | — | **Only for installs still on the pokemontcg.io provider.** Raises its rate limit from 1,000 to 20,000 requests/day. pokemontcg.io is deprecated: [new registrations are closed](https://dev.pokemontcg.io/) and existing keys stop working on **1 March 2027**. New installs default to TCGdex, which needs no key — leave this unset. |
 | `POKEMONTCGAPI_KEY` | unset | Server-side key for the optional [pokemontcgapi.com provider](#pokemon-data-providers). Setting a key alone does not enable it. |
+| `POKEWALLET_API_KEY` | unset | Server-side key for PokéWallet price lookups. When set, Admin → PokéWallet prices can fill English TCGdex cards that still have no positive price. Card ids are not changed, and a price already stored from another source is left alone. The key is never returned to the browser. |
 | `PUBLIC_BASE_URL` | — | External URL behind a proxy, e.g. `https://cards.example.com`. Used for share links and auto-allowed as a CORS origin, so proxied logins work with just this. Also editable in the Admin panel. |
 | `CORS_ORIGIN` | — | Extra allowed origins, comma-separated. Localhost and private-LAN origins are always allowed. |
 | `ALLOW_REGISTRATION` | unset | `true` allows self-registration. Unset means invite-only: admins create accounts. |
@@ -275,6 +276,20 @@ API contract and coverage: [documentation](https://pokemontcgapi.com/docs),
 [OpenAPI](https://pokemontcgapi.com/openapi.json),
 [regional coverage](https://pokemontcgapi.com/coverage).
 
+PokéWallet is a separate price lookup, not another catalogue. Set
+`POKEWALLET_API_KEY` on the server and restart, then use **Admin → PokéWallet
+prices**. It can fill an English TCGdex card that still has no positive price
+when the set, collector number, and name agree and the product is a single.
+The lookup sends the card name and set code. PokéWallet does not search by
+a name plus a collector number; the number is checked on the results. An
+empty set search may be followed by one name-only search for that same card.
+Anything uncertain is listed for confirmation and does not change a price.
+Requests stay inside the key's hourly and daily allowance, and one pass
+asks for at most 25 cards. An admin can save the key in Admin or Settings;
+a saved key is used instead of `POKEWALLET_API_KEY`. Card ids stay as
+they are. TCGCSV is still called the same way; this does not try to get
+around a block on that service.
+
 ## Card scanning
 
 Scanning is image-only — no OCR, no typing. Two things have to be in place, and
@@ -392,6 +407,20 @@ Restore by dropping the file back into the volume with the container stopped. In
 ## Development
 
 Node 18+ and npm 9+.
+
+### GitHub Codespaces
+
+Create the Codespace from a branch that contains `.devcontainer/` (the pull
+request branch). The editor opens when dependency setup finishes, and a terminal then stays
+attached to the app. Refresh port **3001** (**Bindarr test instance**) after
+that terminal says the server is running. A 502 on the forwarded host means
+the server is not listening yet. A Codespace created from `main` has no dev container: the file
+list has no `.devcontainer` folder, no server starts, and the Ports panel
+stays empty. Switching branches in that Codespace does not fix it until
+**Codespaces: Rebuild Container**, or until you create a new Codespace from
+this branch. If the window stays on "Opening remote...", stop that Codespace
+at https://github.com/codespaces and create a new one from this branch.
+Details: [docs/CODESPACES.md](docs/CODESPACES.md).
 
 ```bash
 npm run install:all

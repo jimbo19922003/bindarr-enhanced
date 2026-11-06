@@ -462,6 +462,52 @@ async function initDb() {
   if (!appSettingsCols.some(c => c.name === 'lorcana_prices_swept_at')) {
     await run(`ALTER TABLE app_settings ADD COLUMN lorcana_prices_swept_at DATETIME`);
   }
+  // PokéWallet quotes for cards whose ids stay whatever provider minted them.
+  // The map is not a card identity: collection.card_id is never rewritten from it.
+  if (!appSettingsCols.some(c => c.name === 'pokewallet_prices_swept_at')) {
+    await run(`ALTER TABLE app_settings ADD COLUMN pokewallet_prices_swept_at DATETIME`);
+  }
+  if (!appSettingsCols.some(c => c.name === 'pokewallet_last_report')) {
+    await run(`ALTER TABLE app_settings ADD COLUMN pokewallet_last_report TEXT`);
+  }
+  // The install-wide PokéWallet key. Empty means "use POKEWALLET_API_KEY from
+  // the environment", so a Codespaces secret still works until an admin saves
+  // one here. The value is not copied into logs or into the settings payload
+  // that every signed-in user can read.
+  if (!appSettingsCols.some(c => c.name === 'pokewallet_api_key')) {
+    await run(`ALTER TABLE app_settings ADD COLUMN pokewallet_api_key TEXT NOT NULL DEFAULT ''`);
+  }
+  await run(`CREATE TABLE IF NOT EXISTS pokewallet_map (
+    card_id TEXT PRIMARY KEY,
+    provider_card_id TEXT,
+    status TEXT NOT NULL,
+    reason TEXT,
+    product_type TEXT,
+    quote_currency TEXT,
+    quote_amount REAL,
+    quote_updated_at TEXT,
+    candidates_json TEXT,
+    manual INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(card_id) REFERENCES card_cache(id)
+  )`);
+  // Response bodies and request timestamps. The cache key is a hash prefix of
+  // the API key plus the path, so the credential itself is never stored.
+  await run(`CREATE TABLE IF NOT EXISTS pokewallet_cache (
+    request TEXT PRIMARY KEY, body TEXT NOT NULL, fetched_at INTEGER NOT NULL
+  )`);
+  await run(`CREATE TABLE IF NOT EXISTS pokewallet_request (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL
+  )`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_pokewallet_request_at ON pokewallet_request(created_at)`);
+  await run(`CREATE TABLE IF NOT EXISTS pokewallet_budget (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    remaining_hour INTEGER,
+    remaining_day INTEGER,
+    observed_at INTEGER,
+    paused_until INTEGER
+  )`);
 
   // VESTIGIAL. This gated non-admin members building an individual per-set ORB
   // index, and there are no per-set indexes any more — scanning is CollectorVision

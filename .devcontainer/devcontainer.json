@@ -1,0 +1,33 @@
+{
+  "name": "Bindarr Enhanced Development",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-20-bookworm",
+  "forwardPorts": [3001],
+  "portsAttributes": {
+    "3001": {
+      "label": "Bindarr test instance",
+      "onAutoForward": "notify",
+      "protocol": "http",
+      "visibility": "private"
+    }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "silent"
+  },
+  "remoteEnv": {
+    "DB_PATH": "${containerWorkspaceFolder}/.devcontainer/data/bindarr.db",
+    "PORT": "3001",
+    "HTTPS_PORT": "",
+    "ALLOW_REGISTRATION": "false",
+    "TRUST_PROXY": "1"
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postAttachCommand": "bash .devcontainer/start.sh --ensure",
+  "waitFor": "postCreateCommand",
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "docs/CODESPACES.md"
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "pk_ffffffffffffffffffffffffffffffff",
+  "card_info": {
+    "name": "Celebrations Elite Trainer Box",
+    "set_name": "Celebrations",
+    "set_code": "CEL",
+    "card_number": "",
+    "product_type": "sealed"
+  },
+  "tcgplayer": {
+    "url": "https://www.tcgplayer.com/product/240000",
+    "prices": [{ "sub_type_name": "Normal", "market_price": 79, "updated_at": "2026-11-03T00:00:00Z" }]
+  },
+  "cardmarket": null
+}
