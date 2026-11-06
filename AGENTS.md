@@ -94,3 +94,11 @@ Use `npm ci` in each package scope for reproducible CI/container installs. Backe
 - Frontend utility tests live beside utilities as `frontend/src/utils/*.test.js`, using built-in `node:test`/`node:assert`. Match the surrounding test style; do not add a test framework.
 - Locale changes require `cd frontend && npm run check:locales`. Preserve English keys/order, placeholders, and required plural categories; add translations under `frontend/src/locales/<BCP-47>.json`.
 - CI hard-gates backend tests, frontend lint, and locale validation. There is no coverage threshold or configured coverage tool.
+
+## Cursor Cloud specific instructions
+
+- Shell `PATH` can list another Node binary ahead of `/usr/local/bin`. Export `PATH="/usr/local/bin:$PATH"` before install, test, or server commands so Node 20 loads the `sqlite3` and `sharp` binaries that `npm ci` built.
+- Set `ONNXRUNTIME_NODE_INSTALL_CUDA=skip` for backend `npm ci`. Inference here is CPU-only.
+- The boot script runs `.devcontainer/start.sh` with `DB_PATH` at `.devcontainer/data/bindarr.db`, an empty `HTTPS_PORT`, and `ALLOW_REGISTRATION=false`. The app listens on `http://localhost:3001`. Express serves `frontend/dist`, and the frontend script rebuilds that bundle when files change. Running the script again while port 3001 is open leaves the existing process in place.
+- The first visit to an empty database creates the `admin` account. The password must be at least 8 characters. Card search uses TCGdex and does not need an API key. Scan catalogs are not installed; a missing catalog stays HTTP 503.
+- `npm test` covers backend unit tests, backend e2e, frontend utility tests, and locale checks. Frontend lint is `npm run lint --prefix frontend`.
