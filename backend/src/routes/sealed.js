@@ -100,9 +100,11 @@ function optionalCatalogId(value) {
 // stays marked as the catalog, so a later refresh knows it may replace it.
 function quoteSource(body, product) {
   if (product.market_price_cents == null) return '';
-  return body && body.market_source === 'tcgcsv' && product.provider === 'tcgcsv' && product.provider_product_id
-    ? 'tcgcsv'
-    : 'manual';
+  const source = body && body.market_source;
+  const owned = product.provider_product_id
+    && ((source === 'tcgcsv' && product.provider === 'tcgcsv')
+      || (source === 'pokewallet' && product.provider === 'pokewallet'));
+  return owned ? source : 'manual';
 }
 
 router.get('/sealed/catalog', async (req, res) => {
@@ -110,9 +112,10 @@ router.get('/sealed/catalog', async (req, res) => {
     const found = await catalog.search(req.query.q || '');
     res.json(found);
   } catch (err) {
+    if (err && err.status) return fail(res, err.status, err.message);
     if (err instanceof TypeError || err instanceof RangeError) return fail(res, 400, err.message);
-    console.error('Failed to search the sealed catalog', err);
-    fail(res, 500, 'Failed to search the sealed catalog');
+    console.error('Failed to search sealed products', err);
+    fail(res, 502, 'PokéWallet could not be reached.');
   }
 });
 
@@ -303,6 +306,9 @@ router.post('/sealed/products/:id/quote', async (req, res) => {
     const quote = await catalog.refreshOwned(existing);
     if (!quote) return fail(res, 404, 'This product is no longer in the sealed catalog');
     const cents = quote.market_price == null ? null : sealed.moneyToCents(quote.market_price, 'Market price');
+    const source = cents != null && (quote.market_source === 'pokewallet' || quote.market_source === 'tcgcsv')
+      ? quote.market_source
+      : '';
     await db.run(
       `UPDATE sealed_product
           SET image_url = CASE WHEN ? != '' THEN ? ELSE image_url END,
@@ -311,7 +317,7 @@ router.post('/sealed/products/:id/quote', async (req, res) => {
         WHERE id = ? AND user_id = ?`,
       [
         quote.image_url, quote.image_url, cents, cents == null ? null : quote.market_currency,
-        cents == null ? null : new Date().toISOString(), cents == null ? '' : 'tcgcsv',
+        cents == null ? null : new Date().toISOString(), source,
         existing.id, req.user.id,
       ]
     );
@@ -319,9 +325,10 @@ router.post('/sealed/products/:id/quote', async (req, res) => {
     const lots = await lotsFor(req.user.id, [existing.id]);
     res.json({ product: presentProduct(stored, lots.get(existing.id) || []) });
   } catch (err) {
+    if (err && err.status) return fail(res, err.status, err.message);
     if (err instanceof TypeError || err instanceof RangeError) return fail(res, 400, err.message);
     console.error('Failed to refresh sealed quote', err);
-    fail(res, 500, 'Failed to refresh the market quote');
+    fail(res, 502, 'PokéWallet could not be reached.');
   }
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, ArchiveRestore, Download, Package, Plus } from 'lucide-react';
+import { Archive, ArchiveRestore, Download, Package, Plus, Search } from 'lucide-react';
 import { useT } from '../utils/i18n';
 
 const TYPES = ['booster_box', 'booster_pack', 'etb', 'tin', 'collection_box', 'blister', 'other'];
@@ -32,7 +32,7 @@ function moneyLabel(value, currency) {
   return `${currency || ''} ${value}`.trim();
 }
 
-function SealedInventory({ showToast, admin }) {
+function SealedInventory({ showToast }) {
   const { t } = useT();
   const [products, setProducts] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -44,11 +44,12 @@ function SealedInventory({ showToast, admin }) {
   const [selectedId, setSelectedId] = useState(null);
   const [csv, setCsv] = useState('');
   const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogSet, setCatalogSet] = useState('');
   const [catalogResults, setCatalogResults] = useState([]);
-  const [catalogMeta, setCatalogMeta] = useState(null);
+  const [catalogError, setCatalogError] = useState('');
   const [catalogBusy, setCatalogBusy] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncState, setSyncState] = useState(null);
+  const [pick, setPick] = useState(null);
+  const [quick, setQuick] = useState({ quantity: '1', total_cost: '', currency: 'USD', purchased_at: '', location_id: '' });
 
   const typeLabel = (value) => t(`sealed.type.${value}`);
 
@@ -192,42 +193,74 @@ function SealedInventory({ showToast, admin }) {
     refresh();
   };
 
-  const searchCatalog = async () => {
-    const q = catalogQuery.trim();
-    if (q.length < 3) {
-      showToast(t('sealed.catalogShort'));
+  const searchCatalog = async (event) => {
+    if (event) event.preventDefault();
+    if (catalogBusy) return;
+    const q = [catalogQuery, catalogSet].map(part => part.trim()).filter(Boolean).join(' ');
+    if (q.length < 2) {
+      setCatalogError(t('sealed.catalogShort'));
+      setCatalogResults([]);
       return;
     }
     setCatalogBusy(true);
+    setCatalogError('');
     try {
       const response = await fetch(`/api/sealed/catalog?q=${encodeURIComponent(q)}`);
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || t('sealed.errCatalog'));
-      setCatalogResults(data.results || []);
-      setCatalogMeta(data);
+      const results = data.results || [];
+      setCatalogResults(results);
+      if (results.length === 0) setCatalogError(t('sealed.catalogEmpty'));
     } catch (err) {
-      showToast(err.message);
+      setCatalogResults([]);
+      setCatalogError(err.message);
     } finally {
       setCatalogBusy(false);
     }
   };
 
-  const applyCatalogResult = (result) => {
-    setForm(current => ({
-      ...current,
-      name: result.name,
-      product_type: result.product_type,
-      language: result.language || 'English',
-      set_name: result.set_name || '',
-      image_url: result.image_url || '',
-      market_price: result.market_price || '',
-      market_currency: result.market_currency || 'USD',
-      market_source: result.market_price ? 'tcgcsv' : '',
-      provider: result.provider || '',
-      provider_product_id: result.provider_product_id || '',
-      catalog_category_id: result.catalog_category_id || null,
-      catalog_group_id: result.catalog_group_id || null,
-    }));
+  const chooseProduct = (result) => {
+    setPick(result);
+    setQuick({ quantity: '1', total_cost: '', currency: 'USD', purchased_at: '', location_id: '' });
+    setForm(null);
+  };
+
+  const savePick = async (event) => {
+    event.preventDefault();
+    const body = {
+      name: pick.name,
+      product_type: pick.product_type,
+      language: pick.language || 'English',
+      set_id: pick.set_id || '',
+      set_name: pick.set_name || '',
+      image_url: pick.image_url || '',
+      market_price: pick.market_price || '',
+      market_currency: pick.market_currency || 'USD',
+      market_source: pick.market_source || '',
+      provider: pick.provider || '',
+      provider_product_id: pick.provider_product_id || '',
+      lot: {
+        quantity: Number(quick.quantity),
+        total_cost: quick.total_cost,
+        currency: quick.currency,
+        purchased_at: quick.purchased_at,
+        location_id: quick.location_id === '' ? null : Number(quick.location_id),
+      },
+    };
+    const response = await fetch('/api/sealed/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showToast(data.error || t('sealed.errSave'), 'error');
+      return;
+    }
+    setPick(null);
+    setSelectedId(data.product.id);
+    showToast(t('sealed.saved'), 'success');
+    refresh();
   };
 
   const refreshQuote = async (product) => {
@@ -240,33 +273,6 @@ function SealedInventory({ showToast, admin }) {
     showToast(t('sealed.saved'), 'success');
     refresh();
   };
-
-  const startCatalogSync = async () => {
-    setSyncing(true);
-    const response = await fetch('/api/sealed/catalog/sync', { method: 'POST' });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setSyncing(false);
-      showToast(data.error || t('sealed.errCatalog'));
-      return;
-    }
-    setSyncState(data);
-    if (!data.running) setSyncing(false);
-  };
-
-  useEffect(() => {
-    if (!admin || !syncing) return undefined;
-    const timer = setInterval(async () => {
-      try {
-        const response = await fetch('/api/sealed/catalog/status');
-        const data = await response.json();
-        if (!response.ok) return;
-        setSyncState(data);
-        if (!data.running) setSyncing(false);
-      } catch { /* the next poll retries */ }
-    }, 1500);
-    return () => clearInterval(timer);
-  }, [admin, syncing]);
 
   const setArchived = async (kind, id, archived) => {
     const path = kind === 'product'
@@ -329,16 +335,118 @@ function SealedInventory({ showToast, admin }) {
           <button className="btn btn-secondary" type="button" onClick={exportCsv}>
             <Download size={16} /> {t('sealed.export')}
           </button>
-          {admin && (
-            <button className="btn btn-secondary" type="button" onClick={startCatalogSync} disabled={syncing}>
-              <Download size={16} /> {syncing ? t('sealed.catalogSyncing', { done: syncState?.done || 0, total: syncState?.total || 0 }) : t('sealed.catalogSync')}
-            </button>
-          )}
-          <button className="btn btn-primary" type="button" onClick={() => { setForm(emptyForm()); setCatalogResults([]); setCatalogMeta(null); setSelectedId(null); }}>
+          <button className="btn btn-primary" type="button" onClick={() => { setForm(emptyForm()); setPick(null); setSelectedId(null); }}>
             <Plus size={16} /> {t('sealed.add')}
           </button>
         </div>
       </div>
+
+      <div className="glass-panel" style={{ padding: '1.25rem' }}>
+        <form onSubmit={searchCatalog} style={{ display: 'grid', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('sealed.findTitle')}</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                className="input-control"
+                placeholder={t('sealed.catalogPlaceholder')}
+                value={catalogQuery}
+                onChange={e => setCatalogQuery(e.target.value)}
+                aria-label={t('sealed.findTitle')}
+                style={{ width: '100%', paddingLeft: '2.5rem' }}
+              />
+              <Search size={16} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('sealed.setOptional')}</label>
+              <input
+                type="text"
+                className="input-control"
+                placeholder={t('sealed.setPlaceholder')}
+                value={catalogSet}
+                onChange={e => setCatalogSet(e.target.value)}
+                aria-label={t('sealed.setOptional')}
+              />
+            </div>
+          </div>
+          <button type="submit" className="btn btn-primary" disabled={catalogBusy} style={{ width: '100%' }}>
+            <Search size={18} />
+            {catalogBusy ? t('sealed.catalogSearching') : t('sealed.catalogSearch')}
+          </button>
+        </form>
+        <p style={{ margin: '0.75rem 0 0', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{t('sealed.catalogHint')}</p>
+      </div>
+
+      {catalogError && (
+        <div className="glass-panel" style={{ borderLeft: '4px solid var(--accent-red)', padding: '1rem', color: 'var(--text-secondary)' }}>
+          {catalogError}
+        </div>
+      )}
+
+      {catalogResults.length > 0 && (
+        <div className="card-grid">
+          {catalogResults.map(result => (
+            <div
+              key={`${result.provider}-${result.provider_product_id}`}
+              className="tcg-card"
+              onClick={() => chooseProduct(result)}
+            >
+              <div className="tcg-card-inner">
+                {result.image_url ? (
+                  <img src={result.image_url} alt="" className="tcg-card-image" style={{ objectFit: 'contain', background: 'var(--bg-secondary)' }} />
+                ) : (
+                  <div className="tcg-card-image" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Package size={28} />
+                  </div>
+                )}
+                <div style={{ position: 'absolute', bottom: '8px', right: '8px', background: 'rgba(0,0,0,0.85)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border-glass-hover)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Plus size={10} style={{ color: 'var(--accent-red)' }} />
+                  <span style={{ fontSize: '0.65rem', fontWeight: 700 }}>{t('search.quickAdd')}</span>
+                </div>
+              </div>
+              <div className="tcg-card-info">
+                <div className="tcg-card-name">{result.name}</div>
+                <div className="tcg-card-meta">
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{result.set_name || typeLabel(result.product_type)}</span>
+                  <span className="tcg-card-price">{result.market_price ? `${result.market_currency} ${result.market_price}` : '—'}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pick && (
+        <form className="glass-panel" style={{ padding: '1rem', display: 'grid', gap: '0.7rem' }} onSubmit={savePick}>
+          <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
+            {pick.image_url && <img src={pick.image_url} alt="" style={{ width: '4.5rem', height: '4.5rem', objectFit: 'contain' }} />}
+            <div>
+              <strong>{pick.name}</strong>
+              <div style={{ color: 'var(--text-secondary)' }}>
+                {typeLabel(pick.product_type)}{pick.set_name ? ` · ${pick.set_name}` : ''}
+                {' · '}
+                {pick.market_price ? `${pick.market_currency} ${pick.market_price}` : t('sealed.marketUnknown')}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.6rem' }}>
+            <input className="input-control" required type="number" min="1" value={quick.quantity} onChange={e => setQuick({ ...quick, quantity: e.target.value })} aria-label={t('sealed.quantity')} />
+            <input className="input-control" required value={quick.total_cost} onChange={e => setQuick({ ...quick, total_cost: e.target.value })} placeholder={t('sealed.cost')} aria-label={t('sealed.cost')} />
+            <input className="input-control" required value={quick.currency} onChange={e => setQuick({ ...quick, currency: e.target.value.toUpperCase() })} aria-label={t('sealed.currency')} maxLength={3} />
+            <input className="input-control" type="date" value={quick.purchased_at} onChange={e => setQuick({ ...quick, purchased_at: e.target.value })} aria-label={t('sealed.purchased')} />
+            <select className="select-control" value={quick.location_id} onChange={e => setQuick({ ...quick, location_id: e.target.value })} aria-label={t('sealed.location')}>
+              <option value="">{t('sealed.noLocation')}</option>
+              {locations.map(location => <option key={location.id} value={location.id}>{location.name}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn btn-primary" type="submit">{t('sealed.save')}</button>
+            <button className="btn btn-secondary" type="button" onClick={() => setPick(null)}>{t('sealed.cancel')}</button>
+          </div>
+        </form>
+      )}
 
       <div className="glass-panel" style={{ padding: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <input className="input-control"
@@ -362,47 +470,7 @@ function SealedInventory({ showToast, admin }) {
       {form && (
         <form className="glass-panel" style={{ padding: '1rem', display: 'grid', gap: '0.6rem' }} onSubmit={saveProduct}>
           <strong>{t('sealed.add')}</strong>
-          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{t('sealed.catalogHint')}</p>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <input className="input-control"
-              value={catalogQuery}
-              onChange={e => setCatalogQuery(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); searchCatalog(); } }}
-              placeholder={t('sealed.catalogSearch')}
-              aria-label={t('sealed.catalogSearch')}
-              style={{ flex: '1 1 16rem' }}
-            />
-            <button className="btn btn-secondary" type="button" onClick={searchCatalog} disabled={catalogBusy}>
-              {catalogBusy ? t('sealed.catalogSearching') : t('sealed.catalogSearch')}
-            </button>
-          </div>
-          {catalogMeta && catalogResults.length === 0 && (
-            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              {catalogMeta.needsSet ? t('sealed.catalogNeedsSet') : t('sealed.catalogEmpty')}
-              {catalogMeta.limited ? ` ${t('sealed.catalogLimited')}` : ''}
-            </p>
-          )}
-          {catalogResults.length > 0 && (
-            <div style={{ display: 'grid', gap: '0.4rem' }}>
-              {catalogResults.map(result => (
-                <button
-                  key={`${result.provider}-${result.provider_product_id}`}
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => applyCatalogResult(result)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', textAlign: 'left', justifyContent: 'flex-start' }}
-                >
-                  {result.image_url && <img src={result.image_url} alt="" width="44" height="44" style={{ objectFit: 'contain' }} />}
-                  <span>
-                    <strong>{result.name}</strong>
-                    <span style={{ display: 'block', color: 'var(--text-secondary)' }}>
-                      {typeLabel(result.product_type)} · {result.set_name || result.language} · {result.market_price ? `${result.market_currency} ${result.market_price}` : t('sealed.marketUnknown')}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{t('sealed.manualHint')}</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(12rem, 1fr))', gap: '0.6rem' }}>
             {form.image_url && <img src={form.image_url} alt={form.name || ''} style={{ width: '5.5rem', height: '5.5rem', objectFit: 'contain' }} />}
             <input className="input-control" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder={t('sealed.name')} aria-label={t('sealed.name')} />
@@ -519,7 +587,7 @@ function ProductDetail({ product, locations, t, onArchive, onQuote, onAddLot, on
         <input className="input-control" value={market} onChange={e => setMarket(e.target.value)} aria-label={t('sealed.market')} placeholder={t('sealed.market')} style={{ width: '7rem' }} />
         <input className="input-control" value={marketCurrency} onChange={e => setMarketCurrency(e.target.value.toUpperCase())} aria-label={t('sealed.marketCurrency')} maxLength={3} style={{ width: '4.5rem' }} />
         <button className="btn btn-secondary" type="button" onClick={() => onQuote(market, marketCurrency)}>{t('sealed.saveQuote')}</button>
-        {product.provider === 'tcgcsv' && (
+        {(product.provider === 'pokewallet' || product.provider === 'tcgcsv') && product.provider_product_id && (
           <button className="btn btn-secondary" type="button" onClick={onRefreshQuote}>{t('sealed.updateQuote')}</button>
         )}
         <button className="btn btn-secondary" type="button" onClick={onArchive}>

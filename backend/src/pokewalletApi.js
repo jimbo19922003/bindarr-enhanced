@@ -718,6 +718,21 @@ function resetForTests() {
   pending.clear();
 }
 
+// One documented search. Results include singles and sealed products; the
+// caller keeps the sealed ones. This shares the card-pricing cache and the
+// local hourly and daily caps, and it does not log the key.
+async function searchCatalog(query) {
+  const q = String(query || '').replace(/\s+/g, ' ').trim();
+  if (q.length < 2 || q.length > 100) throw fail('query_short');
+  return request('/search', { q, limit: 30, page: 1 });
+}
+
+async function fetchProduct(id) {
+  const text = String(id || '');
+  if (!/^(pk_[a-f0-9]{16,128}|[a-f0-9]{32,128})$/i.test(text)) throw fail('not_found');
+  return request(`/cards/${encodeURIComponent(text)}`);
+}
+
 module.exports = {
   BASE,
   MAX_REQUESTS_PER_RUN,
@@ -727,5 +742,7 @@ module.exports = {
   updateCollectionPrices,
   status,
   mapManually,
+  searchCatalog,
+  fetchProduct,
   resetForTests,
 };

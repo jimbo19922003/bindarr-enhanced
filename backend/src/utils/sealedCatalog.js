@@ -1,16 +1,18 @@
 'use strict';
 
-// Sealed products are TCGplayer products, the same catalogue TCGCSV already
-// mirrors for card prices. Cards are the rows with a collector number. Sealed
-// product is everything else whose name is a box, pack, tin, or the like.
+// A person searching for a sealed product gets one PokéWallet search, the same
+// request a card lookup uses. PokéWallet returns singles and sealed products
+// together; this keeps the sealed ones and reads the USD market price and the
+// public TCGplayer picture from that response.
 //
-// TCGCSV asks callers not to hit it from a user-facing request, and it only
-// changes once a day. Search reads the copy stored here. A search that names a
-// set downloads that set if we do not have it yet, and then keeps it. The full
-// walk is a separate admin action with a pause between sets.
+// TCGCSV has no search endpoint. Downloading its set list from this request is
+// what failed the lookup whenever that mirror was unreachable. The local copy
+// and the admin download below are a separate full walk. Search does not use them.
 
 const db = require('../db');
 const tcgcsv = require('../tcgcsvApi');
+const pokewallet = require('../pokewalletApi');
+const { productIdFromUrl } = require('./pokewalletMatch');
 const { centsToMoney, moneyToCents } = require('./sealedInventory');
 
 const PROVIDER = 'tcgcsv';
@@ -44,9 +46,16 @@ let client = {
 let current = null;
 let last = null;
 let searchPulls = [];
+let searchProducts = (query) => pokewallet.searchCatalog(query);
+let loadProduct = (id) => pokewallet.fetchProduct(id);
 
 function setClient(next) {
   client = { ...client, ...next };
+}
+
+function setPokewallet(next) {
+  if (next && next.search) searchProducts = next.search;
+  if (next && next.load) loadProduct = next.load;
 }
 
 function resetForTests() {
@@ -56,9 +65,62 @@ function resetForTests() {
     getPrices: tcgcsv.getPrices,
     get: (...args) => tcgcsv.client.get(...args),
   };
+  searchProducts = (query) => pokewallet.searchCatalog(query);
+  loadProduct = (id) => pokewallet.fetchProduct(id);
   current = null;
   last = null;
   searchPulls = [];
+}
+
+function catalogError(err) {
+  if (err && err.status) return err;
+  const code = err && err.code;
+  const message = code === 'key_missing'
+    ? 'Save a PokéWallet API key in Settings or Admin to search sealed products.'
+    : code === 'key_rejected'
+      ? 'The PokéWallet API key was rejected.'
+      : code === 'rate_limited'
+        ? 'PokéWallet’s hourly or daily limit was reached. Try again later.'
+        : code === 'query_short'
+          ? 'Enter at least 2 characters.'
+          : 'PokéWallet could not be reached.';
+  const wrapped = new Error(message);
+  wrapped.status = code === 'rate_limited' ? 429 : (code === 'key_missing' || code === 'key_rejected' || code === 'query_short' ? 400 : 502);
+  return wrapped;
+}
+
+// PokéWallet search returns cards and sealed products together. This keeps the
+// sealed ones. The picture is TCGplayer's public product image for the id
+// PokéWallet already named; we do not call TCGCSV to find it.
+function mapSealedResult(result) {
+  const info = (result && result.card_info) || {};
+  if (String(info.product_type || '') !== 'sealed') return null;
+  const name = String(info.name || '').trim();
+  if (!name || REJECT_NAME.test(name.toLowerCase())) return null;
+  const id = String(result.id || '');
+  if (!/^(pk_[a-f0-9]{16,128}|[a-f0-9]{32,128})$/i.test(id)) return null;
+  const rows = result.tcgplayer && Array.isArray(result.tcgplayer.prices) ? result.tcgplayer.prices : [];
+  const priced = rows.filter(row => row && row.market_price > 0);
+  const chosen = priced.find(row => row.sub_type_name === 'Normal') || priced[0];
+  let market = null;
+  if (chosen) {
+    try { market = centsToMoney(moneyToCents(Number(chosen.market_price).toFixed(2), 'Market price')); }
+    catch { market = null; }
+  }
+  const productId = productIdFromUrl(result.tcgplayer && result.tcgplayer.url);
+  return {
+    provider: 'pokewallet',
+    provider_product_id: id,
+    name: name.slice(0, 200),
+    product_type: sealedKind({ name }) || 'other',
+    language: 'English',
+    set_id: String(info.set_code || '').slice(0, 40),
+    set_name: String(info.set_name || '').slice(0, 120),
+    image_url: productId ? `https://tcgplayer-cdn.tcgplayer.com/product/${productId}_200w.jpg` : '',
+    market_price: market,
+    market_currency: market ? 'USD' : null,
+    market_source: market ? 'pokewallet' : '',
+  };
 }
 
 function sealedKind(product) {
@@ -229,64 +291,37 @@ async function pullGroup(group) {
 }
 
 async function search(query) {
-  const queryTokens = tokensOf(query);
-  if (!queryTokens.length) throw new TypeError('Enter at least 3 characters');
-  await ensureGroups();
-  const groups = await db.all(`SELECT * FROM sealed_catalog_group`);
-  // Product words ("box", "elite", "etb") sit on the product, not the set.
-  // Using them to choose a download would pull dozens of unrelated sets.
-  const productWords = new Set([
-    'etb', 'upc', 'tin', 'box', 'pack', 'elite', 'trainer', 'booster', 'sleeved',
-    'blister', 'collection', 'ultra', 'premium', 'mini', 'poster', 'pin', 'figure',
-    'special', 'build', 'battle', 'theme', 'kit', 'bundle', 'display', 'case',
-  ]);
-  const setTokens = queryTokens.filter(token => !productWords.has(token));
-  const toFetch = groups
-    .map(group => ({
-      group,
-      text: haystack([group.name, group.abbreviation, tcgcsv.stripGroupCode(group.name)]),
-    }))
-    .filter(item => setTokens.length > 0 && tokenHits(item.text, setTokens) && !fresh(item.group.products_fetched_at))
-    .sort((a, b) => score(b.text, setTokens) - score(a.text, setTokens))
-    .slice(0, MAX_GROUPS_PER_SEARCH);
-
-  let fetchedGroups = 0;
-  let limited = false;
-  for (const item of toFetch) {
-    if (!allowSearchPull()) {
-      limited = true;
-      break;
-    }
-    try {
-      await pullGroup(item.group);
-      fetchedGroups += 1;
-    } catch (err) {
-      console.warn(`sealed catalog: ${item.group.name} failed (${err.message})`);
-    }
+  const text = String(query || '').replace(/\s+/g, ' ').trim();
+  if (text.length < 2) {
+    const err = new TypeError('Enter at least 2 characters');
+    err.status = 400;
+    throw err;
   }
-
-  const rows = await db.all(`SELECT * FROM sealed_catalog`);
-  const results = rows
-    .map(row => {
-      const text = haystack([row.name, row.set_name, row.set_id]);
-      return { row, text, rank: score(text, queryTokens) };
-    })
-    .filter(item => tokenHits(item.text, queryTokens))
-    .sort((a, b) => b.rank - a.rank || a.row.name.localeCompare(b.row.name))
-    .slice(0, MAX_RESULTS)
-    .map(item => present(item.row));
-
-  return {
-    results,
-    fetchedGroups,
-    indexed: rows.length,
-    needsSet: results.length === 0 && rows.length === 0,
-    limited,
-    building: Boolean(current),
-  };
+  // One PokéWallet search, the same shape as looking up a card. TCGCSV has no
+  // search endpoint; downloading its set list here is what turned a lookup
+  // into a failed request whenever that mirror was unreachable.
+  let fetched;
+  try {
+    fetched = await searchProducts(text);
+  } catch (err) {
+    throw catalogError(err);
+  }
+  const list = fetched && fetched.body && Array.isArray(fetched.body.results) ? fetched.body.results : [];
+  const results = list.map(mapSealedResult).filter(Boolean);
+  return { results, indexed: results.length, needsSet: false, limited: false, building: false, fetchedGroups: 0 };
 }
 
 async function refreshOwned(product) {
+  if (product.provider === 'pokewallet') {
+    let fetched;
+    try {
+      fetched = await loadProduct(product.provider_product_id);
+    } catch (err) {
+      throw catalogError(err);
+    }
+    const body = fetched && fetched.body ? fetched.body : null;
+    return body ? mapSealedResult(body) : null;
+  }
   const categoryId = Number(product.catalog_category_id);
   const groupId = Number(product.catalog_group_id);
   const productId = String(product.provider_product_id || '');
@@ -401,5 +436,6 @@ module.exports = {
   sealedKind,
   marketCents,
   setClient,
+  setPokewallet,
   resetForTests,
 };

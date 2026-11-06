@@ -13,52 +13,91 @@ process.env.DEFAULT_ADMIN_PASSWORD = 'test-admin-password';
 
 const db = require('../src/db');
 const catalog = require('../src/utils/sealedCatalog');
+const pokewallet = require('../src/pokewalletApi');
 const sealedRoutes = require('../src/routes/sealed');
 
-const calls = { groups: 0, products: [] };
-let etbPrice = 49.95;
+const fixture = JSON.parse(fs.readFileSync(
+  path.join(__dirname, 'fixtures/pokewallet/search-mewtwo.json'),
+  'utf8'
+));
+const etb = fixture.results.find(row => row.card_info && row.card_info.product_type === 'sealed');
 
-const groups = {
-  3: [
-    { groupId: 24325, name: 'SV08: Surging Sparks', abbreviation: 'SV08', categoryId: 3 },
-    { groupId: 3170, name: 'SWSH12: Silver Tempest', abbreviation: 'SWSH12', categoryId: 3 },
-  ],
-  85: [],
-};
+const calls = { groups: 0, products: [], searches: [] };
+let mode = 'results';
+let quotePrice = 89.99;
 
-function sampleProducts() {
-  return [
-    { productId: 10, name: 'Pikachu', imageUrl: 'https://tcgplayer-cdn.tcgplayer.com/product/10_200w.jpg', extendedData: [{ name: 'Number', value: '001/191' }] },
-    { productId: 11, name: 'Surging Sparks Elite Trainer Box', imageUrl: 'https://tcgplayer-cdn.tcgplayer.com/product/11_200w.jpg', extendedData: [] },
-    { productId: 12, name: 'Surging Sparks Booster Box', imageUrl: 'https://tcgplayer-cdn.tcgplayer.com/product/12_200w.jpg', extendedData: [] },
-    { productId: 13, name: 'Surging Sparks Sleeved Booster Pack', imageUrl: 'https://tcgplayer-cdn.tcgplayer.com/product/13_200w.jpg', extendedData: [] },
-    { productId: 14, name: 'Surging Sparks Code Card', imageUrl: 'https://tcgplayer-cdn.tcgplayer.com/product/14_200w.jpg', extendedData: [] },
-    { productId: 15, name: 'Surging Sparks Mini Tin', imageUrl: 'javascript:alert(1)', extendedData: [] },
-  ];
-}
+const extra = [
+  {
+    id: 'pk_cccccccccccccccccccccccccccccccc',
+    card_info: {
+      name: 'Surging Sparks Booster Box',
+      set_name: 'Surging Sparks',
+      set_code: 'SV08',
+      product_type: 'sealed',
+    },
+    tcgplayer: {
+      url: 'https://www.tcgplayer.com/product/12',
+      prices: [{ sub_type_name: 'Normal', market_price: 0, mid_price: 110 }],
+    },
+  },
+  {
+    id: 'pk_dddddddddddddddddddddddddddddddd',
+    card_info: { name: 'Surging Sparks Code Card', product_type: 'sealed' },
+    tcgplayer: {
+      url: 'https://www.tcgplayer.com/product/14',
+      prices: [{ sub_type_name: 'Normal', market_price: 1 }],
+    },
+  },
+];
 
-function samplePrices() {
-  return [
-    { productId: 11, subTypeName: 'Normal', marketPrice: etbPrice, midPrice: 55 },
-    { productId: 12, subTypeName: 'Normal', marketPrice: 0, midPrice: 110 },
-    { productId: 13, subTypeName: 'Normal', marketPrice: 4.5, midPrice: 5 },
-    { productId: 15, subTypeName: 'Normal', marketPrice: 19.99, midPrice: 22 },
-  ];
+function searchBody() {
+  return { results: [...fixture.results, ...extra] };
 }
 
 catalog.resetForTests();
 catalog.setClient({
   getGroups: async (categoryId) => {
     calls.groups += 1;
-    return groups[categoryId] || [];
+    return categoryId === 3
+      ? [{ groupId: 24325, name: 'SV08: Surging Sparks', abbreviation: 'SV08', categoryId: 3 }]
+      : [];
   },
   getProducts: async (categoryId, groupId) => {
     calls.products.push([categoryId, groupId]);
-    return groupId === 24325 ? sampleProducts() : [];
+    return [];
   },
-  getPrices: async () => samplePrices(),
+  getPrices: async () => [],
   get: async () => { throw new Error('no stamp'); },
 });
+catalog.setPokewallet({
+  search: async (query) => {
+    calls.searches.push(query);
+    if (mode === 'key_missing') {
+      const err = new Error('key_missing');
+      err.code = 'key_missing';
+      throw err;
+    }
+    if (mode === 'rate_limited') {
+      const err = new Error('rate_limited');
+      err.code = 'rate_limited';
+      throw err;
+    }
+    return { body: searchBody() };
+  },
+  load: async (id) => {
+    const copy = JSON.parse(JSON.stringify(etb));
+    assert.strictEqual(id, copy.id);
+    copy.tcgplayer.prices[0].market_price = quotePrice;
+    return { body: copy };
+  },
+});
+
+function samplePrices() {
+  return [
+    { productId: 11, subTypeName: 'Normal', marketPrice: 49.95, midPrice: 55 },
+    { productId: 12, subTypeName: 'Normal', marketPrice: 0, midPrice: 110 },
+  ];
+}
 
 function send(port, method, urlPath, userId, body, role) {
   return new Promise((resolve, reject) => {
@@ -94,63 +133,83 @@ async function main() {
   assert.strictEqual(catalog.sealedKind({ name: 'Surging Sparks Code Card', extendedData: [] }), null);
   assert.strictEqual(catalog.sealedKind({ name: 'Surging Sparks Elite Trainer Box' }), 'etb');
   assert.strictEqual(catalog.sealedKind({ name: 'Surging Sparks Booster Box' }), 'booster_box');
-  assert.strictEqual(catalog.sealedKind({ name: 'Surging Sparks Sleeved Booster Pack' }), 'booster_pack');
   assert.strictEqual(catalog.marketCents(samplePrices(), 12), null);
   assert.strictEqual(catalog.marketCents(samplePrices(), 11), 4995);
 
   await db.initDb();
-  const before = await db.run(
+  await db.run(
     `INSERT INTO sealed_catalog (
        provider, provider_product_id, category_id, group_id, name, product_type, language, set_name, fetched_at
      ) VALUES ('tcgcsv', 'keep', 3, 1, 'Keep Me', 'other', 'English', 'Keep', '2020-01-01T00:00:00.000Z')`
   );
-  assert.ok(before.lastID == null || before.changes === 1);
   await db.initDb();
   const kept = await db.get(`SELECT name FROM sealed_catalog WHERE provider_product_id = 'keep'`);
   assert.strictEqual(kept.name, 'Keep Me');
-  await db.run(`DELETE FROM sealed_catalog`);
 
-  const bare = await catalog.search('elite trainer box');
-  assert.strictEqual(bare.results.length, 0);
-  assert.strictEqual(bare.needsSet, true);
+  await assert.rejects(() => catalog.search('a'), err => err.status === 400);
+
+  const found = await catalog.search('mewtwo 30th');
+  assert.deepStrictEqual(calls.searches, ['mewtwo 30th']);
+  assert.strictEqual(calls.groups, 0);
   assert.deepStrictEqual(calls.products, []);
+  const names = found.results.map(row => row.name);
+  assert.ok(names.includes('Mewtwo Elite Trainer Box'));
+  assert.ok(names.includes('Surging Sparks Booster Box'));
+  assert.ok(!names.includes('Mewtwo'));
+  assert.ok(!names.some(name => name.includes('Code Card')));
 
-  const found = await catalog.search('Surging Sparks Elite Trainer Box');
-  assert.deepStrictEqual(calls.products, [[3, 24325]]);
-  assert.strictEqual(found.results.length, 1);
-  assert.strictEqual(found.results[0].name, 'Surging Sparks Elite Trainer Box');
-  assert.strictEqual(found.results[0].product_type, 'etb');
-  assert.strictEqual(found.results[0].market_price, '49.95');
-  assert.strictEqual(found.results[0].market_currency, 'USD');
-  assert.strictEqual(found.results[0].image_url, 'https://tcgplayer-cdn.tcgplayer.com/product/11_200w.jpg');
-  assert.strictEqual(found.results[0].set_name, 'Surging Sparks');
-  assert.ok(!found.results.some(row => row.name === 'Pikachu' || row.name.includes('Code Card')));
+  const box = found.results.find(row => row.name === 'Mewtwo Elite Trainer Box');
+  assert.strictEqual(box.product_type, 'etb');
+  assert.strictEqual(box.provider, 'pokewallet');
+  assert.strictEqual(box.provider_product_id, 'pk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+  assert.strictEqual(box.market_price, '89.99');
+  assert.strictEqual(box.market_currency, 'USD');
+  assert.strictEqual(box.market_source, 'pokewallet');
+  assert.strictEqual(box.set_id, '30th');
+  assert.strictEqual(box.set_name, 'Celebrations: Classic Collection');
+  assert.strictEqual(box.image_url, 'https://tcgplayer-cdn.tcgplayer.com/product/999999_200w.jpg');
 
-  const again = await catalog.search('Surging Sparks Elite Trainer Box');
-  assert.strictEqual(again.fetchedGroups, 0);
-  assert.deepStrictEqual(calls.products, [[3, 24325]]);
-  assert.strictEqual(calls.groups, 2);
+  const unpriced = found.results.find(row => row.name === 'Surging Sparks Booster Box');
+  assert.strictEqual(unpriced.product_type, 'booster_box');
+  assert.strictEqual(unpriced.market_price, null);
+  assert.strictEqual(unpriced.market_source, '');
 
-  const box = await catalog.search('Surging Sparks Booster Box');
-  assert.strictEqual(box.results.length, 1);
-  assert.strictEqual(box.results[0].product_type, 'booster_box');
-  assert.strictEqual(box.results[0].market_price, null);
-
-  const tin = await catalog.search('Surging Sparks Mini Tin');
-  assert.strictEqual(tin.results[0].product_type, 'tin');
-  assert.strictEqual(tin.results[0].image_url, '');
-
-  const named = await catalog.search('elite trainer box');
-  assert.strictEqual(named.results.length, 1);
-  assert.strictEqual(named.results[0].provider_product_id, '11');
-
-  await db.run(`DELETE FROM sealed_catalog`);
-  await db.run(`UPDATE sealed_catalog_group SET products_fetched_at = NULL`);
-  calls.products.length = 0;
-  const firstTin = await catalog.search('Surging Sparks Mini Tin');
-  assert.deepStrictEqual(calls.products, [[3, 24325]]);
-  assert.strictEqual(firstTin.results[0].product_type, 'tin');
-  assert.strictEqual(firstTin.results[0].market_price, '19.99');
+  mode = 'key_missing';
+  await assert.rejects(
+    () => catalog.search('mewtwo'),
+    err => err.status === 400 && /PokéWallet API key/.test(err.message)
+  );
+  // The real client, with no key saved, must stop before any network call.
+  catalog.setPokewallet({ search: (query) => pokewallet.searchCatalog(query) });
+  await assert.rejects(
+    () => catalog.search('elite trainer box'),
+    err => err.status === 400 && /PokéWallet API key/.test(err.message)
+  );
+  catalog.setPokewallet({
+    search: async (query) => {
+      calls.searches.push(query);
+      if (mode === 'key_missing') {
+        const err = new Error('key_missing');
+        err.code = 'key_missing';
+        throw err;
+      }
+      if (mode === 'rate_limited') {
+        const err = new Error('rate_limited');
+        err.code = 'rate_limited';
+        throw err;
+      }
+      return { body: searchBody() };
+    },
+    load: async (id) => {
+      const copy = JSON.parse(JSON.stringify(etb));
+      assert.strictEqual(id, copy.id);
+      copy.tcgplayer.prices[0].market_price = quotePrice;
+      return { body: copy };
+    },
+  });
+  mode = 'rate_limited';
+  await assert.rejects(() => catalog.search('mewtwo'), err => err.status === 429);
+  mode = 'results';
 
   const admin = await db.get(`SELECT id FROM users WHERE username = 'admin'`);
   const member = await db.run(
@@ -167,19 +226,24 @@ async function main() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
 
-  const pick = found.results[0];
+  mode = 'key_missing';
+  const missing = await send(port, 'GET', '/api/sealed/catalog?q=mewtwo', admin.id);
+  assert.strictEqual(missing.status, 400, JSON.stringify(missing.body));
+  assert.match(missing.body.error, /PokéWallet API key/);
+  mode = 'results';
+
   const created = await send(port, 'POST', '/api/sealed/products', admin.id, {
-    ...pick,
+    ...box,
     lot: { quantity: 1, total_cost: '45.00', currency: 'USD', purchased_at: '2026-11-01' },
   });
-  assert.strictEqual(created.status, 201);
-  assert.strictEqual(created.body.product.market_source, 'tcgcsv');
-  assert.strictEqual(created.body.product.market_price, '49.95');
-  assert.strictEqual(created.body.product.image_url, pick.image_url);
+  assert.strictEqual(created.status, 201, JSON.stringify(created.body));
+  assert.strictEqual(created.body.product.market_source, 'pokewallet');
+  assert.strictEqual(created.body.product.market_price, '89.99');
+  assert.strictEqual(created.body.product.image_url, box.image_url);
   assert.strictEqual(created.body.product.lots.length, 1);
 
   const second = await send(port, 'POST', '/api/sealed/products', admin.id, {
-    ...pick,
+    ...box,
     lot: { quantity: 1, total_cost: '60.00', currency: 'USD' },
   });
   assert.strictEqual(second.status, 200);
@@ -187,13 +251,12 @@ async function main() {
   assert.strictEqual(second.body.product.lots.length, 2);
   assert.deepStrictEqual(second.body.product.lots.map(lot => lot.total_cost).sort(), ['45.00', '60.00']);
 
-  etbPrice = 55;
-  await db.run(`UPDATE sealed_catalog_group SET products_fetched_at = '2020-01-01T00:00:00.000Z' WHERE group_id = 24325`);
+  quotePrice = 55;
   const quoted = await send(port, 'POST', `/api/sealed/products/${created.body.product.id}/quote`, admin.id);
   assert.strictEqual(quoted.status, 200, JSON.stringify(quoted.body));
   assert.strictEqual(quoted.body.product.market_price, '55.00');
-  assert.strictEqual(quoted.body.product.market_source, 'tcgcsv');
-  assert.ok(calls.products.length >= 2);
+  assert.strictEqual(quoted.body.product.market_source, 'pokewallet');
+  assert.strictEqual(calls.groups, 0);
 
   const denied = await send(port, 'POST', '/api/sealed/catalog/sync', member.lastID, null, 'member');
   assert.strictEqual(denied.status, 403);

@@ -308,13 +308,12 @@ product and linking the pulls is not part of this screen. Import and export
 use CSV from the Sealed tab. A location name in the file must already exist
 for that user.
 
-Adding a product can search TCGplayer's sealed catalogue through TCGCSV, the
-same mirror that prices single cards. A match fills the name, the product
-image, and the USD market price. English listings come from category 3 and
-Japanese listings from category 85. The copy is kept locally and a set is
-downloaded again only after a day. An admin can download every set from the
-Sealed tab. A product the catalogue does not have is still entered by hand,
-and a missing market price stays unknown.
+Adding a product searches PokéWallet the same way a card search does, and
+keeps only sealed products. A match shows the picture and the USD market
+price, then Quick Add records the purchase lot. The picture is TCGplayer's
+public product image for the id PokéWallet already returned. The search needs
+the PokéWallet key saved in Settings. A missing market price stays unknown.
+A product the search does not list is still entered by hand.
 
 ## Card scanning
 
