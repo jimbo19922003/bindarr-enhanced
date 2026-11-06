@@ -9,8 +9,22 @@ LOG=".devcontainer/data/start.log"
 LOCK=".devcontainer/data/start.lock"
 
 port_open() {
-  # Bash /dev/tcp can block on a dead route. timeout keeps the check short.
-  timeout 0.4 bash -c "echo >/dev/tcp/127.0.0.1/${PORT}" >/dev/null 2>&1
+  # Do not use `timeout`. It moves the probe into a new process group, and the
+  # Codespaces startup terminal can stop that group with SIGTTOU. A stopped
+  # probe never returns, so the editor stays on "Opening remote...".
+  bash -c "echo >/dev/tcp/127.0.0.1/${PORT}" </dev/null >/dev/null 2>&1 &
+  local probe=$!
+  local i
+  for i in 1 2 3 4 5; do
+    if ! kill -0 "$probe" 2>/dev/null; then
+      wait "$probe" && return 0
+      return 1
+    fi
+    sleep 0.1
+  done
+  kill "$probe" 2>/dev/null || true
+  wait "$probe" 2>/dev/null || true
+  return 1
 }
 
 print_url() {
@@ -49,9 +63,9 @@ report_failure() {
   fi
 }
 
-# Start the real server in its own session. Codespaces ends the lifecycle
-# command's process group when that command returns; a new session keeps
-# Express running after postStartCommand finishes.
+# Start the server as an orphan. A process left in the Codespaces startup
+# command's tree keeps the editor on "Opening remote..." until that process
+# exits, and the server is not supposed to exit.
 spawn_server() {
   mkdir -p .devcontainer/data
   if [ ! -x ./node_modules/.bin/concurrently ]; then
@@ -59,10 +73,33 @@ spawn_server() {
     return 1
   fi
   printf '\n===== %s starting Bindarr =====\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$LOG"
-  # Close the lock fd (9). The child would otherwise inherit it and hold the
-  # lock for the whole server lifetime.
-  BINDARR_START_CHILD=1 setsid nohup bash "$0" --foreground >> "$LOG" 2>&1 9>&- < /dev/null &
-  echo $! > .devcontainer/data/server.pid
+  # Double-fork, close inherited descriptors (including lock fd 9), then exec.
+  # The Python process this shell waits for exits immediately.
+  python3 - "$PWD" "$LOG" << 'PY'
+import os, sys
+root, log_path = sys.argv[1], sys.argv[2]
+script = os.path.join(root, ".devcontainer", "start.sh")
+if os.fork() > 0:
+    os._exit(0)
+os.setsid()
+if os.fork() > 0:
+    os._exit(0)
+os.chdir(root)
+os.environ["BINDARR_START_CHILD"] = "1"
+for fd in range(3, 256):
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+devnull = os.open(os.devnull, os.O_RDONLY)
+os.dup2(devnull, 0)
+os.dup2(log_fd, 1)
+os.dup2(log_fd, 2)
+os.close(log_fd)
+os.close(devnull)
+os.execv("/bin/bash", ["bash", script, "--foreground"])
+PY
   echo "Starting Bindarr in the background. Log: ${LOG}"
 }
 

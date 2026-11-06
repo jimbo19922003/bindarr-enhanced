@@ -12,4 +12,4 @@ npm ci --prefix backend
 npm ci --prefix frontend
 npm run build:frontend
 node backend/test/openingAccounting.test.js
-printf '\nSetup complete. The container start command listens on port 3001 and the Ports panel labels it "Bindarr test instance".\n'
+printf '\nSetup complete. The editor opens next. The terminal then starts Bindarr on port 3001.\n'

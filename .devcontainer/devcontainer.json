@@ -20,9 +20,8 @@
     "ALLOW_REGISTRATION": "false"
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
-  "postStartCommand": "bash .devcontainer/start.sh --background",
   "postAttachCommand": "bash .devcontainer/start.sh --ensure",
-  "waitFor": "postStartCommand",
+  "waitFor": "postCreateCommand",
   "customizations": {
     "codespaces": {
       "openFiles": [

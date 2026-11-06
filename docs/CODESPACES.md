@@ -18,10 +18,15 @@ runs every `backend/test/*.test.js`.
 
 ## Start and resume
 
-Creating the Codespace runs `bash .devcontainer/setup.sh`, then
-`bash .devcontainer/start.sh --background`. The editor waits for that start
-attempt. Connecting again runs `bash .devcontainer/start.sh --ensure` in the
-terminal. The server log is `.devcontainer/data/start.log`.
+Creating the Codespace runs `bash .devcontainer/setup.sh` and then opens the
+editor. The editor does not wait for the app. After it connects, the terminal
+runs `bash .devcontainer/start.sh --ensure`. The server log is
+`.devcontainer/data/start.log`.
+
+A window that stays on "Opening remote..." was built from the previous
+container config, which waited for the app process before connecting. Stop or
+delete that Codespace at https://github.com/codespaces and create a new one
+from this branch. Resuming the stuck one uses the same startup command.
 
 When the app is up, the terminal prints `http://localhost:3001` and the Ports
 panel lists port **3001** as **Bindarr test instance**. A preview of that port
