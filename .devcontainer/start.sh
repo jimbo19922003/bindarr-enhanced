@@ -77,6 +77,10 @@ if [ ! -f frontend/dist/index.html ]; then
   npm run build:frontend
 fi
 
+# The prebuilt sqlite3 module crashes on this image (GLIBC_2.38). Rebuild once
+# before nodemon, or the process exits before it listens and the port returns 502.
+bash .devcontainer/rebuild-sqlite3.sh
+
 echo "Starting Bindarr in this terminal. Leave it open."
 echo "http://localhost:${PORT}"
 # nodemon treats end-of-stdin as "the user closed the terminal" and exits.

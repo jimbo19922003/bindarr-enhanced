@@ -9,6 +9,7 @@ fi
 mkdir -p .devcontainer/data
 npm ci
 npm ci --prefix backend
+bash .devcontainer/rebuild-sqlite3.sh
 npm ci --prefix frontend
 npm run build:frontend
 node backend/test/openingAccounting.test.js

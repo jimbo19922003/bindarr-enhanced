@@ -27,6 +27,11 @@ The dev server has to ignore closed stdin. Nodemon otherwise treats
 end-of-file on stdin as a closed terminal and exits. Nothing is left
 listening, and the forwarded port answers HTTP 502.
 
+The first start also rebuilds `sqlite3` from source when its npm prebuild
+needs GLIBC 2.38. Debian Bookworm does not have that version, and the
+prebuild then crashes the server before it listens. The compile takes a few
+minutes and is skipped once the module loads.
+
 When the terminal prints `Bindarr Server running on port 3001`, refresh port
 **3001** in the Ports panel. It is labeled **Bindarr test instance**. Keep
 the visibility private. The page and the API are the same origin: Express
