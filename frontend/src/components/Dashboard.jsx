@@ -68,10 +68,20 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
   }, [statsTrigger, gameFilter]);
 
   useEffect(() => {
-    if (stats && stats.summary.totalCards > 0) {
-      fetchTimelineHistory();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!stats) return;
+    const controller = new AbortController();
+    let current = true;
+    setHistoryData([]);
+    setLoadingHistory(true);
+    fetch(`/api/stats/history?period=${timePeriod}${gameFilter ? `&game=${gameFilter}` : ''}`, { signal: controller.signal })
+      .then(response => {
+        if (!response.ok) throw new Error('Failed to load portfolio history');
+        return response.json();
+      })
+      .then(data => { if (current) setHistoryData(data); })
+      .catch(error => { if (current && error.name !== 'AbortError') console.error(error); })
+      .finally(() => { if (current) setLoadingHistory(false); });
+    return () => { current = false; controller.abort(); };
   }, [timePeriod, stats, gameFilter]);
 
   const fetchStats = async () => {
@@ -88,21 +98,6 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
       setError(err.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchTimelineHistory = async () => {
-    try {
-      setLoadingHistory(true);
-      const response = await fetch(`/api/stats/history?period=${timePeriod}${gameFilter ? `&game=${gameFilter}` : ''}`);
-      if (response.ok) {
-        const data = await response.json();
-        setHistoryData(data);
-      }
-    } catch (err) {
-      console.error('Error loading history timeline:', err);
-    } finally {
-      setLoadingHistory(false);
     }
   };
 
@@ -319,7 +314,10 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
         </div>
       </div>
 
-      {/* Net Worth History Timeline Chart */}
+      {/* Recorded combined holdings, not a backfilled price-only curve. */}
+      <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+        Recorded cards + sealed portfolio snapshots. History starts when this feature is used; earlier combined values are unavailable.
+      </p>
       <div className="glass-panel" style={{ marginBottom: '1.5rem', padding: '1.5rem 1.75rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h3 className="chart-title" style={{ margin: 0 }}>{t('dash.timelineTitle')}</h3>
