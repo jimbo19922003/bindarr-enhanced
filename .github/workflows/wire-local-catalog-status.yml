@@ -1,0 +1,45 @@
+name: Validate Admin local catalog status integration
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - '.github/workflows/wire-local-catalog-status.yml'
+      - 'scripts/wire-local-catalog-status.py'
+      - 'backend/src/routes/localCatalogStatus.js'
+      - 'backend/test/localCatalogStatus.test.js'
+      - 'frontend/src/components/LocalCatalogStatusPanel.jsx'
+permissions:
+  contents: write
+concurrency:
+  group: wire-local-catalog-status
+  cancel-in-progress: false
+jobs:
+  admin-status:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/pokemon-local-first
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: python3 scripts/wire-local-catalog-status.py
+      - run: git diff --check
+      - run: node --check backend/src/routes/localCatalogStatus.js
+      - run: node --check backend/src/routes/admin.js
+      - run: npm ci --prefix backend
+      - run: node --test backend/test/localCatalogStatus.test.js
+      - run: npm test --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run lint --prefix frontend
+      - run: npm test --prefix frontend
+      - run: npm run build --prefix frontend
+      - name: Commit validated Admin and panel wiring only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/src/routes/admin.js frontend/src/components/CatalogPanel.jsx
+          git commit -m 'feat: connect Admin local catalog and artwork status panel'
+          git push origin HEAD:release/pokemon-local-first
