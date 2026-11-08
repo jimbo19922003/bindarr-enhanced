@@ -2,10 +2,43 @@
 const express = require('express');
 const {LANGUAGES} = require('../utils/languages');
 const {resolveLanguage} = require('./localPokemonSets');
+const catalogAutoSync = require('../utils/catalogAutoSync');
 function createLocalCatalogStatusRouter({connect, modeEnabled = () => process.env.POKEMON_LOCAL_CATALOG === '1'}) {
   const router = express.Router();
   router.use((req, res, next) => req.user?.role === 'admin' ? next() : res.status(req.user ? 403 : 401).json({error: 'Administrator access required'}));
   router.use('/install', require('./localCatalogInstall').createLocalCatalogInstallRouter({connect}));
+
+  router.get('/sync-status', (_req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    res.json(catalogAutoSync.status());
+  });
+
+  router.post('/sync', async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    if (!modeEnabled()) return res.status(400).json({error: 'Local catalog mode is not enabled (POKEMON_LOCAL_CATALOG != 1)'});
+    try {
+      const result = await catalogAutoSync.runInitialSync(connect);
+      return res.json(result);
+    } catch (error) {
+      console.error('Manual catalog sync failed:', error.message);
+      return res.status(503).json({error: 'Catalog sync failed', message: error.message});
+    }
+  });
+
+  router.post('/add-language', async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    const {language} = req.body || {};
+    if (!language) return res.status(400).json({error: 'Language code is required'});
+    const lang = LANGUAGES.find(l => l.code === language || l.name === language);
+    if (!lang) return res.status(400).json({error: 'Unsupported language', available: LANGUAGES.map(l => ({code: l.code, name: l.name}))});
+    try {
+      const result = await catalogAutoSync.addLanguage(connect, lang.code);
+      return res.json(result);
+    } catch (error) {
+      console.error('Add language failed:', error.message);
+      return res.status(503).json({error: 'Failed to add language', message: error.message});
+    }
+  });
   router.get('/', async (req, res) => {
     res.set('Cache-Control', 'private, no-store');
     const language = resolveLanguage(req.query.lang);

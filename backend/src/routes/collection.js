@@ -770,16 +770,16 @@ async function addCardToCollection(user, body) {
     // while displaying the name the card is actually printed with.
     card = await tcgdexApi.learnEnglishName(card);
 
-    // TCGdex often has no market price, so a card added from search was stored
-    // at zero until a later refresh. Ask PokéWallet once here, while the card
-    // is still the row we are about to file. A miss leaves the price unknown.
+    // Price the card using the cascading provider chain: CardDex → PokéWallet → cache.
+    // CardDex is primary for English Pokémon cards, with PokéWallet as backup.
     if (card.game === 'pokemon' || String(card.id || '').startsWith('tcgdex-')) {
       try {
-        await pokewallet.priceUnpricedCard(card);
+        const priceChain = require('../utils/pokemonPriceChain');
+        await priceChain.priceCardOnAdd(card);
         const refreshed = await db.get(`SELECT * FROM card_cache WHERE id = ?`, [card.id]);
         if (refreshed) card = refreshed;
       } catch (err) {
-        console.warn(`PokéWallet price on add skipped for ${card.id}: ${err.code || err.message}`);
+        console.warn(`Price chain on add skipped for ${card.id}: ${err.code || err.message}`);
       }
     }
 

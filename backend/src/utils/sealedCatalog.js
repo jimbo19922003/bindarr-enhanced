@@ -297,9 +297,21 @@ async function search(query) {
     err.status = 400;
     throw err;
   }
-  // One PokéWallet search, the same shape as looking up a card. TCGCSV has no
-  // search endpoint; downloading its set list here is what turned a lookup
-  // into a failed request whenever that mirror was unreachable.
+
+  // Try CardDex first for sealed products
+  try {
+    const { getCarddexCatalog } = require('./carddexCatalog');
+    const carddex = getCarddexCatalog();
+    const carddexResult = await carddex.searchSealed(text);
+    if (carddexResult.products && carddexResult.products.length > 0) {
+      console.log(`[sealed-catalog] CardDex returned ${carddexResult.products.length} sealed products`);
+      return { results: carddexResult.products, indexed: carddexResult.products.length, needsSet: false, limited: false, building: false, fetchedGroups: 0, source: 'carddex' };
+    }
+  } catch (err) {
+    console.warn(`[sealed-catalog] CardDex sealed search failed: ${err.code || err.message}`);
+  }
+
+  // Fall back to PokéWallet search
   let fetched;
   try {
     fetched = await searchProducts(text);
@@ -308,7 +320,7 @@ async function search(query) {
   }
   const list = fetched && fetched.body && Array.isArray(fetched.body.results) ? fetched.body.results : [];
   const results = list.map(mapSealedResult).filter(Boolean);
-  return { results, indexed: results.length, needsSet: false, limited: false, building: false, fetchedGroups: 0 };
+  return { results, indexed: results.length, needsSet: false, limited: false, building: false, fetchedGroups: 0, source: 'pokewallet' };
 }
 
 async function refreshOwned(product) {
