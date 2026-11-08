@@ -5,6 +5,7 @@ mkdir -p /work/source
 cp -R /source/. /work/source/
 cd /work/source
 git config --global --add safe.directory /work/source
+bun /opt/bindarr/apply-catalog-corrections.js /work/source /out
 bun --version
 bun install --frozen-lockfile
 cd /work/source/server
