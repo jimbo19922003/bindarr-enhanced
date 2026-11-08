@@ -1,0 +1,94 @@
+name: Inspect CardDex contract and catalog build outcome
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths: ['.github/workflows/carddex-contract-probe.yml']
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+jobs:
+  inspect:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.ref == 'refs/heads/release/pokemon-local-first'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Read bounded public documentation and one pricing sample without credentials
+        run: |
+          python3 <<'PY'
+          import os, json, re, urllib.request, urllib.error
+          from urllib.parse import urlsplit, quote
+          from html.parser import HTMLParser
+          from pathlib import Path
+          allowed = {'carddex.dev', 'api.carddex.dev'}
+          def check(url):
+              parsed = urlsplit(url)
+              if parsed.scheme != 'https' or parsed.hostname not in allowed or parsed.username or parsed.password or parsed.port not in (None,443):
+                  raise ValueError('Unexpected destination')
+          class Redirect(urllib.request.HTTPRedirectHandler):
+              max_redirections = 2
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  check(newurl)
+                  return super().redirect_request(req,fp,code,msg,headers,newurl)
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.hidden=0; self.parts=[]
+              def handle_starttag(self, tag, attrs):
+                  if tag in ('script','style'): self.hidden+=1
+              def handle_endtag(self, tag):
+                  if tag in ('script','style'): self.hidden=max(0,self.hidden-1)
+              def handle_data(self, data):
+                  if not self.hidden and data.strip(): self.parts.append(data.strip())
+          opener = urllib.request.build_opener(Redirect())
+          reports = []
+          def read(url, html=False):
+              entry = {'url':url}; reports.append(entry)
+              try:
+                  check(url)
+                  request = urllib.request.Request(url, headers={'User-Agent':'Bindarr-contract-probe','Accept':'text/html' if html else 'application/json'})
+                  with opener.open(request,timeout=20) as response:
+                      entry['status']=response.status
+                      entry['headers']={key:response.headers.get(key) for key in ('Content-Type','X-RateLimit-Limit','X-RateLimit-Remaining','X-RateLimit-Reset','Retry-After') if response.headers.get(key)}
+                      body=response.read(2000001)
+                  if len(body)>2000000: raise ValueError('Response exceeds two megabytes')
+                  text=body.decode('utf-8',errors='replace')
+                  if html:
+                      parser=Text(); parser.feed(text); entry['excerpt']='\n'.join(parser.parts)[:6000]; return None
+                  data=json.loads(text)
+                  entry['sample']=json.dumps(data,ensure_ascii=False,indent=2)[:14000]
+                  return data
+              except Exception as error:
+                  entry['error']=str(error)[:500]; return None
+          for url in ('https://carddex.dev/compare','https://carddex.dev/migrate/pokemontcg','https://carddex.dev/migrate/pokemontcg/coverage','https://carddex.dev/terms'):
+              read(url,html=True)
+          cards=read('https://api.carddex.dev/v1/cards?pageSize=1&include=prices,images,variants,translations')
+          rows=cards.get('data') if isinstance(cards,dict) else None
+          if isinstance(rows,list) and rows and isinstance(rows[0],dict):
+              identifier=rows[0].get('id')
+              if isinstance(identifier,str) and 0<len(identifier)<=200:
+                  read('https://api.carddex.dev/v1/cards/'+quote(identifier,safe='')+'/prices')
+          content=json.dumps(reports,ensure_ascii=False,indent=2)
+          content=content[:48000]
+          fence='`'*max(3,max((len(m.group())+1 for m in re.finditer(r'`+',content)),default=3))
+          body='## CardDex contract probe\n\nAnonymous public reads only. Documentation excerpts and raw sample shapes are evidence for adapter design, not proof of coverage, reliability or accurate matching. No account, key, production import or provider change.\n\n'+fence+'json\n'+content+'\n'+fence+'\n'
+          Path(os.environ['RUNNER_TEMP'],'carddex-report.md').write_text(body)
+          PY
+      - name: Read the full catalog build result and artifact metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run view 42493574442 --repo jimbo19922003/bindarr-enhanced --json conclusion,headSha,jobs > "$RUNNER_TEMP/catalog-result.json"
+          gh api repos/jimbo19922003/bindarr-enhanced/actions/runs/42493574442/artifacts --jq '[.artifacts[] | {name,expired,size_in_bytes}]' > "$RUNNER_TEMP/catalog-artifacts.json"
+          python3 <<'PY'
+          import os,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])
+          result=json.loads((root/'catalog-result.json').read_text())
+          report={'run':42493574442,'conclusion':result.get('conclusion'),'headSha':result.get('headSha'),'jobs':[{'name':j.get('name'),'conclusion':j.get('conclusion'),'failedSteps':[s.get('name') for s in j.get('steps',[]) if s.get('conclusion')=='failure']} for j in result.get('jobs',[])],'artifacts':json.loads((root/'catalog-artifacts.json').read_text())}
+          with (root/'carddex-report.md').open('a') as output:
+              output.write('\n## Existing full catalog build\n\n```json\n'+json.dumps(report,indent=2)+'\n```\n')
+          PY
+      - name: Post bounded evidence report to draft PR 13
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment 13 --repo jimbo19922003/bindarr-enhanced --body-file "$RUNNER_TEMP/carddex-report.md"
