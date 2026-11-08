@@ -1,8 +1,10 @@
+// provider-keys-consolidated-v1
 import { useState, useEffect, useRef } from 'react';
-import { Shield, UserPlus, Key, Trash2, ToggleLeft, ToggleRight, Search, Users, Globe, HardDriveDownload, Download, Sparkles, Eye, EyeOff } from 'lucide-react';
+import { Shield, UserPlus, Key, Trash2, ToggleLeft, ToggleRight, Search, Users, Globe, HardDriveDownload, Download, Sparkles } from 'lucide-react';
 import { useBackGuard } from '../utils/useBackGuard';
 import CatalogPanel from './CatalogPanel';
 import SetupWizard from './SetupWizard';
+import ProviderKeysPanel from './ProviderKeysPanel';
 import { currencySymbol } from '../utils/formatPrice';
 import { useT } from '../utils/i18n';
 
@@ -39,9 +41,6 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
   const [priceRefreshDays, setPriceRefreshDays] = useState(1);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [pokewallet, setPokewallet] = useState(null);
-  const [pokewalletKey, setPokewalletKey] = useState('');
-  const [pokewalletKeyLoaded, setPokewalletKeyLoaded] = useState(false);
-  const [showPokewalletKey, setShowPokewalletKey] = useState(false);
   const [pokewalletLoading, setPokewalletLoading] = useState(false);
   const mountedRef = useRef(true);
 
@@ -188,8 +187,6 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
       const data = await response.json();
       if (!mountedRef.current) return;
       setPokewallet(data);
-      setPokewalletKey(data.api_key || '');
-      setPokewalletKeyLoaded(true);
     } catch (err) {
       console.error(err);
     }
@@ -253,7 +250,6 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
           pokemon_provider: pokemonProvider,
           mtg_price_source: mtgPriceSource,
           price_refresh_days: Number(priceRefreshDays),
-          ...(pokewalletKeyLoaded ? { pokewallet_api_key: pokewalletKey } : {}),
         })
       });
 
@@ -504,6 +500,8 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
           </form>
         </div>
 
+        <ProviderKeysPanel user={user} onUpdateUser={onUpdateUser} />
+
         {/* Instance Settings Panel */}
         <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <h3 style={{ color: 'var(--text-strong)', fontSize: '1.1rem', borderBottom: '1px solid var(--border-glass)', paddingBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -549,44 +547,6 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
               </select>
               <p style={{ margin: '0.4rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
                 {t(pokemonProvider === 'pokemontcgapi' ? 'admin.pokemontcgapiHint' : 'admin.pokemonProviderHint')}
-              </p>
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label htmlFor="admin-pokewallet-key">{t('admin.pokewalletKey')}</label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  id="admin-pokewallet-key"
-                  type={showPokewalletKey ? 'text' : 'password'}
-                  name="pokewallet-api-key"
-                  autoComplete="off"
-                  className="input-control"
-                  placeholder={t('admin.pokewalletKeyPlaceholder')}
-                  value={pokewalletKey}
-                  onChange={(e) => setPokewalletKey(e.target.value)}
-                  disabled={settingsLoading || !pokewalletKeyLoaded}
-                  style={{ fontFamily: 'monospace', paddingRight: '2.4rem', width: '100%' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPokewalletKey(v => !v)}
-                  aria-label={t(showPokewalletKey ? 'settings.hideApiKey' : 'settings.showApiKey')}
-                  title={t(showPokewalletKey ? 'settings.hideApiKey' : 'settings.showApiKey')}
-                  style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}
-                >
-                  {showPokewalletKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-              <p style={{ margin: '0.4rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                {t('admin.pokewalletKeyHint')}
-                {' '}
-                <a href="https://pokewallet.io/api-docs" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-yellow)', fontWeight: 600 }}>
-                  {t('admin.pokewalletKeyLink')}
-                </a>
-              </p>
-              <p style={{ margin: '0.35rem 0 0', fontSize: '0.75rem', color: 'var(--text-strong)' }}>
-                {pokewallet?.key_source === 'database' ? t('admin.pokewalletKeySaved')
-                  : pokewallet?.key_source === 'environment' ? t('admin.pokewalletKeyEnvironment')
-                    : t('admin.pokewalletKeyMissing')}
               </p>
             </div>
             {/* Which marketplace Magic prices are read from first (#93). Scryfall

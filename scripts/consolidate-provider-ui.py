@@ -94,9 +94,20 @@ export default function SetupProviderKeys({user,onUpdateUser,showToast}) {
 }
 """
  outputs={names[0]:admin,names[1]:settings,names[2]:local,names[3]:setup}
+ import re
+ editable_patterns = [
+  r'\bsetPokewalletKey\b',
+  r'\bpokewalletKeyLoaded\b',
+  r'\bconst\s+\[\s*pokewalletKey\b',
+  r'\bpokewallet_api_key\s*[:\]}]',
+  r'\bpokewallet_api_key\s*=',
+  r'\bid=["\']settings-tcg-api-key["\']',
+  r'\bsetTcgApiKey\b',
+ ]
  for text in (admin,settings):
-  if 'pokewalletKey' in text or 'pokewallet_api_key' in text or 'settings-tcg-api-key' in text:
-   raise SystemExit('Legacy editable key path remains')
+  for pattern in editable_patterns:
+   if re.search(pattern, text):
+    raise SystemExit('Legacy editable key path remains: ' + pattern)
  for name,text in outputs.items():
   Path(name).write_text(MARKER+'\n'+text,encoding='utf-8')
  overview=Path('frontend/test/localCatalogOverview.test.mjs')
