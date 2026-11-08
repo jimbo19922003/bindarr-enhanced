@@ -1,3 +1,4 @@
+// aligned-summary-v1
 // streamlined-executive-v1
 // executive-performance-v1
 // daily-dashboard-v2
@@ -14,6 +15,7 @@ import CardInspectorModal from './CardInspectorModal';
 import CardImage from './CardImage';
 import OpenedPerformance from './OpenedPerformance';
 import PerformanceChart from './PerformanceChart';
+import './SummaryCards.css';
 
 const COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
@@ -190,61 +192,32 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
       </div>
 
       {view === 'executive' && (<>
-      {/* Metrics Summary Grid */}
-      <div className="metrics-grid executive-summary-grid">
-        {/* Net Worth Card with historical switcher */}
+      {/* Aligned Executive summary cards */}
+      <div className="metrics-grid executive-summary-grid executive-cards-aligned">
         <div className="glass-panel metric-card accent-networth">
-          <div className="metric-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span className="metric-icon" style={{ width: '28px', height: '28px' }}><TrendingUp size={16} /></span>
-              {t('dash.netWorth')}
-            </span>
-          </div>
+          <div className="metric-header"><span>{t('dash.portfolioValue')}</span><span className="metric-icon"><TrendingUp size={18} /></span></div>
           <div className="metric-value">{currencySymbol()}{money(summary.totalValue)}</div>
-          {summary.sealed && summary.sealed.remainingUnits > 0 && (
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-              {(summary.sealed.marketValue > 0 || summary.sealed.valuationComplete) && (
-                <div>{t('dash.sealedIncluded', { value: `${currencySymbol()}${money(summary.sealed.marketValue)}` })}</div>
-              )}
-              {summary.sealed.unpricedUnits > 0 && (
-                <div>{t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits })}</div>
-              )}
-            </div>
-          )}
-
-        </div>
-
-        {/* Total Invested (cost basis) */}
-        <div className="glass-panel metric-card accent-invested">
-          <div className="metric-header">
-            <span>{t('dash.totalInvested')}</span>
-            <span className="metric-icon"><Coins size={18} /></span>
-          </div>
-          <div className="metric-value">{currencySymbol()}{money(summary.totalSpent)}</div>
           <div className="metric-footer">
-            <span title="Total recorded card and sealed-product spending divided by currently owned physical card copies; includes unopened sealed purchases.">Average invested per owned card: {priceText(cardAverages(summary).investedPerCard, summary.currency || reportingCurrency)}</span>
-            <div>{t('dash.investedHint')}</div>
+            <div>{t('dash.portfolioIncludes')}</div>
+            {summary.sealed && summary.sealed.remainingUnits > 0 && (summary.sealed.marketValue > 0 || summary.sealed.valuationComplete) && <div>{t('dash.sealedIncluded', { value: `${currencySymbol()}${money(summary.sealed.marketValue)}` })}</div>}
+            {summary.sealed && summary.sealed.unpricedUnits > 0 && <div className="summary-pricing-warning">{t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits })}</div>}
           </div>
         </div>
 
-        {/* Unrealized Gain / ROI */}
+        <div className="glass-panel metric-card accent-invested">
+          <div className="metric-header"><span title={t('dash.investedHint')}>{t('dash.totalInvested')}</span><span className="metric-icon"><Coins size={18} /></span></div>
+          <div className="metric-value">{currencySymbol()}{money(summary.totalSpent)}</div>
+          <div className="metric-footer" title="Total recorded card and sealed spending divided by currently owned physical card copies; includes sealed purchases.">{t('dash.avgInvestedShort', { price: priceText(cardAverages(summary).investedPerCard, summary.currency || reportingCurrency) })}</div>
+        </div>
+
         {(() => {
           const roi = summary.roi || { abs: 0, pct: null };
           const isPositive = (roi.abs || 0) >= 0;
-          return (
-            <div className={`glass-panel metric-card ${isPositive ? 'accent-gain-up' : 'accent-gain-down'}`}>
-              <div className="metric-header">
-                <span>{t('dash.unrealizedGain')}</span>
-                <span className="metric-icon"><ArrowUpRight size={18} style={{ transform: isPositive ? 'none' : 'rotate(90deg)' }} /></span>
-              </div>
-              <div className="metric-value" style={{ color: isPositive ? '#22c55e' : '#ef4444' }}>
-                {isPositive ? '+' : '−'}{currencySymbol()}{money(Math.abs(roi.abs || 0))}
-              </div>
-              <div className="metric-footer">
-                <span>{roi.pct === null ? t('dash.roiUnset') : t('dash.roiVsCost', { pct: `${isPositive ? '+' : ''}${roi.pct}` })}</span>
-              </div>
-            </div>
-          );
+          return <div className={`glass-panel metric-card ${isPositive ? 'accent-gain-up' : 'accent-gain-down'}`}>
+            <div className="metric-header"><span>{t('dash.unrealizedGain')}</span><span className="metric-icon"><ArrowUpRight size={18} style={{ transform: isPositive ? 'none' : 'rotate(90deg)' }} /></span></div>
+            <div className="metric-value" style={{ color: isPositive ? '#22c55e' : '#ef4444' }}>{isPositive ? '+' : '−'}{currencySymbol()}{money(Math.abs(roi.abs || 0))}</div>
+            <div className="metric-footer">{roi.pct === null ? t('dash.roiUnset') : t('dash.roiVsCost', { pct: `${isPositive ? '+' : ''}${roi.pct}` })}</div>
+          </div>;
         })()}
 
         <div className="glass-panel metric-card" aria-label="Realized Loss/Gain pending sales integration">
@@ -253,16 +226,12 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
           <div className="metric-footer">{t('dash.realizedPending')}</div>
         </div>
 
-        {/* Total Cards count */}
         <div className="glass-panel metric-card accent-cards">
-          <div className="metric-header">
-            <span>{t('dash.totalCards')}</span>
-            <span className="metric-icon"><Library size={18} /></span>
-          </div>
+          <div className="metric-header"><span>{t('dash.totalCards')}</span><span className="metric-icon"><Library size={18} /></span></div>
           <div className="metric-value">{summary.totalCards}</div>
           <div className="metric-footer">
-            <span>{t('dash.uniqueCount', { count: summary.uniqueCards })}{summary.unsortedCount > 0 ? ` • ${t('dash.unsortedCount', { count: summary.unsortedCount })}` : ''}</span>
-            <div>Average market value: {priceText(cardAverages(summary).marketPerCard, summary.currency || reportingCurrency)} / card</div>
+            <div>{t('dash.uniqueCount', { count: summary.uniqueCards })}{summary.unsortedCount > 0 ? ` · ${t('dash.unsortedCount', { count: summary.unsortedCount })}` : ''}</div>
+            <div>{t('dash.avgMarketShort', { price: priceText(cardAverages(summary).marketPerCard, summary.currency || reportingCurrency) })}</div>
           </div>
         </div>
       </div>
