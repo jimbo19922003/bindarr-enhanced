@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import LocalCatalogImportPanel from './LocalCatalogImportPanel';
 import CarddexKeyPanel from './CarddexKeyPanel';
+import ArtworkRecoveryPanel from './ArtworkRecoveryPanel';
 
 export default function LocalCatalogStatusPanel() {
   const [language, setLanguage] = useState('en');
@@ -10,6 +11,7 @@ export default function LocalCatalogStatusPanel() {
   const [busy, setBusy] = useState(false);
   const [credentialsOpen, setCredentialsOpen] = useState(false);
   const [maintenanceOpen, setMaintenanceOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   useEffect(() => {
     let live = true;
     const controller = new AbortController();
@@ -41,6 +43,10 @@ export default function LocalCatalogStatusPanel() {
     <details onToggle={event => setCredentialsOpen(event.currentTarget.open)} style={{marginTop:'1rem'}}>
       <summary style={{cursor:'pointer'}}>CardDex connection</summary>
       {credentialsOpen && <CarddexKeyPanel />}
+    </details>
+    <details onToggle={event => setRecoveryOpen(event.currentTarget.open)} style={{marginTop:'1rem'}}>
+      <summary style={{cursor:'pointer'}}>Artwork recovery</summary>
+      {recoveryOpen && <ArtworkRecoveryPanel />}
     </details>
     <details onToggle={event => setMaintenanceOpen(event.currentTarget.open)} style={{marginTop:'1rem'}}>
       <summary style={{cursor:'pointer'}}>Advanced catalogue maintenance</summary>
