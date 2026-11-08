@@ -1,0 +1,53 @@
+name: Apply and validate sale corrections and guarded undo
+on:
+  push:
+    branches: ['fix/rip-valuation-artwork-mixed-sets']
+    paths:
+      - '.github/workflows/apply-sale-adjustments.yml'
+      - 'scripts/apply-sale-adjustments.py'
+      - 'backend/src/utils/saleAdjustments*'
+      - 'frontend/src/components/SaleAdjustmentDialog.jsx'
+permissions:
+  contents: write
+concurrency:
+  group: apply-sale-adjustments
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply guarded integration
+        run: |
+          python3 scripts/apply-sale-adjustments.py
+          python3 scripts/apply-sale-adjustments.py
+          node --check backend/src/utils/saleAdjustments.js
+          node --check backend/src/utils/salesApplication.js
+          node --check backend/src/utils/salesReport.js
+          node --check backend/src/utils/timelineAccounting.js
+          node --check backend/src/routes/sales.js
+      - name: Install isolated test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/sales-deps" --no-audit --no-fund sqlite3@6.0.1 express@4.19.2
+      - name: Test sale adjustments and accounting regressions
+        env:
+          NODE_PATH: ${{ runner.temp }}/sales-deps/node_modules
+        run: node --test backend/src/utils/*.test.js frontend/src/utils/saleTargets.test.js
+      - name: Build frontend
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+      - name: Commit validated correction and undo integration
+        run: |
+          git add backend/src/utils/salesApplication.js backend/src/routes/sales.js backend/src/utils/salesReport.js backend/src/utils/timelineAccounting.js backend/src/utils/sealedSalesRepository.js frontend/src/components/SalesHistory.jsx frontend/src/components/SaleDialogHost.jsx
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: correct or undo sales with immutable audit history and exact basis restoration'
+          git push origin HEAD:refs/heads/fix/rip-valuation-artwork-mixed-sets
