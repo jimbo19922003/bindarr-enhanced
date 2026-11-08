@@ -1,3 +1,4 @@
+// performance-core-start-v1
 // Load .env from the CWD first (how a normal `npm start` from backend/ behaves),
 // then from backend/ explicitly. dotenv never overwrites an already-set variable,
 // so the first one to define a key still wins and nothing changes for existing
@@ -281,6 +282,8 @@ db.initDb()
     // default price source on an install configured for Cardmarket. One indexed
     // read, and it never throws (see scryfallApi.loadPriceSource).
     await scryfallApi.loadPriceSource();
+    await require('./utils/investmentLedger').install(db);
+    require('./utils/dailyPerformance').start();
     dbReady = true;
     console.log('Database tables verified/created successfully.');
 

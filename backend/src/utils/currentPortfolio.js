@@ -1,10 +1,11 @@
+// performance-core-db-v1
 'use strict';
 const db = require('../db');
 const { summarizeHoldings, emptyHoldings } = require('./sealedInventory');
 const round = n => Number(n.toFixed(2));
 
-async function cardRows(userId, game) {
-  return db.all(`SELECT cc.*, cc.id AS card_id, c.id AS entry_id, c.quantity, c.purchase_price,
+async function cardRows(userId, game, database = db) {
+  return database.all(`SELECT cc.*, cc.id AS card_id, c.id AS entry_id, c.quantity, c.purchase_price,
     c.added_at, c.printing, c.condition, c.market_value, c.language, c.is_trade, c.favorite,
     c.list_type, c.grader, c.grade, c.location_id, l.name AS location_name, l.type AS location_type
     FROM collection c JOIN card_cache cc ON cc.id = c.card_id
@@ -13,9 +14,9 @@ async function cardRows(userId, game) {
   game ? [userId, game] : [userId]);
 }
 
-async function sealedData(userId, game, valuation) {
+async function sealedData(userId, game, valuation, database = db) {
   if (game && game !== 'pokemon') return { holdings: emptyHoldings(), spent: 0, lines: [] };
-  const lots = await db.all(`SELECT l.*, p.name, p.set_id, p.set_name, p.image_url, p.product_type,
+  const lots = await database.all(`SELECT l.*, p.name, p.set_id, p.set_name, p.image_url, p.product_type,
     p.market_price_cents, p.market_currency FROM sealed_lot l
     JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
     WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL`, [userId]);
@@ -41,8 +42,8 @@ async function sealedData(userId, game, valuation) {
   return { holdings: summarizeHoldings(holdingsRows), spent: round(spent), lines };
 }
 
-async function currentPortfolio(userId, game, valuation) {
-  const raw = await cardRows(userId, game);
+async function currentPortfolio(userId, game, valuation, database = db) {
+  const raw = await cardRows(userId, game, database);
   const cards = [];
   let cardValueCents = 0, cardSpentCents = 0, totalCards = 0;
   const byGame = {};
@@ -60,7 +61,7 @@ async function currentPortfolio(userId, game, valuation) {
     byGame[gameKey].cards += quantity; byGame[gameKey].value += quantity * unitCents / 100;
     cards.push(card);
   }
-  const sealed = await sealedData(userId, game, valuation);
+  const sealed = await sealedData(userId, game, valuation, database);
   return { cards, totalCards, cardValue: cardValueCents / 100,
     totalValue: round(cardValueCents / 100 + sealed.holdings.marketValue),
     totalSpent: round(cardSpentCents / 100 + sealed.spent), sealed,
