@@ -1,0 +1,31 @@
+name: Validate CardDex key UI and authentication
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - 'backend/src/utils/carddexKey.js'
+      - 'backend/src/utils/carddexArtwork.js'
+      - 'backend/src/routes/providerKeys.js'
+      - 'backend/test/carddexKey.test.js'
+      - 'frontend/src/components/CarddexKeyPanel.jsx'
+      - 'frontend/src/components/LocalCatalogStatusPanel.jsx'
+      - '.github/workflows/carddex-key.yml'
+permissions:
+  contents: read
+jobs:
+  carddex-key:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci --prefix backend
+      - run: node --test backend/test/carddexKey.test.js backend/test/carddexArtwork.test.js
+      - run: npm ci --prefix frontend
+      - run: npm run build --prefix frontend

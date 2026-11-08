@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import LocalCatalogImportPanel from './LocalCatalogImportPanel';
+import CarddexKeyPanel from './CarddexKeyPanel';
 
 export default function LocalCatalogStatusPanel() {
   const [language, setLanguage] = useState('en');
@@ -21,6 +22,7 @@ export default function LocalCatalogStatusPanel() {
   const choices = [{code:'en',name:'English'}, ...(data?.availableLanguages || []).filter(item => item.code !== 'en')];
   return <section className="glass-panel" style={{marginBottom:'1rem'}}>
     <h3 style={{marginTop:0}}>Local Pokémon metadata</h3>
+    <CarddexKeyPanel />
     <p>English-first snapshots. Metadata, artwork references and scanner readiness are separate.</p>
     <div style={{display:'flex',gap:'0.75rem',alignItems:'center',flexWrap:'wrap'}}>
       <label>Installed snapshot language <select className="input-control" value={language} onChange={event => setLanguage(event.target.value)}>
@@ -42,7 +44,7 @@ export default function LocalCatalogStatusPanel() {
         {data.snapshot.scanRefreshRequired && <p role="status">This metadata snapshot requests a scanner-index refresh.</p>}
       </>}
       <p>Image downloads and local image files are not verified by this status endpoint. An artwork URL may still fail to load. Scanner readiness is not verified here.</p>
-      <p>Planned lookup order: local TCGdex cache, then CardDex, then PokéWallet. External fallback and image-repair controls are not connected yet.</p>
+      <p>Artwork repair tries CardDex before PokéWallet for eligible missing English artwork. Provider matching and successful image downloads are verified separately from metadata readiness.</p>
     </>}
     <LocalCatalogImportPanel language={language} onImported={() => setRefresh(value => value + 1)} />
   </section>;
