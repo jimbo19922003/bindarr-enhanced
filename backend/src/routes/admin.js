@@ -14,6 +14,9 @@ const { BACKUP_DIR, listBackups, createBackup } = require('../backup');
 const router = express.Router();
 
 router.use(authenticateToken, requireAdmin);
+router.use('/local-catalog', require('./localCatalogStatus').createLocalCatalogStatusRouter({
+  connect: () => require('../utils/salesRepository').openConnection(db.dbPath),
+}));
 
 router.post('/seed-cards', async (req, res) => {
   try {
