@@ -1,3 +1,4 @@
+// sales-ui-v1
 // performance-core-start-v1
 // Load .env from the CWD first (how a normal `npm start` from backend/ behaves),
 // then from backend/ explicitly. dotenv never overwrites an already-set variable,
@@ -462,6 +463,7 @@ app.use('/api', authenticateToken);
 app.use(BIG_BODY_PATHS, express.json({ limit: '15mb' }));
 
 // --- AUTHENTICATED API ROUTES ---
+app.use('/api/sales', (req,res,next) => dbReady ? next() : res.status(503).json({error:'Database initializing'}), require('./routes/sales').createRouter({service:require('./utils/salesApplication').createSalesApplication({connect:() => require('./utils/salesRepository').openConnection(db.dbPath)})}));
 app.use('/api', collectionRoutes);
 app.use('/api', storageRoutes);
 app.use('/api', statsRoutes);

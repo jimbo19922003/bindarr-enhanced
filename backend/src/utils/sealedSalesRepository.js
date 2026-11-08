@@ -1,3 +1,4 @@
+// sales-ui-v1
 // sales-inventory-protection-v1
 'use strict';
 const { calculateSale } = require('./costBasis');
@@ -59,4 +60,4 @@ function createSealedSalesRepository({connect}) {
     }
   };
 }
-module.exports={createSealedSalesRepository};
+module.exports={createSealedSalesRepository,schema};
