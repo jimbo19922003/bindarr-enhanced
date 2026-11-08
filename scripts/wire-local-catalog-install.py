@@ -1,8 +1,11 @@
 from pathlib import Path
 
 def once(text,old,new):
-    if text.count(old)!=1: raise SystemExit('Expected exactly one catalogue install integration point')
-    return text.replace(old,new,1)
+    if text.count(new)==1 and old not in text.replace(new,'',1):
+        return text
+    if text.count(new)==0 and text.count(old)==1:
+        return text.replace(old,new,1)
+    raise SystemExit('Expected exactly one patched or unpatched catalogue install integration point')
 route_name='backend/src/routes/localCatalogStatus.js'
 route=Path(route_name).read_text()
 route=once(route,"  router.get('/', async (req, res) => {","  router.use('/install', require('./localCatalogInstall').createLocalCatalogInstallRouter({connect}));\n  router.get('/', async (req, res) => {")
