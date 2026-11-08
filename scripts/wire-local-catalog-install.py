@@ -1,18 +1,29 @@
+"""Read-only verification of committed catalogue installation wiring."""
 from pathlib import Path
+import re
 
-def once(text,old,new):
-    if text.count(new)==1 and old not in text.replace(new,'',1):
-        return text
-    if text.count(new)==0 and text.count(old)==1:
-        return text.replace(old,new,1)
-    raise SystemExit('Expected exactly one patched or unpatched catalogue install integration point')
-route_name='backend/src/routes/localCatalogStatus.js'
-route=Path(route_name).read_text()
-route=once(route,"  router.get('/', async (req, res) => {","  router.use('/install', require('./localCatalogInstall').createLocalCatalogInstallRouter({connect}));\n  router.get('/', async (req, res) => {")
-panel_name='frontend/src/components/LocalCatalogStatusPanel.jsx'
-panel=Path(panel_name).read_text()
-panel=once(panel,"import { useEffect, useState } from 'react';","import { useEffect, useState } from 'react';\nimport LocalCatalogImportPanel from './LocalCatalogImportPanel';")
-panel=once(panel,'Sync/import controls are not yet connected.','Use the staged-bundle preview/install controls below; automatic delivery is not connected.')
-panel=once(panel,'  </section>;',"    <LocalCatalogImportPanel language={language} onImported={() => setRefresh(value => value + 1)} />\n  </section>;")
-for name,text in [(route_name,route),(panel_name,panel)]:
-    Path(name).write_text(text)
+def verify_sources(route, panel):
+    mount = "router.use('/install', require('./localCatalogInstall').createLocalCatalogInstallRouter({connect}));"
+    if route.count(mount) != 1:
+        raise ValueError('Expected exactly one catalogue install route mount')
+    guard = route.find("req.user?.role === 'admin'")
+    if guard < 0 or guard > route.index(mount):
+        raise ValueError('Catalogue install route must follow the administrator guard')
+    imports = re.findall(r"^import LocalCatalogImportPanel from ['\"]\./LocalCatalogImportPanel['\"];?\s*$", panel, re.M)
+    if len(imports) != 1:
+        raise ValueError('Expected exactly one catalogue import component import')
+    if len(re.findall(r'<LocalCatalogImportPanel\b', panel)) != 1:
+        raise ValueError('Expected exactly one catalogue import component mount')
+
+def main():
+    root = Path(__file__).resolve().parents[1]
+    route = (root / 'backend/src/routes/localCatalogStatus.js').read_text(encoding='utf-8')
+    panel = (root / 'frontend/src/components/LocalCatalogStatusPanel.jsx').read_text(encoding='utf-8')
+    verify_sources(route, panel)
+    print('Verified one administrator-protected install route and one import panel; no files changed.')
+
+if __name__ == '__main__':
+    try:
+        main()
+    except ValueError as error:
+        raise SystemExit(str(error))

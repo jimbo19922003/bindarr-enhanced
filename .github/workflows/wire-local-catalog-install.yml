@@ -13,6 +13,8 @@ jobs:
     if: github.repository == 'jimbo19922003/bindarr-enhanced'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,6 +22,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Test read-only catalogue wiring validation
+        run: python3 -m unittest discover -s scripts -p 'test_catalog_install_wiring.py'
       - name: Verify committed wiring and repeat safety without changing tracked files
         run: |
           python3 scripts/wire-local-catalog-install.py
