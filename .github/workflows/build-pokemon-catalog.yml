@@ -1,0 +1,101 @@
+name: Build validated Pokemon catalog bundles
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_commit:
+        description: 'Optional pinned 40-character upstream SHA; blank checks master'
+        required: false
+        default: ''
+      languages:
+        description: 'Explicit comma-separated catalog languages'
+        required: true
+        default: 'en,ja'
+  schedule:
+    - cron: '17 */6 * * *'
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - '.github/workflows/build-pokemon-catalog.yml'
+      - 'ci/tcgdex-compiler.Dockerfile'
+      - 'ci/compile-tcgdex.sh'
+      - 'backend/scripts/validate-pokemon-bundle.js'
+permissions:
+  contents: read
+concurrency:
+  group: build-pokemon-catalog-bundle
+  cancel-in-progress: false
+jobs:
+  build-catalog:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate input values without shell interpolation
+        id: input
+        env:
+          REVISION: ${{ inputs.upstream_commit || '' }}
+          LANGUAGES: ${{ inputs.languages || 'en,ja' }}
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs');
+          const supported=new Set(require('./app/shared/languages.json').map(l=>l.code));
+          const revision=process.env.REVISION.trim(),languages=process.env.LANGUAGES.split(',').map(l=>l.trim());
+          if(revision&&!/^[a-f0-9]{40}$/.test(revision))throw new Error('Invalid upstream SHA');
+          if(!languages.length||new Set(languages).size!==languages.length||languages.some(l=>!supported.has(l)))throw new Error('Invalid languages');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`ref=${revision||'master'}\ncsv=${languages.join(',')}\nspace=${languages.join(' ')}\n`);
+          NODE
+      - name: Verify application catalog regressions before compiling upstream
+        env:
+          NODE_PATH: ${{ runner.temp }}/catalog-deps/node_modules
+        run: |
+          npm install --prefix "$RUNNER_TEMP/catalog-deps" --no-audit --no-fund sqlite3@6.0.1
+          node --test app/backend/src/utils/pokemonLocalCatalog.test.js app/backend/src/utils/pokemonCatalogSync.test.js app/backend/src/utils/pokemonCatalogBundle.test.js
+      - name: Fetch the upstream repository without persisting credentials
+        uses: actions/checkout@v4
+        with:
+          repository: tcgdex/cards-database
+          ref: ${{ steps.input.outputs.ref }}
+          path: upstream
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record exact upstream source revision
+        id: upstream
+        run: |
+          SHA="$(git -C upstream rev-parse HEAD)"
+          test "${#SHA}" -eq 40
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+      - name: Build isolated compiler runtime
+        run: docker build -f app/ci/tcgdex-compiler.Dockerfile -t bindarr-catalog-compiler app/ci
+      - name: Compile without production credentials or application database mounts
+        env:
+          BUNDLE_LANGUAGES: ${{ steps.input.outputs.space }}
+        run: |
+          mkdir -p catalog-bundle
+          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 4096 --memory 6g --memory-swap 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=512m --tmpfs /work:rw,nosuid,nodev,size=3g,mode=1777 -e HOME=/tmp -e BUN_INSTALL_CACHE_DIR=/tmp/bun-cache -e BUNDLE_LANGUAGES="$BUNDLE_LANGUAGES" --mount "type=bind,src=$PWD/upstream,dst=/source,readonly" --mount "type=bind,src=$PWD/catalog-bundle,dst=/out" --mount "type=bind,src=$PWD/app/ci/compile-tcgdex.sh,dst=/compile.sh,readonly" bindarr-catalog-compiler /bin/sh /compile.sh
+      - name: Package and test-import the actual generated catalog
+        env:
+          COMMIT: ${{ steps.upstream.outputs.sha }}
+          LANGUAGES: ${{ steps.input.outputs.csv }}
+          NODE_PATH: ${{ runner.temp }}/catalog-deps/node_modules
+        run: |
+          node app/backend/scripts/pokemon-catalog-bundle.js manifest "$PWD/catalog-bundle" "$COMMIT" "$LANGUAGES"
+          node app/backend/scripts/validate-pokemon-bundle.js "$PWD/catalog-bundle" "$COMMIT" "$LANGUAGES" > catalog-bundle/validation-report.json
+      - name: Upload validated versioned metadata bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: pokemon-catalog-${{ steps.upstream.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            catalog-bundle/manifest.json
+            catalog-bundle/LICENSE
+            catalog-bundle/validation-report.json
+            catalog-bundle/*/cards.json
+            catalog-bundle/*/sets.json
