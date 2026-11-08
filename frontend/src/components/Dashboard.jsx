@@ -1,3 +1,4 @@
+// streamlined-executive-v1
 // executive-performance-v1
 // daily-dashboard-v2
 import { useState, useEffect } from 'react';
@@ -53,7 +54,6 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [timePeriod, setTimePeriod] = useState('30d');
   const [view, setView] = useState('executive');
   const [reportingCurrency, setReportingCurrency] = useState(() => getCurrency());
   useEffect(() => {
@@ -191,7 +191,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
 
       {view === 'executive' && (<>
       {/* Metrics Summary Grid */}
-      <div className="metrics-grid">
+      <div className="metrics-grid executive-summary-grid">
         {/* Net Worth Card with historical switcher */}
         <div className="glass-panel metric-card accent-networth">
           <div className="metric-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -199,28 +199,6 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
               <span className="metric-icon" style={{ width: '28px', height: '28px' }}><TrendingUp size={16} /></span>
               {t('dash.netWorth')}
             </span>
-            <div style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '2px', borderRadius: '4px' }}>
-              {['7d', '30d', '1y', '5y'].map(p => (
-                <button 
-                  key={p} 
-                  type="button" 
-                  onClick={() => setTimePeriod(p)}
-                  style={{
-                    padding: '2px 6px',
-                    fontSize: '0.65rem',
-                    border: 'none',
-                    borderRadius: '3px',
-                    background: timePeriod === p ? 'var(--type-grass)' : 'transparent',
-                    color: 'var(--text-strong)',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  {p.toUpperCase()}
-                </button>
-              ))}
-            </div>
           </div>
           <div className="metric-value">{currencySymbol()}{money(summary.totalValue)}</div>
           {summary.sealed && summary.sealed.remainingUnits > 0 && (
@@ -233,30 +211,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
               )}
             </div>
           )}
-          {(() => {
-            const change = timePeriod === '7d' ? summary.change7d :
-                           timePeriod === '30d' ? summary.change30d :
-                           timePeriod === '1y' ? summary.change1y : summary.change5y;
-            // change7d/30d use Cardmarket's real avg7/avg30 (only real source
-            // available); change1y/5y have no real historical price source
-            // anywhere, so they're marked unavailable rather than faked.
-            if (!change || !change.available) {
-              return (
-                <div className="metric-footer" style={{ color: 'var(--text-muted)' }}>
-                  <span>{t('dash.noPriceHistory')}</span>
-                </div>
-              );
-            }
-            const isPositive = change.abs >= 0;
-            return (
-              <div className={`metric-footer ${isPositive ? 'positive' : 'negative'}`} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <TrendingUp size={12} style={{ transform: isPositive ? 'none' : 'rotate(180deg)' }} />
-                <span>
-                  {isPositive ? '+' : ''}{currencySymbol()}{money(change.abs)} ({isPositive ? '+' : ''}{change.pct}%)
-                </span>
-              </div>
-            );
-          })()}
+
         </div>
 
         {/* Total Invested (cost basis) */}
@@ -291,6 +246,12 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
             </div>
           );
         })()}
+
+        <div className="glass-panel metric-card" aria-label="Realized Loss/Gain pending sales integration">
+          <div className="metric-header"><span>{t('dash.realizedLossGain')}</span><span className="metric-icon"><Coins size={18} /></span></div>
+          <div className="metric-value" style={{ color: 'var(--text-muted)' }} aria-label="Not available">—</div>
+          <div className="metric-footer">{t('dash.realizedPending')}</div>
+        </div>
 
         {/* Total Cards count */}
         <div className="glass-panel metric-card accent-cards">

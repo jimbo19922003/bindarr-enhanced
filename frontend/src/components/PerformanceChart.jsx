@@ -1,71 +1,69 @@
 import { useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useT } from '../utils/i18n';
 import BenchmarkComparison from './BenchmarkComparison';
-const ranges = ['7d', '30d', '90d', 'ytd', '1y', '5y', 'all'];
+import './PerformanceChart.css';
+const ranges = ['7d','30d','90d','ytd','1y','5y','all'];
+const views = [['value','Value + cost'],['gain','Loss/Gain $'],['gainPct','Loss/Gain %'],['sp500','S&P 500']];
 export default function PerformanceChart({ statsTrigger }) {
   const { locale } = useT();
-  const [range, setRange] = useState('30d');
-  const [view, setView] = useState('value');
-  const [report, setReport] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [refresh, setRefresh] = useState(0);
+  const [range,setRange] = useState('30d'), [view,setView] = useState('value');
+  const [report,setReport] = useState(null), [loading,setLoading] = useState(true), [error,setError] = useState('');
+  const [refresh,setRefresh] = useState(0);
+  const withBenchmark = view === 'sp500';
   useEffect(() => {
     const controller = new AbortController(); let current = true;
     setReport(null); setLoading(true); setError('');
-    const params = new URLSearchParams({ range, currency: 'USD' });
-    if (view === 'sp500') params.set('benchmark', 'sp500');
-    fetch(`/api/stats/performance?${params}`, { signal: controller.signal, cache: 'no-store' })
+    const params = new URLSearchParams({range,currency:'USD'});
+    if (withBenchmark) params.set('benchmark','sp500');
+    fetch(`/api/stats/performance?${params}`,{signal:controller.signal,cache:'no-store'})
       .then(async response => {
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Could not load daily performance');
+        if (!response.ok) throw new Error(data.error || 'Could not load portfolio history');
         if (data.currency !== 'USD' || !Array.isArray(data.portfolio)) throw new Error('Unexpected performance response');
         return data;
       })
-      .then(data => { if (current) setReport(data); })
-      .catch(err => { if (current && err.name !== 'AbortError') setError(err.message); })
-      .finally(() => { if (current) setLoading(false); });
-    return () => { current = false; controller.abort(); };
-  }, [range, statsTrigger, refresh, view]);
-  const money = value => new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(value);
-  const percent = value => `${Number(value).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-  const day = value => new Intl.DateTimeFormat(locale, { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value}T00:00:00Z`));
-  const rows = report?.portfolio || [], latest = rows[rows.length - 1];
-  const labels = { value: 'Combined market value', invested: 'Recorded cost (daily)', gain: 'Gain / loss vs. recorded cost', gainPct: 'Gain / loss vs. recorded cost (%)' };
-  const series = view === 'value' ? ['value', 'invested'] : [view];
-  return (
-    <section className="glass-panel" aria-label="Daily portfolio performance" style={{ padding: '1.25rem', marginBottom: '1.5rem', minWidth: 0 }}>
-      <h3 className="chart-title">Portfolio value &amp; recorded cost</h3>
-      <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>All games: current holdings today and saved daily history in USD. Gain is compared with each day's recorded cost, not a cash-flow-adjusted investment return. These controls apply only to this panel.</p>
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-        <div role="group" aria-label="Portfolio timeline view" style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          {[['value', 'Value + cost'], ['gain', 'Gain / loss ($)'], ['gainPct', 'Gain / loss (%)'], ['sp500', 'S&P comparison']].map(([id, label]) => (
-            <button key={id} type="button" aria-pressed={view === id} className={`btn ${view === id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView(id)}>{label}</button>
-          ))}
+      .then(data => {if (current) setReport(data);})
+      .catch(err => {if (current && err.name !== 'AbortError') setError(err.message);})
+      .finally(() => {if (current) setLoading(false);});
+    return () => {current=false;controller.abort();};
+  },[range,statsTrigger,refresh,withBenchmark]);
+  const money = value => new Intl.NumberFormat(locale,{style:'currency',currency:'USD'}).format(value);
+  const percent = value => `${Number(value).toLocaleString(locale,{maximumFractionDigits:2})}%`;
+  const date = (value,full=false) => new Intl.DateTimeFormat(locale,{timeZone:'UTC',month:'short',day:'numeric',...(full ? {year:'numeric'} : {})}).format(new Date(`${value}T00:00:00Z`));
+  const rows = report?.portfolio || [];
+  const labels = {value:'Market value',invested:'Recorded cost',gain:'Loss/Gain',gainPct:'Loss/Gain %'};
+  const series = view === 'value' ? ['value','invested'] : [view];
+  const incomplete = rows.some(row => row.staleRates || row.unpricedCards > 0 || row.unpricedSealed > 0);
+  return <section className="glass-panel portfolio-timeline" aria-label="Portfolio timeline" aria-busy={loading}>
+    <header className="portfolio-timeline-header">
+      <h3 className="chart-title">Portfolio timeline</h3>
+      <div className="portfolio-timeline-actions">
+        <div className="portfolio-segment portfolio-ranges" role="group" aria-label="Timeline period">
+          {ranges.map(item => <button key={item} type="button" aria-pressed={range===item} onClick={() => setRange(item)}>{item.toUpperCase()}</button>)}
         </div>
-        <button type="button" className="btn btn-secondary" onClick={() => setRefresh(n => n + 1)}>Refresh timeline</button>
+        <button type="button" className="portfolio-refresh" aria-label="Refresh portfolio timeline" title="Refresh timeline" disabled={loading} onClick={() => setRefresh(n=>n+1)}><RefreshCw size={15} /></button>
       </div>
-      <div role="group" aria-label="Daily performance range" style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-        {ranges.map(item => <button key={item} type="button" aria-pressed={range === item} className={`btn ${range === item ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setRange(item)}>{item.toUpperCase()}</button>)}
-      </div>
-      {loading ? <p role="status">Loading daily snapshots...</p> : error ? <p role="alert">{error}</p> : !rows.length ? <p>No saved snapshots for this range. Earlier values are not reconstructed.</p> : <>
-        <p>{latest.isLive ? 'Current holdings today' : 'Latest saved snapshot'}: {day(latest.date)} - value {money(latest.value)}, cost {money(latest.invested)}, gain {money(latest.gain)} ({latest.gainPct == null ? 'percentage unavailable: zero recorded cost' : percent(latest.gainPct)}).</p>
-        {rows.length === 1 && <p style={{ color: 'var(--text-secondary)' }}>One daily snapshot is available. The dot shows the available observation; a history line will develop as more days are saved.</p>}
-        {view === 'sp500' ? <BenchmarkComparison benchmark={report.sp500} /> : view === 'gainPct' && rows.every(row => row.gainPct == null) ? <p>Gain percentage is unavailable because these snapshots have no recorded cost.</p> : <div style={{ width: '100%', height: 280, minWidth: 0 }}>
-          <ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ top: 12, right: 20, left: 12, bottom: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-glass)" />
-            <XAxis dataKey="date" tickFormatter={day} minTickGap={32} stroke="var(--text-secondary)" />
-            <YAxis width={85} tickFormatter={value => view === 'gainPct' ? percent(value) : money(value)} stroke="var(--text-secondary)" />
-            <Tooltip labelFormatter={day} formatter={(value, name) => [view === 'gainPct' ? percent(value) : money(value), name]} contentStyle={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-glass)' }} />
-            <Legend />
-            {view !== 'value' && <ReferenceLine y={0} stroke="#94a3b8" />}
-            {series.map((key, index) => <Line key={key} type="linear" dataKey={key} name={labels[key]} stroke={index ? '#f59e0b' : '#3b82f6'} strokeWidth={2} dot={{ r: rows.length === 1 ? 6 : 3 }} activeDot={{ r: 7 }} connectNulls={false} isAnimationActive={false} />)}
-          </LineChart></ResponsiveContainer>
-        </div>}
-        <small style={{ color: 'var(--text-secondary)' }}>Snapshot timezone: {report.timeZone}. {rows.length} recorded day(s). Missing days are not backfilled; lines join available observations. Today reflects current holdings using available quotes; earlier days are saved snapshots.</small>
-        {rows.some(row => row.staleRates || row.unpricedCards > 0 || row.unpricedSealed > 0) && <p role="status">Some snapshots contain stale exchange rates or unpriced holdings; their values may be incomplete.</p>}
-      </>}
-    </section>
-  );
+    </header>
+    <div className="portfolio-segment portfolio-views" role="group" aria-label="Timeline view">
+      {views.map(([id,label]) => <button key={id} type="button" aria-pressed={view===id} onClick={() => setView(id)}>{label}</button>)}
+    </div>
+    {loading ? <div className="portfolio-chart-state" role="status">Loading...</div> : error ? <div className="portfolio-chart-state" role="alert">{error}</div> : !rows.length ? <div className="portfolio-chart-state">No history in this range.</div> : withBenchmark ? <BenchmarkComparison benchmark={report.sp500} /> : view==='gainPct' && rows.every(row=>row.gainPct==null) ? <div className="portfolio-chart-state">Add recorded costs to calculate a percentage.</div> : <div className="portfolio-chart-canvas">
+      <ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{top:12,right:12,left:0,bottom:0}}>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-glass)" />
+        <XAxis dataKey="date" tickFormatter={value=>date(value)} minTickGap={32} stroke="var(--text-secondary)" tickLine={false} axisLine={false} fontSize={11} />
+        <YAxis width={76} tickFormatter={value=>view==='gainPct' ? percent(value) : new Intl.NumberFormat(locale,{style:'currency',currency:'USD',notation:'compact',maximumFractionDigits:1}).format(value)} stroke="var(--text-secondary)" tickLine={false} axisLine={false} fontSize={11} />
+        <Tooltip labelFormatter={value=>date(value,true)} formatter={(value,name)=>[view==='gainPct' ? percent(value) : money(value),name]} contentStyle={{background:'var(--bg-secondary)',borderColor:'var(--border-glass)',borderRadius:8}} />
+        <Legend iconType="plainline" iconSize={14} wrapperStyle={{fontSize:12,paddingTop:12}} />
+        {view!=='value' && <ReferenceLine y={0} stroke="#94a3b8" />}
+        {series.map((key,index)=><Line key={key} type="linear" dataKey={key} name={labels[key]} stroke={index ? '#f59e0b' : '#3b82f6'} strokeWidth={2} dot={rows.length===1 ? {r:5} : false} activeDot={{r:5}} connectNulls={false} isAnimationActive={false} />)}
+      </LineChart></ResponsiveContainer>
+    </div>}
+    <footer className="portfolio-timeline-footer">
+      <span>All games · USD{report?.timeZone ? ` · ${report.timeZone}` : ''}{!loading && rows.length===1 ? ' · 1 day recorded' : ''}</span>
+      {incomplete && <span className="portfolio-warning" role="status" title="Some observations include stale exchange rates or unpriced holdings.">Incomplete pricing</span>}
+      <details className="portfolio-about"><summary>About</summary><p>Today uses current holdings and available quotes; earlier days use saved snapshots. Missing days are not backfilled. Loss/gain compares value with recorded cost, not a cash-flow-adjusted return. Hover or tap a point for exact amounts.</p></details>
+    </footer>
+  </section>;
 }
