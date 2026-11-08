@@ -7,12 +7,15 @@ on:
       - 'backend/src/utils/pokemonArtworkRepair.js'
       - 'backend/scripts/repair-pokemon-artwork.js'
       - 'backend/test/pokemonArtworkRepair.test.js'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   artwork-repair:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
     steps:
       - uses: actions/checkout@v4
         with:
