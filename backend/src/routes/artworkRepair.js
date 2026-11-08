@@ -1,7 +1,11 @@
 'use strict';
 const express=require('express');
 const {createArtworkRetry}=require('../utils/artworkRetry');
-function createArtworkRepairRouter({service,enabled=()=>process.env.POKEMON_LOCAL_CATALOG==='1',logger=entry=>console.info('[artwork-repair-route] '+JSON.stringify(entry)),retryController}){
+function artworkRepairEnabled(){
+  if(process.env.ENABLE_ARTWORK_REPAIR==='0')return false;
+  return true;
+}
+function createArtworkRepairRouter({service,enabled=artworkRepairEnabled,logger=entry=>console.info('[artwork-repair-route] '+JSON.stringify(entry)),retryController}){
  const router=express.Router(),audit=entry=>{try{logger(entry);}catch{}};
  const recovery=retryController||createArtworkRetry({service});
  const cardId=req=>/^tcgdex-en-[A-Za-z0-9._-]{1,110}$/.test(req.params.cardId||'')&&!req.params.cardId.includes('..')?req.params.cardId:'invalid';
