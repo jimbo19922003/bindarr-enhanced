@@ -1,8 +1,10 @@
+// daily-dashboard-v2
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
 import { TrendingUp, Coins, Library, Trophy, Plus, ArrowUpRight, Package, Zap } from 'lucide-react';
 import { getCardDisplayName } from '../utils/langHelper';
-import { priceText, currencySymbol } from '../utils/formatPrice';
+import { priceText, currencySymbol, getCurrency } from '../utils/formatPrice';
+import { cardAverages, formatDayTick, formatDayTooltip, formatMoneyTick } from '../utils/dashboardTimeline';
 import { getPrintingBadgeLabel, getPrintingBadgeStyle } from '../utils/cardPrinting';
 import { defaultGameFilter, gameOptions, showGamePicker, gameLabel } from '../utils/games';
 import { useT } from '../utils/i18n';
@@ -51,6 +53,12 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
   const [error, setError] = useState(null);
   const [timePeriod, setTimePeriod] = useState('30d');
   const [view, setView] = useState('executive');
+  const [reportingCurrency, setReportingCurrency] = useState(() => getCurrency());
+  useEffect(() => {
+    const changed = () => setReportingCurrency(getCurrency());
+    window.addEventListener('bindarr_currency_change', changed);
+    return () => window.removeEventListener('bindarr_currency_change', changed);
+  }, []);
   // '' | 'pokemon' | 'mtg'. Collapses to the only visible game when the other is
   // hidden in Settings, so the totals never include cards the user cannot see.
   const [gameFilter, setGameFilter] = useState(() => defaultGameFilter());
@@ -65,7 +73,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
   useEffect(() => {
     fetchStats();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statsTrigger, gameFilter]);
+  }, [statsTrigger, gameFilter, reportingCurrency]);
 
   useEffect(() => {
     if (!stats) return;
@@ -73,7 +81,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
     let current = true;
     setHistoryData([]);
     setLoadingHistory(true);
-    fetch(`/api/stats/history?period=${timePeriod}${gameFilter ? `&game=${gameFilter}` : ''}`, { signal: controller.signal })
+    fetch(`/api/stats/history?period=${timePeriod}&currency=${encodeURIComponent(reportingCurrency)}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')}${gameFilter ? `&game=${gameFilter}` : ''}`, { signal: controller.signal })
       .then(response => {
         if (!response.ok) throw new Error('Failed to load portfolio history');
         return response.json();
@@ -82,12 +90,15 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
       .catch(error => { if (current && error.name !== 'AbortError') console.error(error); })
       .finally(() => { if (current) setLoadingHistory(false); });
     return () => { current = false; controller.abort(); };
-  }, [timePeriod, stats, gameFilter]);
+  }, [timePeriod, stats, gameFilter, reportingCurrency]);
 
   const fetchStats = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/stats${gameFilter ? `?game=${gameFilter}` : ''}`);
+      setError(null);
+      const params = new URLSearchParams({ currency: reportingCurrency });
+      if (gameFilter) params.set('game', gameFilter);
+      const response = await fetch(`/api/stats?${params}`);
       if (!response.ok) {
         throw new Error(t('dash.errStats'));
       }
@@ -274,9 +285,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
           </div>
           <div className="metric-value">{currencySymbol()}{money(summary.totalSpent)}</div>
           <div className="metric-footer">
-            {summary.totalCards > 0 && (
-              <span>{t('dash.avgPerCard', { price: priceText(summary.avgCardValue) })}</span>
-            )}
+            <span title="Total recorded card and sealed-product spending divided by currently owned physical card copies; includes unopened sealed purchases.">Average invested per owned card: {priceText(cardAverages(summary).investedPerCard, summary.currency || reportingCurrency)}</span>
             <div>{t('dash.investedHint')}</div>
           </div>
         </div>
@@ -310,13 +319,14 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
           <div className="metric-value">{summary.totalCards}</div>
           <div className="metric-footer">
             <span>{t('dash.uniqueCount', { count: summary.uniqueCards })}{summary.unsortedCount > 0 ? ` • ${t('dash.unsortedCount', { count: summary.unsortedCount })}` : ''}</span>
+            <div>Average market value: {priceText(cardAverages(summary).marketPerCard, summary.currency || reportingCurrency)} / card</div>
           </div>
         </div>
       </div>
 
       {/* Recorded combined holdings, not a backfilled price-only curve. */}
       <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
-        Recorded cards + sealed portfolio snapshots. History starts when this feature is used; earlier combined values are unavailable.
+        Daily cards + sealed portfolio snapshots. Each day shows its latest recorded normalized value; today updates as the collection changes. Earlier unconverted history is retained separately, not backfilled.
       </p>
       <div className="glass-panel" style={{ marginBottom: '1.5rem', padding: '1.5rem 1.75rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -328,7 +338,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
         <div className="chart-container" style={{ height: '240px', position: 'relative' }}>
           {loadingHistory ? (
             <div className="spinner" style={{ position: 'absolute', top: '45%', left: '45%' }}></div>
-          ) : historyData.length < 2 ? (
+          ) : historyData.length < 1 ? (
             <div className="chart-empty">{t('dash.notEnoughHistory')}</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -339,14 +349,15 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
                     <stop offset="95%" stopColor="var(--type-grass)" stopOpacity={0.0}/>
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="date" stroke="var(--text-secondary)" style={{ fontSize: '0.7rem' }} />
-                <YAxis stroke="var(--text-secondary)" style={{ fontSize: '0.7rem' }} tickFormatter={(v) => `${currencySymbol()}${v}`} />
+                <XAxis dataKey="date" stroke="var(--text-secondary)" style={{ fontSize: '0.7rem' }} minTickGap={28} interval="preserveStartEnd" tickFormatter={day => formatDayTick(day, locale)} />
+                <YAxis stroke="var(--text-secondary)" style={{ fontSize: '0.7rem' }} width={72} tickFormatter={value => formatMoneyTick(value, reportingCurrency, locale)} />
                 <Tooltip 
                   contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-glass)' }}
                   labelStyle={{ color: 'var(--text-primary)' }}
-                  formatter={(v) => [`${currencySymbol()}${v}`, t('dash.portfolioValue')]}
+                  labelFormatter={day => formatDayTooltip(day, locale)}
+                  formatter={value => [priceText(value, reportingCurrency), t('dash.portfolioValue')]}
                 />
-                <Area type="monotone" dataKey="value" stroke="var(--type-grass)" strokeWidth={2} fillOpacity={1} fill="url(#colorVal)" />
+                <Area type="linear" dataKey="value" stroke="var(--type-grass)" strokeWidth={2} dot={{ r: 3 }} fillOpacity={1} fill="url(#colorVal)" />
               </AreaChart>
             </ResponsiveContainer>
           )}
