@@ -8,6 +8,8 @@ export default function LocalCatalogStatusPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [credentialsOpen, setCredentialsOpen] = useState(false);
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false);
   useEffect(() => {
     let live = true;
     const controller = new AbortController();
@@ -21,31 +23,40 @@ export default function LocalCatalogStatusPanel() {
   }, [language, refresh]);
   const choices = [{code:'en',name:'English'}, ...(data?.availableLanguages || []).filter(item => item.code !== 'en')];
   return <section className="glass-panel" style={{marginBottom:'1rem'}}>
-    <h3 style={{marginTop:0}}>Local Pokémon metadata</h3>
-    <CarddexKeyPanel />
-    <p>English-first snapshots. Metadata, artwork references and scanner readiness are separate.</p>
+    <h3 style={{marginTop:0}}>Pokémon catalogue</h3>
     <div style={{display:'flex',gap:'0.75rem',alignItems:'center',flexWrap:'wrap'}}>
-      <label>Installed snapshot language <select className="input-control" value={language} onChange={event => setLanguage(event.target.value)}>
+      <label>Language <select className="input-control" value={language} onChange={event => setLanguage(event.target.value)}>
         {choices.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
       </select></label>
-      <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? 'Reading local status…' : 'Refresh local status'}</button>
+      <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? 'Checking…' : 'Refresh status'}</button>
     </div>
-    {error && <p role="alert">{error} No readiness claim is available.</p>}
+    {busy && <p role="status">Reading installed catalogue status.</p>}
+    {error && <p role="alert">{error} Catalogue status could not be verified.</p>}
     {data && <>
-      <p>Local API preview: {data.localModeEnabled ? 'enabled' : 'disabled; existing provider paths remain active'}.</p>
-      {!data.snapshot ? <p role="status">No local snapshot is installed for this language. A successful repository build does not automatically install it here. Use the staged-bundle preview/install controls below; automatic delivery is not connected.</p> : <>
-        <p>Source revision: <code>{data.snapshot.commit}</code><br />Imported (database time): {data.snapshot.importedAt}</p>
-        <p>Snapshot metadata: {data.summary.metadataCards} cards. Cached rows: {data.summary.cachedRows}. Artwork references: {data.summary.artworkReferences}. Missing references: {data.summary.missingReferences}. Missing cache rows: {data.summary.missingCacheRows}.</p>
-        <div className="collection-table-wrapper" style={{maxHeight:260,overflow:'auto'}}>
-          <table className="collection-table"><thead><tr><th>Set</th><th>Imported cards</th><th>Official printed count</th><th>Artwork references</th><th>Missing references</th><th>Missing cache rows</th></tr></thead>
-            <tbody>{data.sets.map(set => <tr key={set.id}><td>{set.name} <code>{set.id}</code></td><td>{set.metadataCards}</td><td>{set.printedTotal ?? 'Unknown'}</td><td>{set.artworkReferences}</td><td>{set.missingReferences}</td><td>{set.missingCacheRows}</td></tr>)}</tbody>
-          </table>
-        </div>
-        {data.snapshot.scanRefreshRequired && <p role="status">This metadata snapshot requests a scanner-index refresh.</p>}
-      </>}
-      <p>Image downloads and local image files are not verified by this status endpoint. An artwork URL may still fail to load. Scanner readiness is not verified here.</p>
-      <p>Artwork repair tries CardDex before PokéWallet for eligible missing English artwork. Provider matching and successful image downloads are verified separately from metadata readiness.</p>
+      <p role="status">{data.snapshot ? `Installed: ${Number(data.summary?.metadataCards || 0).toLocaleString()} cards.` : 'No local catalogue installed for this language.'}</p>
+      <p>Local search: {data.localModeEnabled ? 'enabled' : 'disabled; the configured provider handles searches'}.</p>
+      {data.snapshot && <p>{Number(data.summary?.missingReferences || 0).toLocaleString()} cards have no provider image reference. Existing image links and scanner readiness are not verified by this check.</p>}
+      <p>Catalogue search, artwork recovery and price refresh are separate. Saving a provider key does not automatically retry a cached artwork failure or enable remote catalogue fallback.</p>
     </>}
-    <LocalCatalogImportPanel language={language} onImported={() => setRefresh(value => value + 1)} />
+    <details onToggle={event => setCredentialsOpen(event.currentTarget.open)} style={{marginTop:'1rem'}}>
+      <summary style={{cursor:'pointer'}}>CardDex connection</summary>
+      {credentialsOpen && <CarddexKeyPanel />}
+    </details>
+    <details onToggle={event => setMaintenanceOpen(event.currentTarget.open)} style={{marginTop:'1rem'}}>
+      <summary style={{cursor:'pointer'}}>Advanced catalogue maintenance</summary>
+      <p>For operators installing a staged metadata snapshot. Opening this section changes no data. Existing collection entries and saved provider keys are not removed.</p>
+      {maintenanceOpen && <>
+        {data?.snapshot && <>
+          <p>Source revision: <code>{data.snapshot.commit}</code><br />Imported: {data.snapshot.importedAt}</p>
+          {data.snapshot.scanRefreshRequired && <p role="status">This snapshot requests a scanner-index refresh.</p>}
+          <div className="collection-table-wrapper" style={{maxHeight:260,overflow:'auto'}}>
+            <table className="collection-table"><thead><tr><th>Set</th><th>Imported cards</th><th>Printed count</th><th>Image references</th><th>Missing references</th></tr></thead>
+              <tbody>{(data.sets || []).map(set => <tr key={set.id}><td>{set.name} <code>{set.id}</code></td><td>{set.metadataCards}</td><td>{set.printedTotal ?? 'Unknown'}</td><td>{set.artworkReferences}</td><td>{set.missingReferences}</td></tr>)}</tbody>
+            </table>
+          </div>
+        </>}
+        <LocalCatalogImportPanel language={language} onImported={() => setRefresh(value => value + 1)} />
+      </>}
+    </details>
   </section>;
 }
