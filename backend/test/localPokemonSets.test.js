@@ -1,0 +1,20 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),{join}=require('node:path'),{tmpdir}=require('node:os'),http=require('node:http'),express=require('express');
+const {openConnection}=require('../src/utils/salesRepository');
+const {createPokemonLocalCatalog}=require('../src/utils/pokemonLocalCatalog');
+const {createLocalPokemonSetsHandler,resolveLanguage}=require('../src/routes/localPokemonSets');
+async function fixture(t,{enabled=true}={}){
+ const root=await fs.mkdtemp(join(tmpdir(),'local-set-route-')),file=join(root,'catalog.db');await fs.writeFile(file,'');const connect=()=>openConnection(file),db=await connect();
+ try{await db.exec('CREATE TABLE card_cache(id TEXT PRIMARY KEY,name TEXT,printed_name TEXT,supertype TEXT,subtypes TEXT,types TEXT,rarity TEXT,set_id TEXT,set_name TEXT,number TEXT,image_url TEXT,game TEXT,language TEXT)');}finally{await db.close();}
+ let fallbacks=0;const app=express();app.get('/api/sets',createLocalPokemonSetsHandler({connect,enabled:()=>enabled}));app.get('/api/sets',(_req,res)=>{fallbacks++;res.json({legacy:true});});
+ const server=http.createServer(app);await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true});});
+ const get=query=>new Promise((resolve,reject)=>{http.get(`http://127.0.0.1:${server.address().port}/api/sets${query}`,response=>{let text='';response.on('data',chunk=>{text+=chunk;});response.on('end',()=>{try{resolve({status:response.statusCode,headers:response.headers,body:JSON.parse(text)});}catch(error){reject(error);}});}).on('error',reject);});
+ return {get,store:createPokemonLocalCatalog({connect}),fallbacks:()=>fallbacks};
+}
+function snapshot(language){const japanese=language==='ja',id=japanese?'SV2a':'base1';return {commit:'a'.repeat(40),language,sets:[{id,name:japanese?'ポケモンカード151':'Base Set',serie:{id:'physical',name:'Physical'},cardCount:{official:102},releaseDate:'2023-06-16'}],cards:[{id:id+'-004',localId:'004',name:japanese?'ヒトカゲ':'Charmander',category:'Pokemon',set:{id}}]};}
+test('local set lists read imported SQLite snapshots without reaching legacy handlers',async t=>{const f=await fixture(t);await f.store.importSnapshot(snapshot('en'));await f.store.importSnapshot(snapshot('ja'));const en=await f.get('?game=pokemon&lang=en'),ja=await f.get('?game=pokemon&lang=Japanese');assert.equal(en.status,200);assert.equal(en.headers['x-pokemon-catalog-source'],'local');assert.equal(en.body[0].id,'base1');assert.equal(en.body[0].total,1);assert.equal(en.body[0].printed_total,102);assert.equal(en.body[0].game,'pokemon');assert.equal(ja.body[0].id,'SV2a');assert.equal(ja.body[0].name,'ポケモンカード151');assert.equal(f.fallbacks(),0);});
+test('absent snapshots return sync-required, never a public provider fallback',async t=>{const f=await fixture(t);const empty=await f.get('?game=pokemon&lang=ja');assert.equal(empty.status,503);assert.equal(empty.body.code,'LOCAL_CATALOG_SYNC_REQUIRED');await f.store.importSnapshot(snapshot('en'));const missing=await f.get('?game=pokemon&lang=ja');assert.equal(missing.status,503);assert.equal(missing.body.language,'ja');assert.equal(f.fallbacks(),0);});
+test('unknown and repeated language inputs do not silently select English',async t=>{const f=await fixture(t);for(const query of ['?game=pokemon&lang=unknown','?game=pokemon&lang=ja&lang=en']){const result=await f.get(query);assert.equal(result.status,400);assert.equal(result.body.code,'INVALID_CATALOG_LANGUAGE');}assert.equal(f.fallbacks(),0);assert.equal(resolveLanguage('Japanese'),'ja');assert.equal(resolveLanguage(undefined),'en');});
+test('disabled preview preserves the legacy route',async t=>{const f=await fixture(t,{enabled:false});assert.deepEqual((await f.get('?game=pokemon&lang=en')).body,{legacy:true});assert.equal(f.fallbacks(),1);});
+test('other games remain untouched by the Pokemon-specific preview',async t=>{const f=await fixture(t);assert.deepEqual((await f.get('?game=mtg')).body,{legacy:true});assert.equal(f.fallbacks(),1);});
