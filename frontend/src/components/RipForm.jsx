@@ -23,7 +23,12 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
   const [removed, setRemoved] = useState([]), [matches, setMatches] = useState([]), [looking, setLooking] = useState(false);
   const [owned, setOwned] = useState({}), [ownershipPending, setOwnershipPending] = useState(0), [ownershipError, setOwnershipError] = useState(false);
   const language = langCode(product.language || 'en');
-  useEffect(() => { live.current = true; inputRef.current?.focus(); return () => { live.current = false; request.current++; }; }, []);
+  useEffect(() => {
+    const requestRef = request;
+    live.current = true;
+    inputRef.current?.focus();
+    return () => { live.current = false; requestRef.current++; };
+  }, []);
   const loadOwnership = async cardIds => {
     const ids = [...new Set(cardIds.filter(Boolean))]; if (!ids.length) return;
     if (live.current) setOwnershipPending(value => value + 1);
@@ -136,7 +141,7 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
       </div>
       {removed.length > 0 && <button className="btn btn-secondary" type="button" onClick={() => { const [last, ...rest] = removed; setPulls(current => [last, ...current]); setRemoved(rest); }}>Undo last removal</button>}
       <button className="btn btn-secondary" type="button" onClick={() => setPulls(current => [{ key: `new-${++nextLine}`, bulk: true, lineMode: true, card_id: '', name: t('sealed.otherCards'), quantity: '1', line_value: '', current_value: '', value_at_opening: '', set_name: product.set_name || '' }, ...current])}>{t('sealed.addBulk')}</button>
-      <small>Saving records this rip as complete. You can edit its contents later unless a sale has frozen the opening's acquisition basis.</small>
+      <small>Saving records this rip as complete. You can edit its contents later unless a sale has frozen the opening&apos;s acquisition basis.</small>
     </fieldset>
     <div className="quick-add-footer"><div className="quick-add-footer-actions">
       <button className="btn btn-secondary" type="button" onClick={onClose} disabled={busy}>{t('common.cancel')}</button>
