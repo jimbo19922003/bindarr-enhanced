@@ -1,0 +1,45 @@
+name: Apply and validate aligned portfolio summary cards
+on:
+  push:
+    branches: ['fix/rip-valuation-artwork-mixed-sets']
+    paths:
+      - '.github/workflows/apply-aligned-summary.yml'
+      - 'scripts/apply-aligned-summary.py'
+      - 'scripts/aligned-summary/**'
+      - 'frontend/src/components/SummaryCards.css'
+permissions:
+  contents: write
+concurrency:
+  group: apply-aligned-summary
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply guarded summary layout
+        run: |
+          python3 scripts/apply-aligned-summary.py
+          python3 scripts/apply-aligned-summary.py
+          python3 -m json.tool frontend/src/locales/en.json > /dev/null
+      - name: Test dashboard arithmetic and benchmark calculations
+        run: node --test frontend/src/utils/dashboardTimeline.test.js backend/src/utils/costBasis.test.js backend/src/utils/performanceHistory.test.js backend/src/utils/livePerformance.test.js backend/src/utils/sp500Benchmark.test.js
+      - name: Build frontend
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+      - name: Commit validated summary edits
+        run: |
+          git add frontend/src/components/Dashboard.jsx frontend/src/locales/en.json
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'style: align summary values and rename Portfolio Value card'
+          git push origin HEAD:refs/heads/fix/rip-valuation-artwork-mixed-sets

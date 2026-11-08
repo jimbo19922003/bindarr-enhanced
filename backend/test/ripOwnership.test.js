@@ -1,0 +1,31 @@
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+async function main() {
+  const source = fs.readFileSync(path.join(__dirname, '../../frontend/src/utils/ripOwnership.js'), 'utf8');
+  const { draftOwnership, candidateOwnership } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+  const first = { key: 'new-1', card_id: 'a', quantity: '1' };
+  const second = { key: 'new-2', card_id: 'a', quantity: '1' };
+  let result = draftOwnership([second, first], { a: 0 });
+  assert.strictEqual(result['new-1'].kind, 'new');
+  assert.strictEqual(result['new-2'].kind, 'extra');
+  assert.strictEqual(result['new-2'].earlier, 1);
+  assert.strictEqual(draftOwnership([first], { a: 2 })['new-1'].kind, 'owned');
+  assert.strictEqual(draftOwnership([first], {})['new-1'].kind, 'unknown');
+  assert.strictEqual(draftOwnership([first], { a: null })['new-1'].kind, 'unknown');
+  const saved = { key: 'saved-8', id: 8, card_id: 'a', quantity: '3' };
+  result = draftOwnership([second, saved], { a: 0 }, true);
+  assert.strictEqual(result['saved-8'].kind, 'first');
+  assert.strictEqual(result['new-2'].kind, 'extra');
+  assert.strictEqual(result['new-2'].earlier, 3);
+  assert.ok(result['saved-8'].text.includes('2 extra copies'));
+  assert.strictEqual(draftOwnership([second], { a: 0 }, true)['new-2'].kind, 'new');
+  assert.strictEqual(candidateOwnership('a', [saved], { a: 0 }, true).kind, 'extra');
+  assert.strictEqual(candidateOwnership('b', [saved], { b: 0 }, true).kind, 'new');
+  assert.strictEqual(candidateOwnership('b', [saved], {}, true).kind, 'unknown');
+  assert.strictEqual(candidateOwnership('a', [saved], { a: 2 }, true).kind, 'owned');
+  assert.deepStrictEqual(draftOwnership([{ key: 'bulk', bulk: true, quantity: '20' }], {}), {});
+  console.log('ripOwnership.test.js: all assertions passed');
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

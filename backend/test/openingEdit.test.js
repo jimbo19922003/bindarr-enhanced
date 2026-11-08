@@ -1,0 +1,52 @@
+'use strict';
+const assert = require('assert'), os = require('os'), path = require('path'), http = require('http');
+process.env.DB_PATH = path.join(os.tmpdir(), `bindarr-edit-${process.pid}.db`);
+process.env.DEFAULT_ADMIN_PASSWORD = 'test-admin-password';
+const db = require('../src/db');
+require('../src/utils/currencyConversion').convertCents = async (amount, from, to) => ({ convertedCents: Math.round(amount * (from === to ? 1 : 1.25)), stale: false });
+async function main() {
+  await db.initDb(); const admin = await db.get("SELECT id FROM users WHERE username = 'admin'");
+  await db.run(`INSERT INTO card_cache (id, name, game, language, price_trend, price_normal, price_currency) VALUES ('tcgdex-en-edit', 'Test card', 'pokemon', 'English', 10, 10, 'USD'), ('tcgdex-en-edit-eur', 'Euro card', 'pokemon', 'English', 5, 5, 'EUR'), ('tcgdex-en-edit-fail', 'Rollback card', 'pokemon', 'English', 5, 5, 'USD')`);
+  const app = require('express')(); app.use(require('express').json()); app.use((req, _res, next) => { req.user = { id: admin.id }; next(); });
+  app.use('/api', require('../src/routes/sealed')); app.use('/api', require('../src/routes/sealedOpenings'));
+  const server = http.createServer(app); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const send = async (method, url, body) => { const response = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: response.status, body: await response.json() }; };
+  const count = async () => (await db.get('SELECT COUNT(*) AS n FROM collection WHERE user_id = ?', [admin.id])).n;
+  const bodyFor = (opening, id) => ({ request_id: id, base: opening, opened_at: opening.opened_at, notes: opening.notes, entry_complete: opening.entry_complete, pulls: opening.pulls.map(pull => ({ id: pull.id, card_id: pull.card_id, name: pull.name, quantity: pull.quantity, ...(pull.line_value != null ? { line_value: pull.line_value } : pull.current_value != null ? { current_value: pull.current_value } : {}) })) });
+  try {
+    const product = await send('POST', '/api/sealed/products', { name: 'Edit test box', product_type: 'etb', lot: { quantity: 1, total_cost: '50', currency: 'USD' } });
+    assert.strictEqual(product.status, 201, JSON.stringify(product.body));
+    const lotId = product.body.product.lots[0].id, productId = product.body.product.id;
+    const inserted = await db.run(`INSERT INTO sealed_opening (user_id, product_id, lot_id, quantity, cost_cents, currency, opened_at, notes, entry_complete) VALUES (?, ?, ?, 1, 5000, 'USD', '2026-11-07', '', 0)`, [admin.id, productId, lotId]);
+    const filed = [];
+    for (let i = 0; i < 20; i++) filed.push((await db.run(`INSERT INTO collection (user_id, card_id, quantity, purchase_price, game, list_type) VALUES (?, 'tcgdex-en-edit', 1, 0, 'pokemon', 'collection')`, [admin.id])).lastID);
+    await db.run(`INSERT INTO sealed_pull (user_id, opening_id, card_id, collection_id, name, quantity, current_unit_cents, opened_unit_cents, filed_ids) VALUES (?, ?, 'tcgdex-en-edit', ?, 'Test card', 20, 1000, 1000, ?)`, [admin.id, inserted.lastID, filed[0], filed.join(',')]);
+    await db.run('UPDATE sealed_lot SET remaining_quantity = 0, remaining_cost_cents = 0 WHERE id = ?', [lotId]);
+    const original = await send('GET', `/api/sealed/openings/${inserted.lastID}`);
+    assert.strictEqual(original.status, 200); assert.strictEqual(await count(), 20);
+    const opening = original.body.opening, url = `/api/sealed/openings/${opening.id}/edit`;
+    const payload = bodyFor(opening, 'edit-add-two-0001');
+    payload.pulls.push({ card_id: 'tcgdex-en-edit', name: 'Test card', quantity: 1 }, { card_id: 'tcgdex-en-edit-eur', name: 'Euro card', quantity: 1 });
+    const saved = await send('PUT', url, payload); assert.strictEqual(saved.status, 200, JSON.stringify(saved.body)); assert.strictEqual(await count(), 22);
+    assert.strictEqual(saved.body.changes.addedCopies, 2); assert.strictEqual(saved.body.opening.pulls[0].id, opening.pulls[0].id);
+    assert.strictEqual(saved.body.opening.pulls.find(pull => pull.card_id === 'tcgdex-en-edit-eur').current_value, '6.25');
+    assert.strictEqual(saved.body.opening.cost, opening.cost); assert.strictEqual(saved.body.opening.pulls[0].value_at_opening, opening.pulls[0].value_at_opening);
+    assert.strictEqual((await send('PUT', url, payload)).status, 200); assert.strictEqual(await count(), 22);
+    assert.strictEqual((await send('PUT', url, { ...payload, request_id: 'edit-stale-0002' })).status, 409); assert.strictEqual(await count(), 22);
+    const unchanged = await send('PUT', url, bodyFor(saved.body.opening, 'edit-unchanged-0003')); assert.strictEqual(unchanged.status, 200, JSON.stringify(unchanged.body)); assert.strictEqual(await count(), 22);
+    const reduce = bodyFor(unchanged.body.opening, 'edit-reduce-0004'); reduce.pulls[0].quantity = 19;
+    const reduced = await send('PUT', url, reduce); assert.strictEqual(reduced.status, 200, JSON.stringify(reduced.body)); assert.strictEqual(await count(), 21);
+    const remove = bodyFor(reduced.body.opening, 'edit-remove-0005'); remove.pulls.pop();
+    const removed = await send('PUT', url, remove); assert.strictEqual(removed.status, 200); assert.strictEqual(await count(), 20);
+    const lot = await db.get('SELECT remaining_quantity, remaining_cost_cents FROM sealed_lot WHERE id = ?', [lotId]); assert.strictEqual(lot.remaining_quantity, 0); assert.strictEqual(lot.remaining_cost_cents, 0);
+    const rollback = bodyFor(removed.body.opening, 'edit-rollback-0006'); rollback.pulls.push({ card_id: 'tcgdex-en-edit', name: 'Test card', quantity: 1 }, { card_id: 'tcgdex-en-edit-fail', name: 'Rollback card', quantity: 1 });
+    await db.run(`CREATE TRIGGER edit_test_abort BEFORE INSERT ON collection WHEN NEW.card_id = 'tcgdex-en-edit-fail' BEGIN SELECT RAISE(ABORT, 'test rollback'); END`);
+    assert.strictEqual((await send('PUT', url, rollback)).status, 500); assert.strictEqual(await count(), 20);
+    await db.run('DROP TRIGGER edit_test_abort');
+    assert.strictEqual((await send('PUT', url, rollback)).status, 200); assert.strictEqual(await count(), 22);
+    assert.strictEqual((await send('PUT', url, rollback)).status, 200); assert.strictEqual(await count(), 22);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+  console.log('openingEdit.test.js: all assertions passed');
+}
+main().then(() => process.exit(0)).catch(error => { console.error(error); process.exit(1); });

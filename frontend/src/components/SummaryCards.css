@@ -1,0 +1,10 @@
+.executive-cards-aligned{align-items:stretch}
+.executive-cards-aligned>.metric-card{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:3.25rem 2.5rem minmax(3rem,auto);align-content:start;align-items:start;justify-content:normal;gap:.5rem;padding:1.25rem;min-width:0;height:100%;box-sizing:border-box;text-align:left}
+.executive-cards-aligned>.metric-card>.metric-header{display:grid;grid-template-columns:minmax(0,1fr) 28px;align-items:start;justify-content:normal;gap:.5rem;min-height:0;margin:0;padding:0;font-size:.75rem;line-height:1.35;width:100%}
+.executive-cards-aligned>.metric-card>.metric-header>span:first-child{min-width:0;align-self:start;padding-top:.25rem;overflow-wrap:break-word}
+.executive-cards-aligned>.metric-card .metric-icon{display:flex;align-items:center;justify-content:center;justify-self:end;align-self:start;width:28px;height:28px;min-width:28px;margin:0;padding:0;box-sizing:border-box}
+.executive-cards-aligned>.metric-card>.metric-value{display:block;align-self:start;font-size:clamp(1.5rem,1.8vw,2rem);font-weight:800;line-height:1.15;font-variant-numeric:tabular-nums;margin:0;padding:0;min-width:0;max-width:100%;white-space:nowrap;overflow-x:auto;overflow-y:hidden;overflow-wrap:normal}
+.executive-cards-aligned>.metric-card>.metric-footer{display:block;align-self:start;min-height:0;margin:0;padding:0;font-size:.75rem;line-height:1.5;color:var(--text-secondary);overflow-wrap:break-word}
+.executive-cards-aligned>.metric-card>.metric-footer>div+div{margin-top:.2rem}
+.executive-cards-aligned .summary-pricing-warning{color:var(--accent-yellow,#b8860b)}
+@media(max-width:760px){.executive-cards-aligned>.metric-card{padding:1rem;grid-template-rows:3.25rem 2.5rem minmax(3rem,auto)}.executive-cards-aligned>.metric-card>.metric-value{font-size:1.75rem}}

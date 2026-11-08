@@ -1,0 +1,56 @@
+name: Integrate and validate complete sales features
+on:
+  push:
+    branches: ['fix/rip-valuation-artwork-mixed-sets']
+    paths:
+      - '.github/workflows/integrate-sales-features.yml'
+      - 'scripts/integrate-sales-features.py'
+permissions:
+  contents: write
+concurrency:
+  group: integrate-complete-sales-features
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply all pending integrations and verify actual wiring
+        run: |
+          python3 scripts/integrate-sales-features.py
+          node --check backend/src/utils/livePerformance.js
+          node --check backend/src/utils/dailyPerformance.js
+          node --check backend/src/utils/performanceHistory.js
+          node --check backend/src/utils/timelineAccounting.js
+          node --check backend/src/utils/dashboardAccounting.js
+          node --check backend/src/utils/saleAdjustments.js
+          node --check backend/src/utils/salesApplication.js
+          node --check backend/src/utils/salesReport.js
+          node --check backend/src/utils/sealedSalesRepository.js
+          node --check backend/src/routes/stats.js
+          node --check backend/src/routes/sales.js
+      - name: Install isolated test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/sales-deps" --no-audit --no-fund sqlite3@6.0.1 express@4.19.2
+      - name: Run complete accounting and sales regression suite
+        env:
+          NODE_PATH: ${{ runner.temp }}/sales-deps/node_modules
+        run: node --test backend/src/utils/*.test.js frontend/src/utils/saleTargets.test.js
+      - name: Build integrated frontend
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+      - name: Commit actual validated application changes
+        run: |
+          git add backend/src/utils/livePerformance.js backend/src/utils/dailyPerformance.js backend/src/utils/performanceHistory.js backend/src/utils/performanceHistory.test.js backend/src/utils/dashboardAccounting.test.js backend/src/utils/salesApplication.js backend/src/utils/salesReport.js backend/src/utils/timelineAccounting.js backend/src/utils/sealedSalesRepository.js backend/src/routes/stats.js backend/src/routes/sales.js frontend/src/components/PerformanceChart.jsx frontend/src/components/Dashboard.jsx frontend/src/components/SalesHistory.jsx frontend/src/components/SaleDialogHost.jsx
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: integrate sales actions dashboard accounting and total performance'
+          git push origin HEAD:refs/heads/fix/rip-valuation-artwork-mixed-sets

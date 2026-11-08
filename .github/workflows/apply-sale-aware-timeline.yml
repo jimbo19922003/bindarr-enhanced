@@ -1,0 +1,59 @@
+name: Repair and validate sale-aware dashboard and timeline
+on:
+  push:
+    branches: ['fix/rip-valuation-artwork-mixed-sets']
+    paths:
+      - '.github/workflows/apply-sale-aware-timeline.yml'
+      - 'scripts/apply-sale-aware-timeline.py'
+      - 'scripts/apply-dashboard-accounting.py'
+      - 'backend/src/utils/timelineAccounting*'
+      - 'backend/src/utils/dashboardAccounting*'
+      - 'backend/src/utils/livePerformance.test.js'
+      - 'frontend/src/components/PortfolioAccountingSummary.jsx'
+permissions:
+  contents: write
+concurrency:
+  group: apply-sale-aware-timeline
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply guarded timeline and dashboard integrations
+        run: |
+          python3 scripts/apply-sale-aware-timeline.py
+          python3 scripts/apply-sale-aware-timeline.py
+          python3 scripts/apply-dashboard-accounting.py
+          python3 scripts/apply-dashboard-accounting.py
+          node --check backend/src/utils/timelineAccounting.js
+          node --check backend/src/utils/dashboardAccounting.js
+          node --check backend/src/utils/dailyPerformance.js
+          node --check backend/src/utils/performanceHistory.js
+          node --check backend/src/utils/livePerformance.js
+          node --check backend/src/routes/stats.js
+      - name: Install isolated test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/sales-deps" --no-audit --no-fund sqlite3@6.0.1 express@4.19.2
+      - name: Run accounting dashboard and timeline regression tests
+        env:
+          NODE_PATH: ${{ runner.temp }}/sales-deps/node_modules
+        run: node --test backend/src/utils/*.test.js frontend/src/utils/saleTargets.test.js
+      - name: Build frontend
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+      - name: Commit validated dashboard and timeline integration
+        run: |
+          git add backend/src/utils/livePerformance.js backend/src/utils/dailyPerformance.js backend/src/utils/performanceHistory.js backend/src/utils/performanceHistory.test.js backend/src/routes/stats.js frontend/src/components/PerformanceChart.jsx frontend/src/components/Dashboard.jsx
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: separate recorded spending from remaining basis and total performance'
+          git push origin HEAD:refs/heads/fix/rip-valuation-artwork-mixed-sets

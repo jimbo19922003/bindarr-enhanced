@@ -1,14 +1,25 @@
+// dashboard-accounting-v1
+// contextual-sales-v1
+// sales-ui-v1
+// aligned-summary-v1
+// streamlined-executive-v1
+// executive-performance-v1
+// daily-dashboard-v2
 import { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { TrendingUp, Coins, Library, Trophy, Plus, ArrowUpRight, Package, Zap } from 'lucide-react';
 import { getCardDisplayName } from '../utils/langHelper';
-import { priceText, currencySymbol } from '../utils/formatPrice';
+import { priceText, currencySymbol, getCurrency } from '../utils/formatPrice';
+import { cardAverages } from '../utils/dashboardTimeline';
 import { getPrintingBadgeLabel, getPrintingBadgeStyle } from '../utils/cardPrinting';
 import { defaultGameFilter, gameOptions, showGamePicker, gameLabel } from '../utils/games';
 import { useT } from '../utils/i18n';
 import CardInspectorModal from './CardInspectorModal';
 import CardImage from './CardImage';
 import OpenedPerformance from './OpenedPerformance';
+import PerformanceChart from './PerformanceChart';
+import PortfolioAccountingSummary from './PortfolioAccountingSummary';
+import './SummaryCards.css';
 
 const COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
@@ -49,15 +60,17 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [timePeriod, setTimePeriod] = useState('30d');
   const [view, setView] = useState('executive');
+  const [reportingCurrency, setReportingCurrency] = useState(() => getCurrency());
+  useEffect(() => {
+    const changed = () => setReportingCurrency(getCurrency());
+    window.addEventListener('bindarr_currency_change', changed);
+    return () => window.removeEventListener('bindarr_currency_change', changed);
+  }, []);
   // '' | 'pokemon' | 'mtg'. Collapses to the only visible game when the other is
   // hidden in Settings, so the totals never include cards the user cannot see.
   const [gameFilter, setGameFilter] = useState(() => defaultGameFilter());
   
-  // Timeline Chart State
-  const [historyData, setHistoryData] = useState([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Clickable Card Inspector State
   const [inspectorCard, setInspectorCard] = useState(null);
@@ -65,29 +78,15 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
   useEffect(() => {
     fetchStats();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statsTrigger, gameFilter]);
-
-  useEffect(() => {
-    if (!stats) return;
-    const controller = new AbortController();
-    let current = true;
-    setHistoryData([]);
-    setLoadingHistory(true);
-    fetch(`/api/stats/history?period=${timePeriod}${gameFilter ? `&game=${gameFilter}` : ''}`, { signal: controller.signal })
-      .then(response => {
-        if (!response.ok) throw new Error('Failed to load portfolio history');
-        return response.json();
-      })
-      .then(data => { if (current) setHistoryData(data); })
-      .catch(error => { if (current && error.name !== 'AbortError') console.error(error); })
-      .finally(() => { if (current) setLoadingHistory(false); });
-    return () => { current = false; controller.abort(); };
-  }, [timePeriod, stats, gameFilter]);
+  }, [statsTrigger, gameFilter, reportingCurrency]);
 
   const fetchStats = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/stats${gameFilter ? `?game=${gameFilter}` : ''}`);
+      setError(null);
+      const params = new URLSearchParams({ currency: reportingCurrency });
+      if (gameFilter) params.set('game', gameFilter);
+      const response = await fetch(`/api/stats?${params}`);
       if (!response.ok) {
         throw new Error(t('dash.errStats'));
       }
@@ -139,7 +138,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
 
   const sealedUnits = stats && stats.summary.sealed ? stats.summary.sealed.remainingUnits : 0;
   const openedReports = stats && stats.openingPerformance ? stats.openingPerformance.reports : [];
-  if (!stats || (stats.summary.totalCards === 0 && sealedUnits === 0 && (!openedReports || openedReports.length === 0))) {
+  if (!stats) {
     const isFiltered = Boolean(gameFilter);
     const gameName = isFiltered ? gameLabel(gameFilter, true) : '';
     return (
@@ -197,161 +196,30 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
       </div>
 
       {view === 'executive' && (<>
-      {/* Metrics Summary Grid */}
-      <div className="metrics-grid">
-        {/* Net Worth Card with historical switcher */}
+      {/* Aligned Executive summary cards */}
+      <div className="metrics-grid executive-summary-grid executive-cards-aligned">
         <div className="glass-panel metric-card accent-networth">
-          <div className="metric-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span className="metric-icon" style={{ width: '28px', height: '28px' }}><TrendingUp size={16} /></span>
-              {t('dash.netWorth')}
-            </span>
-            <div style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '2px', borderRadius: '4px' }}>
-              {['7d', '30d', '1y', '5y'].map(p => (
-                <button 
-                  key={p} 
-                  type="button" 
-                  onClick={() => setTimePeriod(p)}
-                  style={{
-                    padding: '2px 6px',
-                    fontSize: '0.65rem',
-                    border: 'none',
-                    borderRadius: '3px',
-                    background: timePeriod === p ? 'var(--type-grass)' : 'transparent',
-                    color: 'var(--text-strong)',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  {p.toUpperCase()}
-                </button>
-              ))}
-            </div>
-          </div>
+          <div className="metric-header"><span>{t('dash.portfolioValue')}</span><span className="metric-icon"><TrendingUp size={18} /></span></div>
           <div className="metric-value">{currencySymbol()}{money(summary.totalValue)}</div>
-          {summary.sealed && summary.sealed.remainingUnits > 0 && (
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-              {(summary.sealed.marketValue > 0 || summary.sealed.valuationComplete) && (
-                <div>{t('dash.sealedIncluded', { value: `${currencySymbol()}${money(summary.sealed.marketValue)}` })}</div>
-              )}
-              {summary.sealed.unpricedUnits > 0 && (
-                <div>{t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits })}</div>
-              )}
-            </div>
-          )}
-          {(() => {
-            const change = timePeriod === '7d' ? summary.change7d :
-                           timePeriod === '30d' ? summary.change30d :
-                           timePeriod === '1y' ? summary.change1y : summary.change5y;
-            // change7d/30d use Cardmarket's real avg7/avg30 (only real source
-            // available); change1y/5y have no real historical price source
-            // anywhere, so they're marked unavailable rather than faked.
-            if (!change || !change.available) {
-              return (
-                <div className="metric-footer" style={{ color: 'var(--text-muted)' }}>
-                  <span>{t('dash.noPriceHistory')}</span>
-                </div>
-              );
-            }
-            const isPositive = change.abs >= 0;
-            return (
-              <div className={`metric-footer ${isPositive ? 'positive' : 'negative'}`} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <TrendingUp size={12} style={{ transform: isPositive ? 'none' : 'rotate(180deg)' }} />
-                <span>
-                  {isPositive ? '+' : ''}{currencySymbol()}{money(change.abs)} ({isPositive ? '+' : ''}{change.pct}%)
-                </span>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Total Invested (cost basis) */}
-        <div className="glass-panel metric-card accent-invested">
-          <div className="metric-header">
-            <span>{t('dash.totalInvested')}</span>
-            <span className="metric-icon"><Coins size={18} /></span>
-          </div>
-          <div className="metric-value">{currencySymbol()}{money(summary.totalSpent)}</div>
           <div className="metric-footer">
-            {summary.totalCards > 0 && (
-              <span>{t('dash.avgPerCard', { price: priceText(summary.avgCardValue) })}</span>
-            )}
-            <div>{t('dash.investedHint')}</div>
+            {summary.sealed && summary.sealed.remainingUnits > 0 && (summary.sealed.marketValue > 0 || summary.sealed.valuationComplete) && <div>{t('dash.sealedIncluded', { value: `${currencySymbol()}${money(summary.sealed.marketValue)}` })}</div>}
+            {summary.sealed && summary.sealed.unpricedUnits > 0 && <div className="summary-pricing-warning">{t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits })}</div>}
           </div>
         </div>
 
-        {/* Unrealized Gain / ROI */}
-        {(() => {
-          const roi = summary.roi || { abs: 0, pct: null };
-          const isPositive = (roi.abs || 0) >= 0;
-          return (
-            <div className={`glass-panel metric-card ${isPositive ? 'accent-gain-up' : 'accent-gain-down'}`}>
-              <div className="metric-header">
-                <span>{t('dash.unrealizedGain')}</span>
-                <span className="metric-icon"><ArrowUpRight size={18} style={{ transform: isPositive ? 'none' : 'rotate(90deg)' }} /></span>
-              </div>
-              <div className="metric-value" style={{ color: isPositive ? '#22c55e' : '#ef4444' }}>
-                {isPositive ? '+' : '−'}{currencySymbol()}{money(Math.abs(roi.abs || 0))}
-              </div>
-              <div className="metric-footer">
-                <span>{roi.pct === null ? t('dash.roiUnset') : t('dash.roiVsCost', { pct: `${isPositive ? '+' : ''}${roi.pct}` })}</span>
-              </div>
-            </div>
-          );
-        })()}
+        <PortfolioAccountingSummary statsTrigger={statsTrigger} game={gameFilter} currency={summary.currency || reportingCurrency} />
 
-        {/* Total Cards count */}
         <div className="glass-panel metric-card accent-cards">
-          <div className="metric-header">
-            <span>{t('dash.totalCards')}</span>
-            <span className="metric-icon"><Library size={18} /></span>
-          </div>
+          <div className="metric-header"><span>{t('dash.totalCards')}</span><span className="metric-icon"><Library size={18} /></span></div>
           <div className="metric-value">{summary.totalCards}</div>
           <div className="metric-footer">
-            <span>{t('dash.uniqueCount', { count: summary.uniqueCards })}{summary.unsortedCount > 0 ? ` • ${t('dash.unsortedCount', { count: summary.unsortedCount })}` : ''}</span>
+            <div>{t('dash.uniqueCount', { count: summary.uniqueCards })}{summary.unsortedCount > 0 ? ` · ${t('dash.unsortedCount', { count: summary.unsortedCount })}` : ''}</div>
+            <div>{t('dash.avgMarketShort', { price: priceText(cardAverages(summary).marketPerCard, summary.currency || reportingCurrency) })}</div>
           </div>
         </div>
       </div>
 
-      {/* Recorded combined holdings, not a backfilled price-only curve. */}
-      <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
-        Recorded cards + sealed portfolio snapshots. History starts when this feature is used; earlier combined values are unavailable.
-      </p>
-      <div className="glass-panel" style={{ marginBottom: '1.5rem', padding: '1.5rem 1.75rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h3 className="chart-title" style={{ margin: 0 }}>{t('dash.timelineTitle')}</h3>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            {t('dash.timelineRange', { range: timePeriod.toUpperCase() })}
-          </span>
-        </div>
-        <div className="chart-container" style={{ height: '240px', position: 'relative' }}>
-          {loadingHistory ? (
-            <div className="spinner" style={{ position: 'absolute', top: '45%', left: '45%' }}></div>
-          ) : historyData.length < 2 ? (
-            <div className="chart-empty">{t('dash.notEnoughHistory')}</div>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={historyData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--type-grass)" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="var(--type-grass)" stopOpacity={0.0}/>
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="date" stroke="var(--text-secondary)" style={{ fontSize: '0.7rem' }} />
-                <YAxis stroke="var(--text-secondary)" style={{ fontSize: '0.7rem' }} tickFormatter={(v) => `${currencySymbol()}${v}`} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-glass)' }}
-                  labelStyle={{ color: 'var(--text-primary)' }}
-                  formatter={(v) => [`${currencySymbol()}${v}`, t('dash.portfolioValue')]}
-                />
-                <Area type="monotone" dataKey="value" stroke="var(--type-grass)" strokeWidth={2} fillOpacity={1} fill="url(#colorVal)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
+      <PerformanceChart statsTrigger={statsTrigger} game={gameFilter} />
 
       <div className="dashboard-details">
         <div className="glass-panel">

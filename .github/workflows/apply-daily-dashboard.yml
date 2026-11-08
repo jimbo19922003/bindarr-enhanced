@@ -1,0 +1,46 @@
+name: Apply and validate daily dashboard update
+on:
+  push:
+    branches: ['fix/rip-valuation-artwork-mixed-sets']
+    paths:
+      - '.github/workflows/apply-daily-dashboard.yml'
+      - 'scripts/apply-daily-dashboard.py'
+      - 'scripts/dashboard-daily/**'
+permissions:
+  contents: write
+concurrency:
+  group: apply-daily-dashboard
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply exact guarded source edits
+        run: python3 scripts/apply-daily-dashboard.py
+      - name: Check backend syntax
+        run: |
+          node --check backend/src/utils/currentPortfolio.js
+          node --check backend/src/utils/portfolioTimeline.js
+          node --check backend/src/routes/stats.js
+      - name: Test daily grouping and corrected averages
+        run: node --test backend/test/portfolioTimeline.test.js frontend/src/utils/dashboardTimeline.test.js
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Build frontend
+        run: npm run build --prefix frontend
+      - name: Commit validated source changes to the repair branch
+        run: |
+          git add frontend/src/components/Dashboard.jsx frontend/src/utils/dashboardTimeline.js frontend/src/utils/dashboardTimeline.test.js backend/src/routes/stats.js backend/src/utils/currentPortfolio.js backend/src/utils/portfolioTimeline.js backend/test/portfolioTimeline.test.js
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: correct dashboard averages and show daily normalized net worth'
+          git push origin HEAD:refs/heads/fix/rip-valuation-artwork-mixed-sets

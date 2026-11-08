@@ -1,7 +1,9 @@
+// contextual-sales-v1
 import { useEffect, useState } from 'react';
 import { Archive, ArchiveRestore, Download, Package, Plus, Search, X } from 'lucide-react';
 import { useT } from '../utils/i18n';
 import SealedOpenings from './SealedOpenings';
+import { sealedSaleTarget } from '../utils/saleTargets';
 
 const TYPES = ['booster_box', 'booster_pack', 'etb', 'tin', 'collection_box', 'blister', 'other'];
 
@@ -752,7 +754,7 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
           </thead>
           <tbody>
             {lots.map(item => (
-              <LotRow key={item.id} lot={item} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot} onRip={() => setRipLot(item)} />
+              <LotRow key={item.id} lot={item} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot} onRip={() => setRipLot(item)} onSell={!product.archived_at ? () => { const target = sealedSaleTarget(item, product); if (target) window.dispatchEvent(new CustomEvent("bindarr_sell_item", { detail: { ...target, onSold: onChanged } })); } : null} />
             ))}
           </tbody>
         </table>
@@ -791,7 +793,7 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
   );
 }
 
-function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip }) {
+function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip, onSell }) {
   const [remaining, setRemaining] = useState(String(lot.remaining_quantity));
   const [cost, setCost] = useState(lot.total_cost);
   const canRip = !lot.archived_at && lot.remaining_quantity > 0;
@@ -814,6 +816,7 @@ function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip }) {
       <td>
         <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {canRip && <button className="btn btn-primary" type="button" onClick={onRip}>{t('sealed.letItRip')}</button>}
+          {canRip && onSell && <button className="btn btn-secondary" type="button" onClick={onSell} title={`Sell from lot #${lot.id}`}>Sell</button>}
           <button className="btn btn-secondary" type="button" onClick={() => onUpdateLot(lot, { remaining_quantity: Number(remaining), total_cost: cost })}>{t('sealed.save')}</button>
           <button className="btn btn-secondary" type="button" onClick={() => onArchiveLot(lot, !lot.archived_at)}>
             {lot.archived_at ? t('sealed.restore') : t('sealed.archive')}
