@@ -1,3 +1,4 @@
+// sales-inventory-protection-v1
 'use strict';
 const { calculateSale } = require('./costBasis');
 const schema = `
@@ -29,6 +30,7 @@ function createSealedSalesRepository({connect}) {
       const db=await connect();let began=false;
       try {
         await db.run('BEGIN IMMEDIATE');began=true;await db.exec(schema);
+        await require('./salesInventoryProtection').install(db);
         const prior=await db.get('SELECT id,request_json,result_json FROM sealed_sale_record WHERE user_id=? AND request_key=?',[userId,requestKey]);
         if (prior) {
           if (prior.request_json!==request) throw fail(409,'Idempotency key reused with different sale details');

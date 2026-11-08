@@ -1,3 +1,4 @@
+// sales-inventory-protection-v1
 // opening-sale-integration-v1
 'use strict';
 const { calculateSale } = require('./costBasis');
@@ -48,6 +49,7 @@ function createSalesRepository({ connect }) {
     try {
       await db.run('BEGIN IMMEDIATE'); began = true;
       await openingIntegration.prepareSchema(db, schema);
+      await require('./salesInventoryProtection').install(db);
       const result = await work(db);
       await db.run('COMMIT'); began = false; return result;
     } catch (error) { if (began) await db.run('ROLLBACK').catch(() => {}); throw error; }

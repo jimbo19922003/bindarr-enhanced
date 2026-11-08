@@ -1,3 +1,4 @@
+// sales-inventory-protection-v1
 'use strict';
 
 const express = require('express');
@@ -431,6 +432,9 @@ router.put('/sealed/lots/:id', async (req, res) => {
     );
     if (!existing) return fail(res, 404, 'Sealed lot not found');
     const body = req.body || {};
+    const salesProtection = require('../utils/salesInventoryProtection');
+    const hasSales = await salesProtection.hasSealedSales(db, existing.id, req.user.id);
+    if (hasSales) salesProtection.validateSealedLotEdit(existing, body, sealed.moneyToCents);
     const opened = await db.get(
       `SELECT COUNT(*) AS n FROM sealed_opening WHERE lot_id = ? AND user_id = ?`,
       [existing.id, req.user.id]
@@ -460,6 +464,7 @@ router.put('/sealed/lots/:id', async (req, res) => {
         remainingQuantity: body.remaining_quantity == null ? null : Number(body.remaining_quantity),
       }
     );
+    if (hasSales) lot.remainingCostCents = existing.remaining_cost_cents;
     const currency = body.currency == null ? existing.currency : sealed.normalizeLot({
       quantity: lot.quantity,
       total_cost: sealed.centsToMoney(lot.totalCostCents),
