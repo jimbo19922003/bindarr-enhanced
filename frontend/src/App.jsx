@@ -1,7 +1,9 @@
+// contextual-sales-v1
 import React, { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from 'react';
 import { LayoutDashboard, Database, MapPin, Sparkles, Settings as SettingsIcon, LogOut, ShieldAlert, Plus, Swords, StickyNote, Package } from 'lucide-react';
 import Login from './components/Login';
 import Logo from './components/Logo';
+import SaleDialogHost from './components/SaleDialogHost';
 import { App as CapacitorApp } from '@capacitor/app';
 import { pushBackGuard } from './utils/useBackGuard';
 import { useT } from './utils/i18n';
@@ -21,6 +23,7 @@ const SharedContainer = lazy(() => import('./components/SharedContainer'));
 const DeckBuilder = lazy(() => import('./components/DeckBuilder'));
 const Notes = lazy(() => import('./components/Notes'));
 const SealedInventory = lazy(() => import('./components/SealedInventory'));
+const SalesHistory = lazy(() => import('./components/SalesHistory'));
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -91,7 +94,8 @@ function App() {
   useEffect(() => {
     const invalidate = () => setStatsTrigger(previous => previous + 1);
     window.addEventListener(VALUATION_CHANGED, invalidate);
-    return () => window.removeEventListener(VALUATION_CHANGED, invalidate);
+    window.addEventListener('bindarr_sales_changed', invalidate);
+    return () => { window.removeEventListener(VALUATION_CHANGED, invalidate); window.removeEventListener('bindarr_sales_changed', invalidate); };
   }, []);
 
   const tabGuardRef = useRef(null);
@@ -116,6 +120,11 @@ function App() {
     tabGuardRef.current = pushBackGuard(() => { tabGuardRef.current = null; showTab(prev); });
     showTab(tab);
   };
+  useEffect(() => {
+    const open = () => goTab('sales-history');
+    window.addEventListener('bindarr_open_sales_history', open);
+    return () => window.removeEventListener('bindarr_open_sales_history', open);
+  }, [activeTab]);
   const [shareToken] = useState(() => {
     const match = window.location.pathname.match(/^\/share\/([a-zA-Z0-9_-]+)$/);
     return match ? match[1] : null;
@@ -262,6 +271,7 @@ function App() {
       case 'storage': return <LocationManager statsTrigger={statsTrigger} onUpdate={triggerRefresh} showToast={showToast} selectedLocationId={selectedLocationId} setSelectedLocationId={setSelectedLocationId} focusEntryId={focusEntryId} setFocusEntryId={setFocusEntryId} />;
       case 'deckbuilder': return <DeckBuilder showToast={showToast} />;
       case 'sealed': return <SealedInventory showToast={showToast} />;
+      case 'sales-history': return <SalesHistory statsTrigger={statsTrigger} />;
       case 'notes': return <Notes showToast={showToast} />;
       case 'settings': return <Settings user={user} onUpdateUser={handleUpdateUser} showToast={showToast} />;
       case 'admin': return <AdminPanel user={user} onUpdateUser={handleUpdateUser} showToast={showToast} />;
@@ -279,6 +289,7 @@ function App() {
           <button className={`nav-tab ${activeTab === 'add-cards' ? 'active' : ''}`} onClick={() => goTab('add-cards')} aria-label={t('nav.addCards')} title={t('nav.addCards')}><Plus size={18} /><span className="nav-tab-label">{t('nav.addCards')}</span></button>
           <button className={`nav-tab ${activeTab === 'collection' ? 'active' : ''}`} onClick={() => goTab('collection')} aria-label={t('nav.collection')} title={t('nav.collection')}><Database size={18} /><span className="nav-tab-label">{t('nav.collection')}</span></button>
           <button className={`nav-tab ${activeTab === 'sealed' ? 'active' : ''}`} onClick={() => goTab('sealed')} aria-label={t('nav.sealed')} title={t('nav.sealed')}><Package size={18} /><span className="nav-tab-label">{t('nav.sealed')}</span></button>
+          <button className={`nav-tab ${activeTab === 'sales-history' ? 'active' : ''}`} onClick={() => goTab('sales-history')} aria-label="Sales History" title="Sales History"><Database size={18} /><span className="nav-tab-label">Sales History</span></button>
           <button className={`nav-tab ${activeTab === 'storage' ? 'active' : ''}`} onClick={() => goTab('storage')} aria-label={t('nav.storage')} title={t('nav.storage')}><MapPin size={18} /><span className="nav-tab-label">{t('nav.storage')}</span></button>
           <button className={`nav-tab ${activeTab === 'deckbuilder' ? 'active' : ''}`} onClick={() => goTab('deckbuilder')} aria-label={t('nav.deckBuilder')} title={t('nav.deckBuilder')}><Swords size={18} /><span className="nav-tab-label">{t('nav.deckBuilder')}</span></button>
           <button className={`nav-tab ${activeTab === 'notes' ? 'active' : ''}`} onClick={() => goTab('notes')} aria-label={t('nav.notes')} title={t('nav.notes')}><StickyNote size={18} /><span className="nav-tab-label">{t('nav.notes')}</span></button>
@@ -290,6 +301,7 @@ function App() {
           <button onClick={handleLogout} className="btn btn-secondary btn-icon-only" title={t('header.logOut')} aria-label={t('header.logOut')} style={{ padding: '0.4rem 0.5rem', borderRadius: 'var(--radius-sm)' }}><LogOut size={14} /></button>
         </div>
       </header>
+      <SaleDialogHost showToast={showToast} />
       <main style={{ flex: 1, marginTop: '1rem' }}>
         {mountedTabs.map(tab => <div key={tab} className={tab === activeTab ? 'tab-pane view-transition' : 'tab-pane tab-pane-hidden'}><ErrorBoundary active={tab === activeTab} t={t}><Suspense fallback={<ChunkFallback />}>{renderTab(tab)}</Suspense></ErrorBoundary></div>)}
       </main>

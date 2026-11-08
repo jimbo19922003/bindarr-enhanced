@@ -1,3 +1,4 @@
+// contextual-sales-v1
 import {useEffect,useState} from 'react';
 import {Coins} from 'lucide-react';
 import {useT} from '../utils/i18n';
@@ -11,6 +12,6 @@ export default function RealizedGainCard({statsTrigger,currency='USD'}) {
  return <div className={`glass-panel metric-card ${value==null?'':value>=0?'accent-gain-up':'accent-gain-down'}`}>
   <div className="metric-header"><span>{t('dash.realizedLossGain')}</span><span className="metric-icon"><Coins size={18} /></span></div>
   <div className="metric-value" style={{color:value==null?'var(--text-muted)':value>=0?'#22c55e':'#ef4444'}}>{amount}</div>
-  <div className="metric-footer">{error?'Sales totals unavailable':`${currency} · ${group?.unknownCount||0} unknown-basis sale(s)`}<div><button type="button" className="sales-card-link" onClick={()=>window.dispatchEvent(new Event('bindarr_open_sales'))}>View / record sales</button></div></div>
+  <div className="metric-footer">{error?'Sales totals unavailable':`${currency} · ${group?.unknownCount||0} unknown-basis sale(s)`}<div><button type="button" className="sales-card-link" onClick={()=>window.dispatchEvent(new Event('bindarr_open_sales_history'))}>Sales history</button></div></div>
  </div>;
 }

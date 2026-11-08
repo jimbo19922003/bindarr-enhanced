@@ -1,3 +1,4 @@
+// contextual-sales-v1
 import { useState, useEffect, useRef } from 'react';
 import { X, MapPin, Trash2, Star, Maximize2, ExternalLink, Search, Layers, RefreshCw, FlipHorizontal2 } from 'lucide-react';
 import { getCardDisplayName } from '../utils/langHelper';
@@ -6,6 +7,7 @@ import { formatPrice, priceText } from '../utils/formatPrice';
 import { resolveCardPrice } from '../utils/resolveCardPrice';
 import { tcgplayerUrl, cardmarketUrl, searchUrl, priceSource, noLinkReason } from '../utils/marketplaceLinks';
 import CardImage from './CardImage';
+import { cardSaleTarget } from '../utils/saleTargets';
 import CardImageZoom from './CardImageZoom';
 import CardEntryFields from './CardEntryFields';
 import PriceHistoryChart from './PriceHistoryChart';
@@ -386,6 +388,7 @@ function CardInspectorModal({ card, onClose, onUpdate, onDeleted, showToast, onV
   // only caught up after a save and a refetch, which reads as "prices don't
   // respond to the foil type". Same resolution order as the server.
   const displayPrice = resolveCardPrice(activeCard, printing);
+  const saleTarget = cardSaleTarget(card);
 
   return (
     <div className="modal-overlay" style={{
@@ -535,6 +538,8 @@ function CardInspectorModal({ card, onClose, onUpdate, onDeleted, showToast, onV
               </div>
             )}
           </div>
+
+          {mode === 'view' && saleTarget && <div><button type="button" className="btn btn-primary" onClick={() => window.dispatchEvent(new CustomEvent('bindarr_sell_item', { detail: { ...saleTarget, onSold: () => { onUpdate?.(); onClose?.(); } } }))}>Sell this copy</button></div>}
 
           {mode === 'edit' ? (
             <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

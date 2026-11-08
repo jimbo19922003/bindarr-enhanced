@@ -1,3 +1,4 @@
+// contextual-sales-v1
 'use strict';
 const {createHash}=require('node:crypto');
 const {calculateSale}=require('./costBasis');
@@ -95,15 +96,8 @@ function createSalesApplication({connect}) {
     await db.run('COMMIT');began=false;return response;
    }catch(e){if(began)await db.run('ROLLBACK').catch(()=>{});throw e;}finally{await db.close();}
   },
-  history(user,{beforeId=Number.MAX_SAFE_INTEGER,limit=25}={}) {
-   if(!Number.isSafeInteger(beforeId)||beforeId<1||!Number.isSafeInteger(limit)||limit<1||limit>100)throw fail(400,'Invalid history cursor');
-   return read(user,async db=>{
-    if(!await has(db,'sales_entry'))return {entries:[],groups:[],nextCursor:null};
-    const rows=await db.all('SELECT id,response_json FROM sales_entry WHERE user_id=? AND id<? ORDER BY id DESC LIMIT ?',[user,beforeId,limit]);
-    const groups=await db.all('SELECT currency,COUNT(*) AS count,SUM(CASE WHEN gain_cents IS NULL THEN 1 ELSE 0 END) AS unknownCount,SUM(COALESCE(gain_cents,0)) AS knownGainCents FROM sales_entry WHERE user_id=? GROUP BY currency',[user]);
-    if(groups.some(g=>!Number.isSafeInteger(g.knownGainCents)))throw fail(500,'Sales totals exceed safe numeric range');
-    return {entries:rows.map(r=>({historyId:r.id,...JSON.parse(r.response_json)})),groups,nextCursor:rows.length===limit?rows[rows.length-1].id:null};
-   });
+  history(user,filters={}) {
+   return read(user,db=>require('./salesReport').readReport(db,user,filters));
   }
  };
 }

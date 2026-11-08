@@ -1,3 +1,4 @@
+// contextual-sales-v1
 // sales-ui-v1
 // aligned-summary-v1
 // streamlined-executive-v1
@@ -16,7 +17,6 @@ import CardInspectorModal from './CardInspectorModal';
 import CardImage from './CardImage';
 import OpenedPerformance from './OpenedPerformance';
 import PerformanceChart from './PerformanceChart';
-import SalesPanel from './SalesPanel';
 import RealizedGainCard from './RealizedGainCard';
 import './SummaryCards.css';
 
@@ -235,7 +235,6 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
       </div>
 
       <PerformanceChart statsTrigger={statsTrigger} />
-      <SalesPanel statsTrigger={statsTrigger} onUpdate={onUpdate} showToast={showToast} />
 
       <div className="dashboard-details">
         <div className="glass-panel">

@@ -1,3 +1,4 @@
+// contextual-sales-v1
 'use strict';
 function createRouter({service}) {
  const router=require('express').Router();
@@ -6,7 +7,7 @@ function createRouter({service}) {
  router.get('/items',handle(req=>service.items(req.user.id,req.query)));
  router.post('/preview',handle(req=>service.preview(req.user.id,req.body||{})));
  router.post('/',handle(req=>service.sell(req.user.id,req.body||{})));
- router.get('/history',handle(req=>service.history(req.user.id,{beforeId:req.query.beforeId?Number(req.query.beforeId):Number.MAX_SAFE_INTEGER,limit:req.query.limit?Number(req.query.limit):25})));
+ router.get('/history',handle(req=>service.history(req.user.id,req.query)));
  return router;
 }
 module.exports={createRouter};
