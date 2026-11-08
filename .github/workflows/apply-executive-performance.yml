@@ -1,0 +1,42 @@
+name: Apply and validate Executive performance timeline
+on:
+  push:
+    branches: ['fix/rip-valuation-artwork-mixed-sets']
+    paths:
+      - '.github/workflows/apply-executive-performance.yml'
+      - 'scripts/apply-executive-performance.py'
+permissions:
+  contents: write
+concurrency:
+  group: apply-executive-performance
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply exact guarded source edits
+        run: python3 scripts/apply-executive-performance.py
+      - name: Check patch idempotency
+        run: python3 scripts/apply-executive-performance.py
+      - name: Test performance history and timeline utilities
+        run: node --test backend/src/utils/performanceHistory.test.js frontend/src/utils/dashboardTimeline.test.js
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Build frontend
+        run: npm run build --prefix frontend
+      - name: Commit validated frontend edits
+        run: |
+          git add frontend/src/App.jsx frontend/src/components/Dashboard.jsx frontend/src/components/PerformanceChart.jsx
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: consolidate Executive daily value and cost timeline'
+          git push origin HEAD:refs/heads/fix/rip-valuation-artwork-mixed-sets
