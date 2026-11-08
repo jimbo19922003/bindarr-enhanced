@@ -4,12 +4,13 @@ const {foldName,collectorNumber}=require('./pokewalletMatch');
 const fail=code=>Object.assign(new Error(code),{code});
 const schema=`CREATE TABLE IF NOT EXISTS pokemon_artwork_carddex_cache(request TEXT PRIMARY KEY,body TEXT NOT NULL,fetched_at INTEGER NOT NULL);CREATE TABLE IF NOT EXISTS pokemon_artwork_carddex_request(id INTEGER PRIMARY KEY,created_at INTEGER NOT NULL);CREATE TABLE IF NOT EXISTS pokemon_artwork_carddex_budget(id INTEGER PRIMARY KEY CHECK(id=1),paused_until INTEGER NOT NULL);`;
 function imageUrl(value){if(typeof value!=='string'||value.length>1000)return null;try{const url=new URL(value);if(url.protocol!=='https:'||url.username||url.password||url.port||url.search||url.hash)return null;if(url.hostname==='images.carddex.dev'||url.hostname==='assets.tcgdex.net'&&url.pathname.startsWith('/en/'))return url.toString();}catch{}return null;}
+const {selectCarddexImage}=require('./carddexImage');
 function chooseCarddexArtwork(card,body){
  if(card?.game!=='pokemon'||card.language!=='English'||!String(card.id).startsWith('tcgdex-en-'))throw fail('unsupported_language_or_game');
  if(!Array.isArray(body?.data)||!Number.isSafeInteger(body?.meta?.total)||body.meta.total!==body.data.length)throw fail('search_incomplete');
  const expected=card.id.slice('tcgdex-en-'.length);
  const matches=body.data.filter(row=>row&&row.id===expected&&row.set_id===card.set_id&&foldName(row.set_name)===foldName(card.set_name)&&foldName(row.name)===foldName(card.name)&&collectorNumber(row.number)===collectorNumber(card.number)&&collectorNumber(card.number)!==''&&[undefined,null,'en','eng','English'].includes(row.language)&&[undefined,null,'en','eng','English'].includes(row.lang));
- if(matches.length>1)throw fail('ambiguous');if(matches.length!==1)return null;const url=imageUrl(matches[0].image_url);return url?{provider:'carddex',providerId:matches[0].id,imageUrl:url}:null;
+ if(matches.length>1)throw fail('ambiguous');if(matches.length!==1)return null;const url=selectCarddexImage(matches[0],imageUrl);return url?{provider:'carddex',providerId:matches[0].id,imageUrl:url}:null;
 }
 function createCarddexArtworkClient({connect,http=require('axios'),now=Date.now}){
  async function using(work){const db=await connect();try{await db.exec(schema);return await work(db);}finally{await db.close();}}
