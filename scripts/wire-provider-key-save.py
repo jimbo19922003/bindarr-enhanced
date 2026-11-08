@@ -1,12 +1,15 @@
 from pathlib import Path
 import hashlib
 
+CONSOLIDATION_MARKER = '// provider-keys-consolidated-v1'
+
 def once(text,old,new):
     if text.count(old)!=1: raise SystemExit('Provider-key integration point changed')
     return text.replace(old,new,1)
 def guarded(name,expected,marker,change):
     raw=Path(name).read_bytes()
     text=raw.decode()
+    if CONSOLIDATION_MARKER in text: return text
     if marker in text: return text
     actual=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
     if actual!=expected: raise SystemExit(name+': source changed; refusing overwrite')

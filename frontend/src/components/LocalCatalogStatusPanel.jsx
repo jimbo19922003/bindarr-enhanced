@@ -1,6 +1,6 @@
+// provider-keys-consolidated-v1
 import { useEffect, useState } from 'react';
 import LocalCatalogImportPanel from './LocalCatalogImportPanel';
-import CarddexKeyPanel from './CarddexKeyPanel';
 import ArtworkRecoveryPanel from './ArtworkRecoveryPanel';
 
 export default function LocalCatalogStatusPanel() {
@@ -9,7 +9,6 @@ export default function LocalCatalogStatusPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [credentialsOpen, setCredentialsOpen] = useState(false);
   const [maintenanceOpen, setMaintenanceOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   useEffect(() => {
@@ -40,10 +39,7 @@ export default function LocalCatalogStatusPanel() {
       {data.snapshot && <p>{Number(data.summary?.missingReferences || 0).toLocaleString()} cards have no provider image reference. Existing image links and scanner readiness are not verified by this check.</p>}
       <p>Catalogue search, artwork recovery and price refresh are separate. Saving a provider key does not automatically retry a cached artwork failure or enable remote catalogue fallback.</p>
     </>}
-    <details onToggle={event => setCredentialsOpen(event.currentTarget.open)} style={{marginTop:'1rem'}}>
-      <summary style={{cursor:'pointer'}}>CardDex connection</summary>
-      {credentialsOpen && <CarddexKeyPanel />}
-    </details>
+    <p>Provider credentials: Admin → API keys.</p>
     <details onToggle={event => setRecoveryOpen(event.currentTarget.open)} style={{marginTop:'1rem'}}>
       <summary style={{cursor:'pointer'}}>Artwork recovery</summary>
       {recoveryOpen && <ArtworkRecoveryPanel />}
