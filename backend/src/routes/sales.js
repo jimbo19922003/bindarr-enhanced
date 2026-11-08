@@ -1,0 +1,12 @@
+'use strict';
+function createRouter({service}) {
+ const router=require('express').Router();
+ router.use((req,res,next)=>{res.set('Cache-Control','no-store');if(!req.user||!Number.isSafeInteger(req.user.id))return res.status(401).json({error:'Authentication required'});next();});
+ const handle=fn=>async(req,res)=>{try{res.json(await fn(req));}catch(error){const status=error.status||(error instanceof TypeError||error instanceof RangeError?400:String(error.message).includes('protect')||String(error.message).includes('correction')?409:500);if(status===500)console.error('Sales request failed:',error.code||error.message);res.status(status).json({error:status===500?'Sale request failed; no partial inventory changes were committed':error.message});}};
+ router.get('/items',handle(req=>service.items(req.user.id,req.query)));
+ router.post('/preview',handle(req=>service.preview(req.user.id,req.body||{})));
+ router.post('/',handle(req=>service.sell(req.user.id,req.body||{})));
+ router.get('/history',handle(req=>service.history(req.user.id,{beforeId:req.query.beforeId?Number(req.query.beforeId):Number.MAX_SAFE_INTEGER,limit:req.query.limit?Number(req.query.limit):25})));
+ return router;
+}
+module.exports={createRouter};
