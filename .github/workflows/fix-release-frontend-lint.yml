@@ -5,6 +5,7 @@ on:
     paths:
       - 'scripts/fix-release-frontend-lint.py'
       - '.github/workflows/fix-release-frontend-lint.yml'
+      - 'frontend/src/utils/formatPrice.test.js'
 permissions:
   contents: write
 concurrency:
