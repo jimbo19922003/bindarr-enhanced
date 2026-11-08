@@ -60,12 +60,12 @@ function OpeningCard({ opening, t, onEdit, onRemove, disabled }) {
     [t('sealed.knownValue'), money(currency, stats.known_value)], [t('sealed.valueAtOpening'), stats.opened_value == null ? t('sealed.noSnapshot') : money(currency, stats.opened_value)],
     [t('sealed.estimatedDifference'), money(currency, stats.value_difference)], [t('sealed.recovery'), recovery]];
   return <article className="glass-panel" style={{ padding: '0.9rem', display: 'grid', gap: '0.65rem' }}>
-    <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', background: 'transparent', border: 0, color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
+    <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={`opening-details-${opening.id}`} style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', background: 'transparent', border: 0, color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
       <span>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />} {t('sealed.openedOn')} {opening.opened_at}</span>
       <span>{t('sealed.recordedPulls')} {stats.recorded_quantity} · {money(currency, stats.known_value)} · {recovery}</span>
     </button>
-    <button className="btn btn-secondary" type="button" onClick={onEdit} disabled={disabled || removing}>Edit rip / add cards</button>
-    {open && <>
+    {open && <div id={`opening-details-${opening.id}`} style={{ display: 'grid', gap: '0.65rem', marginLeft: '1.25rem', paddingLeft: '0.75rem', borderLeft: '1px solid var(--border-glass)' }}>
+      <button className="btn btn-secondary" type="button" onClick={onEdit} disabled={disabled || removing} style={{ justifySelf: 'start' }}>Edit rip / add cards</button>
       {opening.notes && <p>{opening.notes}</p>}
       <div>{stats.entry_complete ? t('sealed.entryComplete') : t('sealed.entryIncomplete')} · {stats.unpriced_quantity > 0 ? t('sealed.unpricedPulls', { count: stats.unpriced_quantity }) : t('sealed.pricesComplete')}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.55rem' }}>{metrics.map(([label, value]) => <div key={label}><small>{label}</small><div style={{ fontWeight: 700 }}>{value}</div></div>)}</div>
@@ -80,6 +80,6 @@ function OpeningCard({ opening, t, onEdit, onRemove, disabled }) {
         <button className="btn btn-secondary" type="button" disabled={removing || disabled} onClick={async () => { setRemoving(true); try { await onRemove(); } finally { setRemoving(false); setConfirm(false); } }}>Confirm removal</button>
         <button className="btn btn-secondary" type="button" disabled={removing} onClick={() => setConfirm(false)}>{t('common.cancel')}</button>
       </div> : <button className="btn btn-secondary" type="button" onClick={() => setConfirm(true)} disabled={disabled || removing}>Remove opening</button>}
-    </>}
+    </div>}
   </article>;
 }

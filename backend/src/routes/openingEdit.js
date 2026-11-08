@@ -31,6 +31,32 @@ async function removeCopies(tx, userId, row, ids) {
   if (!ids.length || !row.card_id) return;
   await tx.run(`DELETE FROM collection WHERE user_id = ? AND card_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [userId, row.card_id, ...ids]);
 }
+
+// A local, read-only ownership lookup. No provider requests or collection writes.
+router.post('/sealed/rip-ownership', async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!Array.isArray(body.card_ids) || body.card_ids.length > 100 || body.card_ids.some(id => typeof id !== 'string' || !id || id.length > 80)) throw fail('Provide at most 100 valid card IDs');
+    const ids = [...new Set(body.card_ids)];
+    let openingId = null;
+    if (body.opening_id != null) {
+      openingId = Number(body.opening_id);
+      if (!Number.isSafeInteger(openingId) || openingId < 1) throw fail('Invalid opening ID');
+      if (!(await db.get('SELECT id FROM sealed_opening WHERE id = ? AND user_id = ?', [openingId, req.user.id]))) throw fail('Opening not found', 404);
+    }
+    const counts = Object.fromEntries(ids.map(id => [id, 0]));
+    if (ids.length) {
+      const exclude = openingId == null ? '' : ` AND NOT EXISTS (SELECT 1 FROM sealed_pull sp WHERE sp.user_id = c.user_id AND sp.opening_id = ? AND instr(',' || COALESCE(sp.filed_ids, '') || ',', ',' || c.id || ',') > 0)`;
+      const rows = await db.all(`SELECT c.card_id, SUM(COALESCE(c.quantity, 1)) AS owned FROM collection c
+        WHERE c.user_id = ? AND c.list_type = 'collection' AND c.card_id IN (${ids.map(() => '?').join(',')})${exclude} GROUP BY c.card_id`,
+      [req.user.id, ...ids, ...(openingId == null ? [] : [openingId])]);
+      for (const row of rows) counts[row.card_id] = row.owned;
+    }
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ counts, excluded_opening_id: openingId, identity: 'catalog-card-any-finish' });
+  } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : 'Could not check collection ownership' }); }
+});
+
 router.put('/sealed/openings/:id/edit', async (req, res) => {
   let tx, begun = false;
   try {
