@@ -198,7 +198,6 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
           <div className="metric-header"><span>{t('dash.portfolioValue')}</span><span className="metric-icon"><TrendingUp size={18} /></span></div>
           <div className="metric-value">{currencySymbol()}{money(summary.totalValue)}</div>
           <div className="metric-footer">
-            <div>{t('dash.portfolioIncludes')}</div>
             {summary.sealed && summary.sealed.remainingUnits > 0 && (summary.sealed.marketValue > 0 || summary.sealed.valuationComplete) && <div>{t('dash.sealedIncluded', { value: `${currencySymbol()}${money(summary.sealed.marketValue)}` })}</div>}
             {summary.sealed && summary.sealed.unpricedUnits > 0 && <div className="summary-pricing-warning">{t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits })}</div>}
           </div>
