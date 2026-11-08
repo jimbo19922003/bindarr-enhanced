@@ -4,6 +4,7 @@ import { GAMES, enabledGames, setGameEnabled, gameOptions, defaultGame } from '.
 import { CURRENCIES, getCurrency, setCurrency } from '../utils/formatPrice';
 import { LOCALES, localeName, useT } from '../utils/i18n';
 import { REPO_URL } from '../utils/repo';
+import { saveProviderKeys } from '../utils/saveProviderKeys.mjs';
 
 // One secret: what it is called, what it buys you, and where to get one. Three of
 // these replaced three near-identical panels, so a fourth provider is a few lines
@@ -93,14 +94,10 @@ function Settings({ user, onUpdateUser, showToast }) {
   useEffect(() => {
     if (user?.role !== 'admin') return undefined;
     let cancelled = false;
-    fetch('/api/settings/pokewallet')
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (cancelled || !data) return;
-        setPokewalletKey(data.api_key || '');
-        setPokewalletKeyLoaded(true);
-      })
-      .catch(() => {});
+    fetch('/api/settings/provider-keys/pokewallet', { cache: 'no-store' })
+      .then(response => response.ok ? response.json() : null)
+      .then(() => { if (!cancelled) setPokewalletKeyLoaded(true); })
+      .catch(() => { if (!cancelled) setPokewalletKeyLoaded(true); });
     return () => { cancelled = true; };
   }, [user?.role]);
 
@@ -396,44 +393,28 @@ function Settings({ user, onUpdateUser, showToast }) {
     }
   };
 
-  // All three provider keys in one PUT. They are independent services, but they
-  // are set up in one sitting and the settings route takes them together, so three
-  // buttons only ever meant three chances to save two of them.
+  // provider-key-save-v2: the emergency instance key is independent of personal settings.
   const handleSaveKeys = async (e) => {
     e.preventDefault();
     setKeysLoading(true);
     try {
-      const response = await fetch('/api/auth/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tcg_api_key: tcgApiKey,
-          psa_api_token: psaToken,
-          graded_price_api_key: gradedKey
-        })
+      const result = await saveProviderKeys({
+        isAdmin: user?.role === 'admin',
+        pokewalletKey,
+        personal: { tcg_api_key: tcgApiKey, psa_api_token: psaToken, graded_price_api_key: gradedKey },
+        previous: user || {},
       });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        showToast(data?.error || t('settings.errKeys'));
-        return;
+      if (result.user) onUpdateUser(result.user);
+      if (result.pokewalletSaved) {
+        setPokewalletKey('');
+        if (!pokewalletKeyLoaded) setPokewalletKeyLoaded(true);
       }
-      onUpdateUser(data.user);
-      if (user?.role === 'admin' && pokewalletKeyLoaded) {
-        const keyResponse = await fetch('/api/settings', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pokewallet_api_key: pokewalletKey }),
-        });
-        const keyData = await keyResponse.json().catch(() => null);
-        if (!keyResponse.ok) {
-          showToast(keyData?.error || t('settings.errKeys'));
-          return;
-        }
-      }
-      showToast(t('settings.keysUpdated'));
-    } catch (err) {
-      console.error(err);
-      showToast(t('settings.errKeys'));
+      showToast(result.pokewalletSaved
+        ? 'PokéWallet emergency backup key saved and database persistence verified.'
+        : result.personalSaved ? t('settings.keysUpdated') : 'No API key changes to save.');
+    } catch (error) {
+      if (error.pokewalletSaved) { setPokewalletKey(''); setPokewalletKeyLoaded(true); }
+      showToast(error.message || t('settings.errKeys'));
     } finally {
       setKeysLoading(false);
     }
