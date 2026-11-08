@@ -15,6 +15,7 @@ import { getPerspectiveTransform, warpPerspective } from '../../../shared/imgpro
 import { shouldCapture, shouldRearm, nextChangedFrames, autoStatusKey } from '../utils/autoCapture';
 import { zoomRange, initialZoom } from '../utils/cameraZoom';
 import { pickPreferredCamera, nextCamera } from '../utils/cameraPick';
+import { assertCameraAllowed, cameraFailureMessage } from '../utils/cameraAccess';
 import { defaultGame, gameOptions, showGamePicker, isGameEnabled } from '../utils/games';
 import { isNative } from '../apiBase';
 import { useT } from '../utils/i18n';
@@ -226,6 +227,9 @@ function CameraScanner({ onAddSuccess, showToast }) {
   // Camera active states
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraErrorKey, setCameraErrorKey] = useState('');
+  const [cameraErrorMessage, setCameraErrorMessage] = useState('');
+  const [cameraOpening, setCameraOpening] = useState(false);
+  const cameraStarting = useRef(false);
   // Scanning is the DEFAULT and only mode: point the camera at a card and it is
   // captured when the detector says it is there and still. There is no manual
   // shutter — the toggle in the action row pauses scanning instead. Deliberately
@@ -1009,12 +1013,19 @@ function CameraScanner({ onAddSuccess, showToast }) {
     if (track) updateAdvancedConstraints(track, { zoom: val });
   };
 
-  const startCamera = async () => {
+  const startCamera = async (event) => {
+    event?.stopPropagation();
+    event?.preventDefault();
+    if (cameraStarting.current) return;
+    cameraStarting.current = true;
+    setCameraOpening(true);
+    try {
     // Create/unlock the scan cue here: this call is inside a click handler, and a
     // context first created without a gesture starts suspended with no promise of
     // ever being allowed to resume. Every capture after this is gesture-less.
-    beepCtx();
+    try { beepCtx(); } catch (error) { console.warn('Camera audio cue unavailable:', error); }
     setCameraErrorKey('');
+    setCameraErrorMessage('');
     setScanMatches([]);
     setScanStatus('');
     setDebugHashImg('');
@@ -1029,7 +1040,7 @@ function CameraScanner({ onAddSuccess, showToast }) {
     // is undefined, and the browser never shows a permission prompt at all — so
     // "check your permissions" sends people hunting for a setting that is fine.
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      setCameraErrorKey('scan.errCameraInsecure');
+      setCameraErrorMessage(cameraFailureMessage({ name: window.isSecureContext ? 'UnsupportedCameraError' : 'InsecureContextError' }));
       showToast(t('scan.errCameraInsecure', { origin: window.location.origin, port: window.location.port || '80' }));
       return;
     }
@@ -1040,6 +1051,7 @@ function CameraScanner({ onAddSuccess, showToast }) {
       // The lens picked last time (by the user or by the heuristic below). Exact,
       // so the browser can't swap in another lens; a camera that has gone (new
       // phone, cleared site data rotates deviceIds) falls back to the default.
+      assertCameraAllowed(document);
       const saved = localStorage.getItem(CAMERA_KEY);
       let mediaStream = null;
       if (saved) {
@@ -1085,7 +1097,15 @@ function CameraScanner({ onAddSuccess, showToast }) {
     } catch (err) {
       console.error('Error opening camera:', err);
       setCameraErrorKey('scan.errCameraPermissions');
+      setCameraErrorMessage(cameraFailureMessage(err));
       showToast(t('scan.errCameraAccess'));
+    }
+    } catch (error) {
+      console.error('Camera activation failed:', error);
+      setCameraErrorMessage(cameraFailureMessage(error));
+    } finally {
+      cameraStarting.current = false;
+      setCameraOpening(false);
     }
   };
 
@@ -1891,14 +1911,14 @@ function CameraScanner({ onAddSuccess, showToast }) {
           style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           onClick={startCamera}
         >
-          {cameraErrorKey ? (
+          {(cameraErrorKey || cameraErrorMessage) ? (
             <div style={{ textAlign: 'center', padding: '2rem' }}>
               <AlertTriangle size={48} style={{ color: 'var(--accent-yellow)', marginBottom: '1rem' }} />
               <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-                {t(cameraErrorKey, { origin: window.location.origin, port: window.location.port || '80' })}
+                {cameraErrorMessage || t(cameraErrorKey, { origin: window.location.origin, port: window.location.port || '80' })}
               </p>
-              <button className="btn btn-primary" onClick={startCamera}>
-                <RefreshCw size={14} /> Retry Camera
+              <button type="button" className="btn btn-primary" onClick={startCamera} disabled={cameraOpening}>
+                <RefreshCw size={14} /> {cameraOpening ? 'Requesting camera…' : 'Retry Camera'}
               </button>
             </div>
           ) : (
@@ -1906,8 +1926,8 @@ function CameraScanner({ onAddSuccess, showToast }) {
               <Camera size={48} style={{ color: 'var(--accent-red)', marginBottom: '1rem', opacity: 0.8 }} />
               <p style={{ fontSize: '0.95rem', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>{t('scan.readyTitle')}</p>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>{t('scan.readyHint')}</p>
-              <button className="btn btn-primary">
-                {t('scan.activateCamera')}
+              <button type="button" className="btn btn-primary" onClick={startCamera} disabled={cameraOpening}>
+                {cameraOpening ? 'Requesting camera…' : t('scan.activateCamera')}
               </button>
             </div>
           )}
