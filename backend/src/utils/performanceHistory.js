@@ -1,3 +1,4 @@
+// live-performance-v1
 'use strict';
 const DAYS = Object.freeze({ '7d': 7, '30d': 30, '90d': 90, '1y': 365, '5y': 1826 });
 function dayAt(timestamp, timeZone) {
@@ -13,9 +14,9 @@ function bounds(range, timestamp, timeZone) {
 }
 function point(row) {
   const gain = row.value_cents - row.invested_cents;
-  return { date: row.day, value: row.value_cents / 100, cardsValue: row.cards_cents / 100, sealedValue: row.sealed_cents / 100, invested: row.invested_cents / 100, gain: gain / 100, gainPct: row.invested_cents > 0 ? gain / row.invested_cents * 100 : null, recordedAt: row.recorded_at, staleRates: !!row.stale_rates, unpricedCards: row.unpriced_cards, unpricedSealed: row.unpriced_sealed };
+  return { date: row.day, value: row.value_cents / 100, cardsValue: row.cards_cents / 100, sealedValue: row.sealed_cents / 100, invested: row.invested_cents / 100, gain: gain / 100, gainPct: row.invested_cents > 0 ? gain / row.invested_cents * 100 : null, recordedAt: row.recorded_at, isLive: !!row.is_live, staleRates: !!row.stale_rates, unpricedCards: row.unpriced_cards, unpricedSealed: row.unpriced_sealed };
 }
-function createPerformanceHandler({ db, now = Date.now, timeZone = process.env.PORTFOLIO_TIMEZONE || 'UTC' }) {
+function createPerformanceHandler({ db, now = Date.now, timeZone = process.env.PORTFOLIO_TIMEZONE || 'UTC', loadCurrent = null }) {
   try { dayAt(now(), timeZone); } catch { timeZone = 'UTC'; }
   return async (req, res) => {
     res.set('Cache-Control', 'no-store');
@@ -29,7 +30,10 @@ function createPerformanceHandler({ db, now = Date.now, timeZone = process.env.P
       const { dailySchema } = require('../../../shared/investmentLedgerSchema.json');
       await db.run(dailySchema);
       const rows = await db.all('SELECT * FROM portfolio_daily_performance WHERE user_id = ? AND game = ? AND currency = ? AND time_zone = ? AND day BETWEEN ? AND ? ORDER BY day', [req.user.id, game, 'USD', timeZone, window.from, window.to]);
-      return res.json({ currency: 'USD', timeZone, range, ...window, basis: 'gain-vs-recorded-cost', portfolio: rows.map(point) });
+      const params = { db, userId: req.user.id, game, timeZone, now };
+      const live = loadCurrent ? await loadCurrent(params) : db.dbPath ? await require('./livePerformance').readCurrentPoint(params) : null;
+      const combined = require('./livePerformance').mergeCurrent(rows, live, window.from, window.to);
+      return res.json({ currency: 'USD', timeZone, range, ...window, basis: 'gain-vs-recorded-cost', portfolio: combined.map(point) });
     } catch (error) {
       console.error('Performance history failed:', error.code || error.message);
       return res.status(500).json({ error: 'Could not retrieve performance history' });

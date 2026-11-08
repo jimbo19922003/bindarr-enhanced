@@ -35,21 +35,21 @@ export default function PerformanceChart({ statsTrigger }) {
   return (
     <section className="glass-panel" aria-label="Daily portfolio performance" style={{ padding: '1.25rem', marginBottom: '1.5rem', minWidth: 0 }}>
       <h3 className="chart-title">Portfolio value &amp; recorded cost</h3>
-      <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>All games: saved cards + sealed snapshots in USD. Gain is compared with each day's recorded cost, not a cash-flow-adjusted investment return. These controls apply only to this panel.</p>
+      <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>All games: current holdings today and saved daily history in USD. Gain is compared with each day's recorded cost, not a cash-flow-adjusted investment return. These controls apply only to this panel.</p>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
         <div role="group" aria-label="Portfolio timeline view" style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
           {[['value', 'Value + cost'], ['gain', 'Gain / loss ($)'], ['gainPct', 'Gain / loss (%)']].map(([id, label]) => (
             <button key={id} type="button" aria-pressed={view === id} className={`btn ${view === id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView(id)}>{label}</button>
           ))}
         </div>
-        <button type="button" className="btn btn-secondary" onClick={() => setRefresh(n => n + 1)}>Refresh snapshots</button>
+        <button type="button" className="btn btn-secondary" onClick={() => setRefresh(n => n + 1)}>Refresh timeline</button>
       </div>
       <div role="group" aria-label="Daily performance range" style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
         {ranges.map(item => <button key={item} type="button" aria-pressed={range === item} className={`btn ${range === item ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setRange(item)}>{item.toUpperCase()}</button>)}
       </div>
       {loading ? <p role="status">Loading daily snapshots...</p> : error ? <p role="alert">{error}</p> : !rows.length ? <p>No saved snapshots for this range. Earlier values are not reconstructed.</p> : <>
-        <p>Latest: {day(latest.date)} - value {money(latest.value)}, cost {money(latest.invested)}, gain {money(latest.gain)} ({latest.gainPct == null ? 'percentage unavailable: zero recorded cost' : percent(latest.gainPct)}).</p>
-        {rows.length === 1 && <p style={{ color: 'var(--text-secondary)' }}>One daily snapshot is available. The dot is your actual record; a history line will develop as more days are saved.</p>}
+        <p>{latest.isLive ? 'Current holdings today' : 'Latest saved snapshot'}: {day(latest.date)} - value {money(latest.value)}, cost {money(latest.invested)}, gain {money(latest.gain)} ({latest.gainPct == null ? 'percentage unavailable: zero recorded cost' : percent(latest.gainPct)}).</p>
+        {rows.length === 1 && <p style={{ color: 'var(--text-secondary)' }}>One daily snapshot is available. The dot shows the available observation; a history line will develop as more days are saved.</p>}
         {view === 'gainPct' && rows.every(row => row.gainPct == null) ? <p>Gain percentage is unavailable because these snapshots have no recorded cost.</p> : <div style={{ width: '100%', height: 280, minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ top: 12, right: 20, left: 12, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-glass)" />
@@ -61,7 +61,7 @@ export default function PerformanceChart({ statsTrigger }) {
             {series.map((key, index) => <Line key={key} type="linear" dataKey={key} name={labels[key]} stroke={index ? '#f59e0b' : '#3b82f6'} strokeWidth={2} dot={{ r: rows.length === 1 ? 6 : 3 }} activeDot={{ r: 7 }} connectNulls={false} isAnimationActive={false} />)}
           </LineChart></ResponsiveContainer>
         </div>}
-        <small style={{ color: 'var(--text-secondary)' }}>Snapshot timezone: {report.timeZone}. {rows.length} recorded day(s). Missing days are not backfilled; lines join available observations. Refresh reads saved snapshots, not a new valuation.</small>
+        <small style={{ color: 'var(--text-secondary)' }}>Snapshot timezone: {report.timeZone}. {rows.length} recorded day(s). Missing days are not backfilled; lines join available observations. Today reflects current holdings using available quotes; earlier days are saved snapshots.</small>
         {rows.some(row => row.staleRates || row.unpricedCards > 0 || row.unpricedSealed > 0) && <p role="status">Some snapshots contain stale exchange rates or unpriced holdings; their values may be incomplete.</p>}
       </>}
     </section>
