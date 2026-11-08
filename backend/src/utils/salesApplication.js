@@ -1,3 +1,4 @@
+// completed-rip-basis-v1
 // contextual-sales-v1
 'use strict';
 const {createHash}=require('node:crypto');
@@ -36,14 +37,16 @@ async function state(db,user,v) {
   return {name:copy.name,cardId:copy.card_id,source:lot.source,remainingQuantity:1,remainingBasisCents:lot.remaining_basis_cents};
  }
  if(mapping)return {name:copy.name,cardId:copy.card_id,source:'opening',remainingQuantity:1,remainingBasisCents:mapping.cost_cents};
- const pull=await db.get("SELECT id FROM sealed_pull WHERE user_id=? AND (collection_id=? OR instr(','||replace(COALESCE(filed_ids,''),' ','')||',',','||?||',')>0) LIMIT 1",[user,v.id,String(v.id)]);
+ const pull=await db.get("SELECT * FROM sealed_pull WHERE user_id=? AND (collection_id=? OR instr(','||replace(COALESCE(filed_ids,''),' ','')||',',','||?||',')>0) LIMIT 1",[user,v.id,String(v.id)]);
+ const completed=pull?.opening_id ? await require('./completedRipBasis').forCopy(db,user,copy,pull.opening_id) : null;
+ if(completed?.snapshot)return {name:copy.name,cardId:copy.card_id,source:'opening',remainingQuantity:1,remainingBasisCents:completed.basisCents,openingDraft:completed.snapshot};
  const basis=!pull&&typeof copy.purchase_price==='number'&&Number.isFinite(copy.purchase_price)&&copy.purchase_price>0?Math.round(copy.purchase_price*100):null;
- return {name:copy.name,cardId:copy.card_id,source:basis==null?'unknown':'direct',remainingQuantity:1,remainingBasisCents:basis};
+ return {name:copy.name,cardId:copy.card_id,source:basis==null?'unknown':'direct',remainingQuantity:1,remainingBasisCents:basis,basisReason:completed?.reason || null};
 }
 function review(user,v,s) {
  const amounts=calculateSale({...v,remainingQuantity:s.remainingQuantity,remainingBasisCents:s.remainingBasisCents});
  const token=createHash('sha256').update(JSON.stringify({user,v,s})).digest('hex');
- return {...amounts,itemName:s.name,source:s.source,currency:v.currency,previewToken:token};
+ return {...amounts,itemName:s.name,source:s.source,currency:v.currency,previewToken:token,basisReason:s.basisReason || null,willFreezeOpening:!!s.openingDraft};
 }
 function createSalesApplication({connect}) {
  async function read(user,work) {
@@ -79,7 +82,7 @@ function createSalesApplication({connect}) {
     if(v.kind==='card'){
      let lot=await db.get('SELECT * FROM card_acquisition_lot WHERE collection_id=? AND user_id=?',[v.id,user]);
      if(!lot){
-      if(s.source==='opening')lot=await opening.createOpeningLot(db,user,v.id);
+      if(s.source==='opening'){if(s.openingDraft)await require('./completedRipBasis').freeze(db,user,s.openingDraft);lot=await opening.createOpeningLot(db,user,v.id);}
       else {const inserted=await db.run('INSERT INTO card_acquisition_lot (user_id,collection_id,source,original_quantity,remaining_quantity,original_basis_cents,remaining_basis_cents,currency) VALUES (?,?,?,1,1,?,?,?)',[user,v.id,s.source,s.remainingBasisCents,s.remainingBasisCents,'USD']);lot={id:inserted.lastID};}
      }
      await db.run('UPDATE card_acquisition_lot SET remaining_quantity=0,remaining_basis_cents=? WHERE id=? AND user_id=?',[checked.remainingBasisCents,lot.id,user]);

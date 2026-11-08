@@ -1,3 +1,4 @@
+// completed-rip-basis-v1
 'use strict';
 const { allocateOpeningCost } = require('./costBasis');
 const schema = `
@@ -75,4 +76,4 @@ function createOpeningBasisRepository({ connect }) {
     finally { await db.close(); }
   } };
 }
-module.exports = { createOpeningBasisRepository };
+module.exports = { createOpeningBasisRepository, schema };
