@@ -38,6 +38,7 @@ const PRESERVE_WHEN_POKEWALLET = new Set([
 const SET_CLAUSE = COLUMNS
   .filter(c => c !== 'id' && c !== 'name')
   .map(c => {
+    if (c === 'image_url') return "image_url = CASE WHEN NULLIF(TRIM(excluded.image_url), '') IS NULL THEN card_cache.image_url ELSE excluded.image_url END";
     if (!PRESERVE_WHEN_POKEWALLET.has(c)) return `${c} = excluded.${c}`;
     return `${c} = CASE
       WHEN card_cache.price_source LIKE 'pokewallet%'

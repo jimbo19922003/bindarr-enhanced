@@ -1,0 +1,35 @@
+name: Validate Pokemon artwork repair
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - '.github/workflows/pokemon-artwork-repair.yml'
+      - 'backend/src/utils/pokemonArtworkRepair.js'
+      - 'backend/src/utils/carddexArtwork.js'
+      - 'backend/src/utils/orderedArtworkFallback.js'
+      - 'backend/scripts/repair-pokemon-artwork.js'
+      - 'backend/test/pokemonArtworkRepair.test.js'
+      - 'backend/test/carddexArtwork.test.js'
+      - 'frontend/src/components/AddCards.jsx'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  artwork-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci --prefix backend
+      - run: node --check backend/scripts/repair-pokemon-artwork.js
+      - run: node --check backend/src/utils/pokemonArtworkRepair.js
+      - run: node --check backend/src/utils/carddexArtwork.js
+      - run: node --check backend/src/utils/orderedArtworkFallback.js
+      - run: node --test backend/test/pokemonArtworkRepair.test.js backend/test/carddexArtwork.test.js

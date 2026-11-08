@@ -414,7 +414,7 @@ async function embedPhase(job) {
   job.phase = 'embed';
   job.total = rows.length;
   job.done = 0;
-  if (!rows.length) return { built: 0, reused: 0, failed: 0, wrote: false };
+  if (!rows.length) throw new Error('No eligible card artwork found for ' + job.game + '/' + job.lang + (scoped ? ' in selected sets: ' + job.sets.join(', ') : '') + '. No scan catalog was written. Synchronize card metadata and verify the language, set IDs and artwork coverage before retrying.');
 
   // Resume: keep every embedding whose source image has not changed.
   let prev = null;

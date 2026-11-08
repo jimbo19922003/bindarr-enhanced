@@ -1,0 +1,49 @@
+name: Validate and connect provider key persistence repair
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - '.github/workflows/provider-key-save.yml'
+      - 'scripts/wire-provider-key-save.py'
+      - 'backend/src/routes/providerKeys.js'
+      - 'backend/test/providerKeys.test.js'
+      - 'frontend/src/utils/saveProviderKeys.mjs'
+      - 'frontend/test/saveProviderKeys.test.mjs'
+permissions:
+  contents: write
+concurrency:
+  group: provider-key-save-repair
+  cancel-in-progress: false
+jobs:
+  provider-key-save:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: python3 scripts/wire-provider-key-save.py
+      - name: Verify repeat safety
+        run: |
+          git diff > /tmp/provider-key-first.diff
+          python3 scripts/wire-provider-key-save.py
+          git diff > /tmp/provider-key-second.diff
+          cmp /tmp/provider-key-first.diff /tmp/provider-key-second.diff
+          git diff --check
+      - run: npm ci --prefix backend
+      - run: node --test backend/test/providerKeys.test.js frontend/test/saveProviderKeys.test.mjs
+      - run: npm test --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run lint --prefix frontend
+      - run: npm test --prefix frontend
+      - run: npm run build --prefix frontend
+      - name: Commit tested key-save wiring without modifying other files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/src/routes/settings.js frontend/src/components/Settings.jsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'fix: connect independently verified emergency provider key saving'
+          git push origin HEAD:release/pokemon-local-first

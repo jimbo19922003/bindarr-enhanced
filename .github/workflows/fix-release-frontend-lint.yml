@@ -1,0 +1,48 @@
+name: Validate targeted release frontend lint repair
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - 'scripts/fix-release-frontend-lint.py'
+      - '.github/workflows/fix-release-frontend-lint.yml'
+      - 'frontend/src/utils/formatPrice.test.js'
+permissions:
+  contents: write
+concurrency:
+  group: fix-release-frontend-lint
+  cancel-in-progress: false
+jobs:
+  repair:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/pokemon-local-first
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply exact source edits with original-file hash guards
+        run: python3 scripts/fix-release-frontend-lint.py
+      - name: Check patch whitespace
+        run: git diff --check
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+      - name: Run all backend tests
+        run: npm test --prefix backend
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Enforce frontend lint without suppressions
+        run: npm run lint --prefix frontend
+      - name: Run frontend tests
+        run: npm test --prefix frontend
+      - name: Build frontend
+        run: npm run build --prefix frontend
+      - name: Commit only the validated four-file repair to the release branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/App.jsx frontend/src/components/Dashboard.jsx frontend/src/components/RipForm.jsx frontend/src/components/SaleDialogHost.jsx
+          git commit -m 'fix: resolve release frontend lint errors and hook warnings'
+          git push origin HEAD:release/pokemon-local-first

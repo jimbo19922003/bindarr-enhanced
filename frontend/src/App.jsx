@@ -1,5 +1,5 @@
 // contextual-sales-v1
-import React, { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { LayoutDashboard, Database, MapPin, Sparkles, Settings as SettingsIcon, LogOut, ShieldAlert, Plus, Swords, StickyNote, Package } from 'lucide-react';
 import Login from './components/Login';
 import Logo from './components/Logo';
@@ -104,27 +104,27 @@ function App() {
   if (!mountedTabs.includes(activeTab)) setMountedTabs([...mountedTabs, activeTab]);
   const scrollByTabRef = useRef({});
   const shownTabRef = useRef(activeTab);
-  const showTab = (tab) => {
+  const showTab = useCallback((tab) => {
     scrollByTabRef.current[shownTabRef.current] = window.scrollY;
     setActiveTab(tab);
-  };
+  }, []);
   useEffect(() => { if (activeTab !== 'storage') setFocusEntryId(null); }, [activeTab]);
   const resetTabs = () => {
     setActiveTab('dashboard');
     setMountedTabs(['dashboard']);
     scrollByTabRef.current = {};
   };
-  const goTab = (tab) => {
+  const goTab = useCallback((tab) => {
     if (tab === activeTab) return;
     const prev = activeTab;
     tabGuardRef.current = pushBackGuard(() => { tabGuardRef.current = null; showTab(prev); });
     showTab(tab);
-  };
+  }, [activeTab, showTab]);
   useEffect(() => {
     const open = () => goTab('sales-history');
     window.addEventListener('bindarr_open_sales_history', open);
     return () => window.removeEventListener('bindarr_open_sales_history', open);
-  }, [activeTab]);
+  }, [goTab]);
   const [shareToken] = useState(() => {
     const match = window.location.pathname.match(/^\/share\/([a-zA-Z0-9_-]+)$/);
     return match ? match[1] : null;

@@ -1,0 +1,45 @@
+name: Validate manual Admin catalogue installation
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: manual-catalog-install-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  manual-install:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Test read-only catalogue wiring validation
+        run: python3 -m unittest discover -s scripts -p 'test_catalog_install_wiring.py'
+      - name: Verify committed wiring and repeat safety without changing tracked files
+        run: |
+          python3 scripts/wire-local-catalog-install.py
+          git diff --exit-code
+          python3 scripts/wire-local-catalog-install.py
+          git diff --exit-code
+      - run: node --check backend/src/utils/pokemonBundleInstall.js
+      - run: node --check backend/src/routes/localCatalogInstall.js
+      - run: npm ci --prefix backend
+      - run: node --test backend/test/pokemonBundleInstall.test.js backend/test/localCatalogInstall.test.js backend/test/localCatalogStatus.test.js
+      - name: Backend tests with failure-only Scryfall child-server diagnostics
+        working-directory: backend
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/backend/test/e2e/trace-server.cjs
+        run: npm test
+      - run: npm ci --prefix frontend
+      - run: npm run lint --prefix frontend
+      - run: npm test --prefix frontend
+      - run: npm run build --prefix frontend

@@ -85,6 +85,7 @@ async function attachOwnedQty(cards, userId) {
 // English follows whichever provider actually built the data being searched.
 // That rule lives in utils/pokemonProvider — this only maps its answer to a module.
 async function pokemonApiFor(lang) {
+  if (process.env.POKEMON_LOCAL_CATALOG === '1') return require('../utils/localPokemonSearch').getLocalPokemonSearch();
   return pokemonProvider.apiFor(lang);
 }
 
@@ -172,7 +173,7 @@ router.all('/search', searchLimiter, async (req, res) => {
     }
 
     await attachOwnedQty(cards, req.user.id);
-    if (game === 'pokemon' && !image) {
+    if (game === 'pokemon' && !image && !api.localOnly) {
       const overlayQuery = [name, set].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
       if (overlayQuery.length >= 2) await overlayPokewalletPrices(cards, overlayQuery);
     }
@@ -193,6 +194,8 @@ router.all('/search', searchLimiter, async (req, res) => {
     if (['POKEMONTCGAPI_KEY_REQUIRED', 'POKEMONTCGAPI_KEY_INVALID'].includes(error.message)) {
       return res.status(503).json({ error: 'The administrator needs to configure a valid POKEMONTCGAPI_KEY on the server.' });
     }
+    if (error.code === 'LOCAL_CATALOG_SYNC_REQUIRED') return res.status(503).json({ error: 'Synchronize the local Pokemon catalog for this language before searching.', code: error.code, language: error.language });
+    if (error.code === 'INVALID_LOCAL_CATALOG_QUERY') return res.status(400).json({ error: 'Invalid local catalog query', code: error.code });
     if (error.message === 'UPSTREAM_UNAVAILABLE') {
       return res.status(503).json({ error: 'Card API is having trouble. Try again in a moment.' });
     }

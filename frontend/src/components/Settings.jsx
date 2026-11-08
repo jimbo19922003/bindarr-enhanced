@@ -1,3 +1,4 @@
+// provider-keys-consolidated-v1
 import { useState, useEffect } from 'react';
 import { ShieldAlert, Share2, Clipboard, RefreshCw, KeyRound, Check, Database, Download, Upload, Eye, EyeOff, SlidersHorizontal, Info, Bug, Lightbulb, MessagesSquare, ScrollText, Github, Layers, Languages } from 'lucide-react';
 import { GAMES, enabledGames, setGameEnabled, gameOptions, defaultGame } from '../utils/games';
@@ -60,11 +61,8 @@ function Settings({ user, onUpdateUser, showToast }) {
   const [shareLoading, setShareLoading] = useState(false);
   const [containers, setContainers] = useState([]);
 
-  const [tcgApiKey, setTcgApiKey] = useState(user?.tcg_api_key || '');
   const [psaToken, setPsaToken] = useState(user?.psa_api_token || '');
   const [gradedKey, setGradedKey] = useState(user?.graded_price_api_key || '');
-  const [pokewalletKey, setPokewalletKey] = useState('');
-  const [pokewalletKeyLoaded, setPokewalletKeyLoaded] = useState(false);
   const [keysLoading, setKeysLoading] = useState(false);
   const [accessKey, setAccessKey] = useState(user?.api_key || '');
   const [showAccessKey, setShowAccessKey] = useState(false);
@@ -90,19 +88,6 @@ function Settings({ user, onUpdateUser, showToast }) {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (user?.role !== 'admin') return undefined;
-    let cancelled = false;
-    fetch('/api/settings/pokewallet')
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (cancelled || !data) return;
-        setPokewalletKey(data.api_key || '');
-        setPokewalletKeyLoaded(true);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [user?.role]);
 
   // The build stamps its own version in, so Settings can always state what it
   // is even with the backend down. The call below only adds the SERVER's
@@ -246,7 +231,6 @@ function Settings({ user, onUpdateUser, showToast }) {
     if (user) {
       setShareEnabled(user.share_enabled === 1 || user.share_enabled === true);
       setShareLocations(user.share_locations === 1 || user.share_locations === true);
-      setTcgApiKey(user.tcg_api_key || '');
       setPsaToken(user.psa_api_token || '');
       setGradedKey(user.graded_price_api_key || '');
       setAccessKey(user.api_key || '');
@@ -396,47 +380,22 @@ function Settings({ user, onUpdateUser, showToast }) {
     }
   };
 
-  // All three provider keys in one PUT. They are independent services, but they
-  // are set up in one sitting and the settings route takes them together, so three
-  // buttons only ever meant three chances to save two of them.
   const handleSaveKeys = async (e) => {
     e.preventDefault();
+    if (user?.role === 'admin') return;
+    const personal = {};
+    if (psaToken !== (user?.psa_api_token || '')) personal.psa_api_token = psaToken;
+    if (gradedKey !== (user?.graded_price_api_key || '')) personal.graded_price_api_key = gradedKey;
+    if (!Object.keys(personal).length) return showToast('No personal credential changes to save.');
     setKeysLoading(true);
     try {
-      const response = await fetch('/api/auth/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tcg_api_key: tcgApiKey,
-          psa_api_token: psaToken,
-          graded_price_api_key: gradedKey
-        })
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        showToast(data?.error || t('settings.errKeys'));
-        return;
-      }
-      onUpdateUser(data.user);
-      if (user?.role === 'admin' && pokewalletKeyLoaded) {
-        const keyResponse = await fetch('/api/settings', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pokewallet_api_key: pokewalletKey }),
-        });
-        const keyData = await keyResponse.json().catch(() => null);
-        if (!keyResponse.ok) {
-          showToast(keyData?.error || t('settings.errKeys'));
-          return;
-        }
-      }
+      const response = await fetch('/api/auth/settings', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(personal)});
+      if (!response.ok) throw new Error();
+      const result = await response.json();
+      if (result.user) onUpdateUser(result.user);
       showToast(t('settings.keysUpdated'));
-    } catch (err) {
-      console.error(err);
-      showToast(t('settings.errKeys'));
-    } finally {
-      setKeysLoading(false);
-    }
+    } catch { showToast(t('settings.errKeys')); }
+    finally { setKeysLoading(false); }
   };
 
   // Create/rotate/revoke the read-only API key. Rotating and revoking both break
@@ -768,42 +727,13 @@ function Settings({ user, onUpdateUser, showToast }) {
           {/* One form and one save for all three: they are all "keys for outside
               services", and three separate saves was three round trips to set up
               an account once. */}
-          <form onSubmit={handleSaveKeys} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-            <KeyField
-              id="settings-tcg-api-key" label={t('settings.apiKeyTitle')} hint={t('settings.apiKeyIntro')}
-              link="https://dev.pokemontcg.io" linkLabel={t('settings.apiKeyGetOne')}
-              value={tcgApiKey} onChange={setTcgApiKey} disabled={keysLoading} t={t}
-              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-            />
-            <KeyField
-              id="settings-psa-token" label={t('settings.psaTokenTitle')} hint={t('settings.psaTokenIntro')}
-              link="https://www.psacard.com/publicapi/documentation" linkLabel={t('settings.psaTokenGetOne')}
-              value={psaToken} onChange={setPsaToken} disabled={keysLoading} t={t}
-            />
-            <KeyField
-              id="settings-graded-key" label={t('settings.gradedKeyTitle')} hint={t('settings.gradedKeyIntro')}
-              link="https://www.pokemonpricetracker.com/api" linkLabel={t('settings.gradedKeyGetOne')}
-              value={gradedKey} onChange={setGradedKey} disabled={keysLoading} t={t}
-            />
-            {user?.role === 'admin' && (
-              <KeyField
-                id="settings-pokewallet-key" label={t('settings.pokewalletKeyTitle')} hint={t('settings.pokewalletKeyIntro')}
-                link="https://pokewallet.io/api-docs" linkLabel={t('settings.pokewalletKeyGetOne')}
-                value={pokewalletKey} onChange={setPokewalletKey} disabled={keysLoading || !pokewalletKeyLoaded} t={t}
-              />
-            )}
-
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={keysLoading}
-              style={{ padding: '0.6rem 1.2rem', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-            >
-              {keysLoading ? (
-                <div className="spinner" style={{ width: '14px', height: '14px', margin: 0, borderWidth: '2px' }}></div>
-              ) : t('settings.saveKeys')}
-            </button>
-          </form>
+          {user?.role === 'admin' ? <p>Manage external-provider keys in Admin → API keys. Your generated Bindarr access key below remains account-specific.</p> : (
+            <form onSubmit={handleSaveKeys} style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+              <KeyField id="settings-psa-token" label={t('settings.psaTokenTitle')} hint={t('settings.psaTokenIntro')} link="https://www.psacard.com/publicapi/documentation" linkLabel={t('settings.psaTokenGetOne')} value={psaToken} onChange={setPsaToken} disabled={keysLoading} t={t} />
+              <KeyField id="settings-graded-key" label={t('settings.gradedKeyTitle')} hint={t('settings.gradedKeyIntro')} link="https://www.pokemonpricetracker.com/api" linkLabel={t('settings.gradedKeyGetOne')} value={gradedKey} onChange={setGradedKey} disabled={keysLoading} t={t} />
+              <button type="submit" className="btn btn-primary" disabled={keysLoading}>{t('settings.saveKeys')}</button>
+            </form>
+          )}
 
           {/* The one key that points the other way: not a credential Bindarr uses
               to reach a service, but one something else uses to read Bindarr. Shown

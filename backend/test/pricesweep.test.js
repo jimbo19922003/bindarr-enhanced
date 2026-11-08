@@ -1,16 +1,5 @@
-// The daily Pokémon price sweep, and the two things it used to get wrong.
-//
-// It selected every owned English Pokémon card and handed each one to
-// getCardById. That returns the cached row untouched when it is less than three
-// days old — so on a daily sweep against a three-day cache, most days it made
-// almost no requests. It then slept a second per card regardless, which meant a
-// 5,000-card collection spent 83 minutes a day in setTimeout to fetch nothing.
-//
-// Two assertions, and neither can be made by reading the code: how many requests
-// reach the provider, and how long the sweep takes relative to the number of
-// cards it actually had work for.
-//
-// No framework — plain node + assert. Run: `node test/pricesweep.test.js`
+// Exercise real HTTP and SQLite, but observe requested pacing instead of
+// requiring those I/O operations to complete within a 40ms wall-clock budget.
 const assert = require('assert');
 const http = require('http');
 const os = require('os');
@@ -18,18 +7,36 @@ const path = require('path');
 
 process.env.DB_PATH = path.join(os.tmpdir(), `bindarr-pricesweep-${process.pid}.db`);
 process.env.POKEMON_TCG_API_KEY = 'test-key';
-// initDb only seeds the 'admin' user when a password is pinned, and collection
-// rows carry a user_id that references it.
 process.env.DEFAULT_ADMIN_PASSWORD = 'test-admin-password';
-// The real gap is a second per request. The point here is that it is paid per
-// REQUEST rather than per owned card, which a smaller gap measures just as well
-// and 30 seconds faster.
 process.env.POKEMON_PRICE_GAP_MS = '40';
 
 const db = require('../src/db');
 const { updateCollectionPrices, tcgClient } = require('../src/tcgApi');
+const gap = Number(process.env.POKEMON_PRICE_GAP_MS);
+const tcgSource = path.resolve(__dirname, '../src/tcgApi.js');
 
-// Stand-in for api.pokemontcg.io. Counts what actually reaches it.
+async function observePacing(state) {
+  const original = global.setTimeout;
+  const scheduled = [];
+  global.setTimeout = function (callback, delay, ...args) {
+    const caller = String(new Error().stack?.split('\n')[2] || '');
+    // Capture the configured gap, plus any other timer requested directly by
+    // tcgApi (including a mistakenly hardcoded after-last-request delay).
+    // Leave HTTP/socket and other dependency timers unchanged.
+    if (Number(delay) === gap || caller.includes(tcgSource + ':')) {
+      scheduled.push({ afterRequest: state.hits, delay: Number(delay) });
+      return original(callback, 0, ...args);
+    }
+    return original(callback, delay, ...args);
+  };
+  try {
+    await updateCollectionPrices(true);
+    return scheduled;
+  } finally {
+    global.setTimeout = original;
+  }
+}
+
 function makeServer(state) {
   return http.createServer((req, res) => {
     state.hits++;
@@ -37,9 +44,7 @@ function makeServer(state) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       data: {
-        id,
-        name: 'Test Card',
-        number: '1',
+        id, name: 'Test Card', number: '1',
         set: { id: 'test', name: 'Test Set' },
         images: { small: 'https://img/small.png' },
         tcgplayer: { prices: { normal: { market: 1.23 } } },
@@ -48,15 +53,13 @@ function makeServer(state) {
   });
 }
 
-const listen = (server) => new Promise(resolve =>
+const listen = server => new Promise(resolve =>
   server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`)));
 
-// `fresh` cards were cached just now; `stale` ones four days ago. Only the stale
-// ones have anything to fetch.
 async function seed({ fresh, stale }) {
-  await db.run(`DELETE FROM collection`);
-  await db.run(`DELETE FROM card_cache`);
-  await db.run(`DELETE FROM price_sweeps`).catch(() => {});
+  await db.run('DELETE FROM collection');
+  await db.run('DELETE FROM card_cache');
+  await db.run('DELETE FROM price_sweeps').catch(() => {});
   let n = 0;
   const add = async (count, when) => {
     for (let i = 0; i < count; i++) {
@@ -78,75 +81,54 @@ async function seed({ fresh, stale }) {
 
 async function main() {
   await db.initDb();
-
-  // --- 1. Nothing stale: no requests, and no time spent pretending. ----------
   {
     const state = { hits: 0 };
     const server = makeServer(state);
     tcgClient.defaults.baseURL = await listen(server);
     try {
       await seed({ fresh: 40, stale: 0 });
-      const t0 = Date.now();
-      await updateCollectionPrices(true);
-      const ms = Date.now() - t0;
-
+      const pacing = await observePacing(state);
       assert.strictEqual(state.hits, 0, 'cards cached today must not be re-fetched');
-      // The old loop slept POKEMON_PRICE_GAP_MS per owned card whether or not it
-      // fetched anything: 40 cards, 40 gaps. Anything near that is the bug back.
-      assert.ok(ms < 20 * Number(process.env.POKEMON_PRICE_GAP_MS),
-        `a sweep with nothing to do took ${ms}ms — it is still sleeping per owned card`);
+      assert.deepStrictEqual(pacing, [], 'fresh cards must not schedule pacing delays');
     } finally {
-      await new Promise(r => server.close(r));
+      await new Promise(resolve => server.close(resolve));
     }
   }
-
-  // --- 2. Some stale: exactly those are fetched, and priced. -----------------
   {
     const state = { hits: 0 };
     const server = makeServer(state);
     tcgClient.defaults.baseURL = await listen(server);
     try {
       await seed({ fresh: 30, stale: 5 });
-      await updateCollectionPrices(true);
-
-      assert.strictEqual(state.hits, 5,
-        `expected one request per STALE card, got ${state.hits} for 5 stale of 35 owned`);
-
-      // The fetched rows really were written back, or "refreshed" means nothing.
+      const pacing = await observePacing(state);
+      assert.strictEqual(state.hits, 5, 'only the five stale cards should reach the provider');
+      assert.deepStrictEqual(pacing, [1, 2, 3, 4].map(afterRequest => ({ afterRequest, delay: gap })),
+        'five requests require four configured gaps between requests, with none before the first or after the last');
       const priced = await db.get(
         `SELECT COUNT(*) n FROM card_cache
-          WHERE game = 'pokemon' AND price_trend = 1.23 AND last_updated > datetime('now', '-1 day')`
+         WHERE game = 'pokemon' AND price_trend = 1.23 AND last_updated > datetime('now', '-1 day')`
       );
       assert.strictEqual(priced.n, 5, 'every stale card must come back with its new price');
-
-      // And a price series row for each, since the price moved 1.00 -> 1.23.
-      const history = await db.get(`SELECT COUNT(*) n FROM price_history`);
+      const history = await db.get('SELECT COUNT(*) n FROM price_history');
       assert.strictEqual(history.n, 5, 'a price movement must be recorded once per card');
     } finally {
-      await new Promise(r => server.close(r));
+      await new Promise(resolve => server.close(resolve));
     }
   }
-
-  // --- 3. The gap is paid BETWEEN requests, not after the last one. ----------
   {
     const state = { hits: 0 };
     const server = makeServer(state);
     tcgClient.defaults.baseURL = await listen(server);
     try {
       await seed({ fresh: 0, stale: 1 });
-      const t0 = Date.now();
-      await updateCollectionPrices(true);
-      const ms = Date.now() - t0;
-
+      const pacing = await observePacing(state);
       assert.strictEqual(state.hits, 1);
-      assert.ok(ms < Number(process.env.POKEMON_PRICE_GAP_MS),
-        `one card took ${ms}ms — the sweep is still sleeping after the last request`);
+      assert.deepStrictEqual(pacing, [], 'one request must not schedule a before-first or after-last delay');
     } finally {
-      await new Promise(r => server.close(r));
+      await new Promise(resolve => server.close(resolve));
     }
   }
-
-  console.log('pricesweep.test.js: all 7 assertions passed');
+  console.log('pricesweep.test.js: request, pacing, price and history assertions passed');
 }
 
-main().then(() => process.exit(0)).catch((err) => { console.error(err); process.exit(1); });
+main().then(() => process.exit(0)).catch(error => { console.error(error); process.exit(1); });

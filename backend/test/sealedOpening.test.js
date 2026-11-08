@@ -17,7 +17,7 @@ async function main() {
   assert.strictEqual(pickCatalogSet({ code: '30C', name: '30th Celebration', cached: [{ set_id: '30th', set_name: '30th Celebration' }], sets: [] }).set_id, '30th');
   await db.initDb();
   const admin = await db.get("SELECT id FROM users WHERE username = 'admin'");
-  const other = await db.run("INSERT INTO users (username, password_hash, role) VALUES ('other-rip-user', 'x', 'member')");
+  const other = await db.run("INSERT INTO users (username, password_hash, role, share_token) VALUES ('other-rip-user', 'x', 'member', ?)", [require('crypto').randomBytes(32).toString('hex')]);
   await db.run(`INSERT INTO card_cache (id, name, game, language, set_id, set_name, number, price_trend, price_normal, price_currency) VALUES
     ('tcgdex-en-rip-usd', 'Dollar card', 'pokemon', 'English', '30th', '30th Celebration', '1', 10, 10, 'USD'),
     ('tcgdex-en-rip-eur', 'Euro card', 'pokemon', 'English', '30th-classic', '30th Classic', '2', 54.85, 54.85, 'EUR')`);

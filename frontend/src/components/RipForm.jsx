@@ -21,10 +21,14 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
   const [sets, setSets] = useState([]), [setId, setSetId] = useState(''), [resolved, setResolved] = useState(null), [setError, setSetError] = useState(false);
   const [query, setQuery] = useState(''), [pulls, setPulls] = useState(() => (existingOpening?.pulls || []).map(initialPull));
   const [removed, setRemoved] = useState([]), [matches, setMatches] = useState([]), [looking, setLooking] = useState(false);
-  const [entryComplete, setEntryComplete] = useState(() => !!existingOpening?.entry_complete);
   const [owned, setOwned] = useState({}), [ownershipPending, setOwnershipPending] = useState(0), [ownershipError, setOwnershipError] = useState(false);
   const language = langCode(product.language || 'en');
-  useEffect(() => { live.current = true; inputRef.current?.focus(); return () => { live.current = false; request.current++; }; }, []);
+  useEffect(() => {
+    const requestRef = request;
+    live.current = true;
+    inputRef.current?.focus();
+    return () => { live.current = false; requestRef.current++; };
+  }, []);
   const loadOwnership = async cardIds => {
     const ids = [...new Set(cardIds.filter(Boolean))]; if (!ids.length) return;
     if (live.current) setOwnershipPending(value => value + 1);
@@ -85,7 +89,7 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
   const remove = pull => { setRemoved(current => [pull, ...current]); setPulls(current => current.filter(row => row.key !== pull.key)); };
   const submit = event => {
     event.preventDefault(); if (busy || looking) return;
-    const payload = { opened_at: openedAt, notes, entry_complete: entryComplete, pulls: pulls.map(pull => {
+    const payload = { opened_at: openedAt, notes, entry_complete: true, pulls: pulls.map(pull => {
       const row = { name: pull.name.trim() || t('sealed.otherCards'), quantity: Number(pull.quantity), card_id: pull.card_id || '', set_name: pull.set_name || '', number: pull.number || '', ...(pull.image_url ? { image_url: pull.image_url } : {}) };
       if (pull.id) { row.id = pull.id; if (pull.lineMode) { if (pull.line_value !== '') row.line_value = pull.line_value; } else if (pull.current_value !== '') row.current_value = pull.current_value; }
       else if (pull.bulk) { if (pull.line_value.trim()) row.line_value = pull.line_value.trim(); if (pull.value_at_opening.trim()) row.opened_line_value = pull.value_at_opening.trim(); }
@@ -137,7 +141,7 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
       </div>
       {removed.length > 0 && <button className="btn btn-secondary" type="button" onClick={() => { const [last, ...rest] = removed; setPulls(current => [last, ...current]); setRemoved(rest); }}>Undo last removal</button>}
       <button className="btn btn-secondary" type="button" onClick={() => setPulls(current => [{ key: `new-${++nextLine}`, bulk: true, lineMode: true, card_id: '', name: t('sealed.otherCards'), quantity: '1', line_value: '', current_value: '', value_at_opening: '', set_name: product.set_name || '' }, ...current])}>{t('sealed.addBulk')}</button>
-      <label><input type="checkbox" checked={entryComplete} onChange={e => setEntryComplete(e.target.checked)} /> {t('sealed.markComplete')}</label>
+      <small>Saving records this rip as complete. You can edit its contents later unless a sale has frozen the opening&apos;s acquisition basis.</small>
     </fieldset>
     <div className="quick-add-footer"><div className="quick-add-footer-actions">
       <button className="btn btn-secondary" type="button" onClick={onClose} disabled={busy}>{t('common.cancel')}</button>

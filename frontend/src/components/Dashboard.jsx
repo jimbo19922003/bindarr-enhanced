@@ -7,7 +7,7 @@
 // daily-dashboard-v2
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { TrendingUp, Coins, Library, Trophy, Plus, ArrowUpRight, Package, Zap } from 'lucide-react';
+import { TrendingUp, Library, Trophy, Plus, Package, Zap } from 'lucide-react';
 import { getCardDisplayName } from '../utils/langHelper';
 import { priceText, currencySymbol, getCurrency } from '../utils/formatPrice';
 import { cardAverages } from '../utils/dashboardTimeline';
@@ -136,7 +136,6 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
     );
   }
 
-  const sealedUnits = stats && stats.summary.sealed ? stats.summary.sealed.remainingUnits : 0;
   const openedReports = stats && stats.openingPerformance ? stats.openingPerformance.reports : [];
   if (!stats) {
     const isFiltered = Boolean(gameFilter);

@@ -21,6 +21,10 @@ router.get('/exchange-rates', async (_req, res) => {
   } catch { res.status(503).json({ error: 'Exchange rates are unavailable' }); }
 });
 
+router.get('/', require('./localPokemonSets').createLocalPokemonSetsHandler({
+  connect: () => require('../utils/salesRepository').openConnection(db.dbPath),
+}));
+
 router.get('/', async (req, res) => {
   try {
     const { game, lang } = req.query;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Database, Play, Square, RefreshCw, Check, AlertTriangle, Cpu, Download, ListFilter, Languages, Zap } from 'lucide-react';
 import SetTree from './SetTree';
+import LocalCatalogStatusPanel from './LocalCatalogStatusPanel';
 import { useT } from '../utils/i18n';
 
 // Scan catalogs.
@@ -460,7 +461,7 @@ function OtherLanguages({ disabled, onBuild, showToast }) {
   );
 }
 
-export default function CatalogPanel({ showToast }) {
+function LegacyCatalogPanel({ showToast }) {
   const { t } = useT();
   const [catalogs, setCatalogs] = useState([]);
   const [progress, setProgress] = useState(null);
@@ -791,4 +792,16 @@ export default function CatalogPanel({ showToast }) {
       </Step>
     </div>
   );
+}
+
+export default function CatalogPanel(props) {
+  const [legacyOpen, setLegacyOpen] = useState(false);
+  return <>
+    <LocalCatalogStatusPanel />
+    <details onToggle={event => setLegacyOpen(event.currentTarget.open)}>
+      <summary style={{cursor: 'pointer', marginBottom: '1rem'}}>Scanner setup and legacy build tools</summary>
+      <p>Scanning still requires model files and a compatible index. These tools remain available while the replacement workflow is unfinished; metadata readiness does not establish scanner readiness.</p>
+      {legacyOpen && <LegacyCatalogPanel {...props} />}
+    </details>
+  </>;
 }

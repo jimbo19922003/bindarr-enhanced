@@ -1,0 +1,42 @@
+name: Validate camera activation repair
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - '.github/workflows/camera-activation-repair.yml'
+      - 'scripts/fix-camera-activation.py'
+      - 'frontend/src/utils/cameraAccess.js'
+      - 'frontend/src/utils/cameraActivation.test.js'
+permissions:
+  contents: write
+concurrency:
+  group: camera-activation-repair
+  cancel-in-progress: false
+jobs:
+  camera-repair:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/pokemon-local-first
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply hash-guarded camera activation edits
+        run: python3 scripts/fix-camera-activation.py
+      - run: git diff --check
+      - run: npm ci --prefix frontend
+      - name: Check actual activation handler behavior with controlled browser doubles
+        run: node --test frontend/src/utils/cameraActivation.test.js
+      - run: npm run lint --prefix frontend
+      - run: npm test --prefix frontend
+      - run: npm run build --prefix frontend
+      - name: Commit validated camera source to the release branch only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/components/CameraScanner.jsx
+          git commit -m 'fix: prevent silent and overlapping camera activation failures'
+          git push origin HEAD:release/pokemon-local-first

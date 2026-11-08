@@ -1,0 +1,43 @@
+name: Validate Admin local catalog status integration
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - '.github/workflows/wire-local-catalog-status.yml'
+      - 'backend/src/routes/localCatalogStatus.js'
+      - 'backend/src/routes/admin.js'
+      - 'backend/test/localCatalogStatus.test.js'
+      - 'frontend/src/components/LocalCatalogStatusPanel.jsx'
+      - 'frontend/src/components/CatalogPanel.jsx'
+      - 'frontend/test/localCatalogOverview.test.mjs'
+permissions:
+  contents: read
+concurrency:
+  group: validate-local-catalog-status
+  cancel-in-progress: true
+jobs:
+  admin-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: git diff --check
+      - run: node --check backend/src/routes/localCatalogStatus.js
+      - run: node --check backend/src/routes/admin.js
+      - run: node --test frontend/test/localCatalogOverview.test.mjs
+      - run: npm ci --prefix backend
+      - run: node --test backend/test/localCatalogStatus.test.js
+      - run: npm test --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run lint --prefix frontend
+      - run: npm test --prefix frontend
+      - run: npm run build --prefix frontend
+      - name: Confirm validation changed no tracked files
+        run: git diff --exit-code

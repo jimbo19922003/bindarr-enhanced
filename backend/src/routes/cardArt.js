@@ -36,6 +36,14 @@ router.get('/:cardId.png', (req, res) => {
 // would be editing what everybody else sees.
 router.use(authenticateToken, requireAdmin);
 
+// artwork-browser-v1: jobs run after the existing administrator gate.
+router.use('/repair', require('./artworkRepair').createArtworkRepairRouter({
+  service: require('../utils/artworkRepairService').createArtworkRepairService({
+    connect: () => require('../utils/salesRepository').openConnection(db.dbPath),
+    art: cardArt,
+  }),
+}));
+
 // Upload art for a card. Body: { image: "data:image/png;base64,..." }.
 router.post('/:cardId', async (req, res) => {
   const { cardId } = req.params;

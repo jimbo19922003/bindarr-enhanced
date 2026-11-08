@@ -5,6 +5,10 @@ const { requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
+router.use('/provider-keys', require('./providerKeys').createProviderKeysRouter({
+  connect: () => require('../utils/salesRepository').openConnection(db.dbPath),
+}));
+
 // --- Version + update check ---
 
 // backend/package.json is what the release workflow bumps, so it is the running

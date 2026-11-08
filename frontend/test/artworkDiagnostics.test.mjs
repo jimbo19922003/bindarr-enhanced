@@ -1,0 +1,6 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createArtworkRepairClient} from '../src/utils/artworkRepairClient.mjs';
+const id='tcgdex-en-30th-c-012';
+test('provider reasons survive the browser client but raw provider fields do not',async()=>{const logs=[];const client=createArtworkRepairClient({logger:event=>logs.push(event),request:async()=>({ok:true,status:200,json:async()=>({state:'unavailable',reason:'provider_chain_exhausted',attempts:[{provider:'carddex',status:'search_incomplete',secret:'PRIVATE_KEY'},{provider:'pokewallet',status:'key_missing'}]})})});const result=await client.repair(id);assert.equal(result.attempts[0].status,'search_incomplete');assert.equal(result.attempts[1].status,'key_missing');assert.equal(JSON.stringify({result,logs}).includes('PRIVATE_KEY'),false);});
+test('the default transport uses the current authenticated fetch wrapper at request time',async()=>{const original=globalThis.fetch;let calls=0;const client=createArtworkRepairClient({logger:()=>{}});try{globalThis.fetch=async()=>{calls++;return {ok:false,status:403};};assert.equal((await client.repair(id)).state,'not_authorized');assert.equal(calls,1);}finally{globalThis.fetch=original;}});

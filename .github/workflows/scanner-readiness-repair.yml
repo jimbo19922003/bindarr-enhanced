@@ -1,0 +1,65 @@
+name: Validate scanner readiness and inspect camera activation
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - '.github/workflows/scanner-readiness-repair.yml'
+      - 'scripts/fix-empty-scan-build.py'
+      - 'backend/test/catalogEmptyBuild.test.js'
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: scanner-readiness-repair
+  cancel-in-progress: false
+jobs:
+  scanner-readiness:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/pokemon-local-first
+      - name: Extract camera activation and video attachment source
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import os, re
+          lines = Path('frontend/src/components/CameraScanner.jsx').read_text().splitlines()
+          blocks = []
+          for i, line in enumerate(lines):
+              if re.search(r'^\s*(?:const|function|async function)\s+startCamera\b', line):
+                  blocks.append((max(0,i-10),min(len(lines),i+190)))
+          for i, line in enumerate(lines):
+              if 'srcObject' in line or 'onClick={startCamera}' in line or ('cameraErrorKey' in line and 'const [' not in line):
+                  blocks.append((max(0,i-12),min(len(lines),i+16)))
+          excerpt = '\n\n'.join('\n'.join(f'{i+1}: {lines[i]}' for i in range(start,end)) for start,end in blocks)[:40000]
+          if not excerpt:
+              raise SystemExit('Camera diagnostic selectors found no source')
+          fence = '`' * max(3,max((len(m.group())+1 for m in re.finditer(r'`+',excerpt)),default=3))
+          body = '## Camera activation source diagnostic\n\nRepository source excerpt only; no camera, user data or runtime permissions were accessed.\n\n' + fence + 'text\n' + excerpt + '\n' + fence + '\n'
+          Path(os.environ['RUNNER_TEMP'],'camera-activation.md').write_text(body)
+          PY
+      - name: Post bounded source diagnostic to draft PR 13
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment 13 --repo jimbo19922003/bindarr-enhanced --body-file "$RUNNER_TEMP/camera-activation.md"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply exact scanner-readiness guard
+        run: python3 scripts/fix-empty-scan-build.py
+      - run: git diff --check
+      - run: npm ci --prefix backend
+      - name: Verify the real catalog start path refuses empty artwork
+        run: node --test backend/test/catalogEmptyBuild.test.js
+      - name: Run all backend regressions
+        run: npm test --prefix backend
+      - name: Commit only validated catalog guard to the release branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/src/catalog.js
+          git commit -m 'fix: reject empty scan builds instead of reporting success'
+          git push origin HEAD:release/pokemon-local-first

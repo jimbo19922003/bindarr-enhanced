@@ -1,0 +1,43 @@
+name: Validate camera deadlines and artwork preservation
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - '.github/workflows/camera-wait-artwork-repair.yml'
+      - 'scripts/fix-camera-wait-and-artwork.py'
+      - 'frontend/src/utils/cameraWait.js'
+      - 'frontend/src/utils/cameraWait.test.js'
+      - 'backend/test/cardCacheArtwork.test.js'
+permissions:
+  contents: write
+concurrency:
+  group: camera-wait-artwork-repair
+  cancel-in-progress: false
+jobs:
+  validate-repair:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/pokemon-local-first
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: python3 scripts/fix-camera-wait-and-artwork.py
+      - run: git diff --check
+      - run: npm ci --prefix backend
+      - run: node --test backend/test/cardCacheArtwork.test.js
+      - run: npm test --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run lint --prefix frontend
+      - run: npm test --prefix frontend
+      - run: npm run build --prefix frontend
+      - name: Commit only the validated three-file source repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/src/utils/cardCache.js frontend/src/components/CameraScanner.jsx frontend/src/utils/cameraAccess.js
+          git commit -m 'fix: bound pending camera access and preserve existing artwork'
+          git push origin HEAD:release/pokemon-local-first

@@ -1,0 +1,28 @@
+name: Validate artwork failure diagnostics
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - '.github/workflows/artwork-diagnostics.yml'
+      - 'backend/src/utils/artworkRepairService.js'
+      - 'backend/src/routes/artworkRepair.js'
+      - 'frontend/src/utils/artworkRepairClient.mjs'
+      - 'backend/test/artworkDiagnostics.test.js'
+      - 'frontend/test/artworkDiagnostics.test.mjs'
+permissions:
+  contents: read
+jobs:
+  artwork-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci --prefix backend
+      - run: node --test backend/test/pokemonArtworkRepair.test.js backend/test/carddexArtwork.test.js backend/test/artworkRepairService.test.js backend/test/artworkDiagnostics.test.js frontend/test/artworkRepairClient.test.mjs frontend/test/artworkDiagnostics.test.mjs
