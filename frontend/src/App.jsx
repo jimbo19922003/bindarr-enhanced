@@ -9,10 +9,7 @@ import { isNative } from './apiBase';
 import { parseOidcReturn, takeVerifier } from './utils/nativeOidc';
 import { isSealedMutation, VALUATION_CHANGED } from './utils/sealedMutation';
 
-const Dashboard = lazy(async () => {
-  const [{ default: ExistingDashboard }, { default: PerformanceChart }] = await Promise.all([import('./components/Dashboard'), import('./components/PerformanceChart')]);
-  return { default: function DashboardWithPerformance(props) { return <><PerformanceChart statsTrigger={props.statsTrigger} /><ExistingDashboard {...props} /></>; } };
-});
+const Dashboard = lazy(() => import('./components/Dashboard'));
 const AddCards = lazy(() => import('./components/AddCards'));
 const CollectionList = lazy(() => import('./components/CollectionList'));
 const LocationManager = lazy(() => import('./components/LocationManager'));
