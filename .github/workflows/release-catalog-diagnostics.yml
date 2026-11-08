@@ -1,0 +1,54 @@
+name: Read original release build diagnostics
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths: ['.github/workflows/release-catalog-diagnostics.yml']
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+jobs:
+  diagnose:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.ref == 'refs/heads/release/pokemon-local-first'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read the original failed catalog log and repair outcome
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run view 42456535223 --repo jimbo19922003/bindarr-enhanced --log-failed > "$RUNNER_TEMP/catalog-failure.log"
+          gh run view 42492824840 --repo jimbo19922003/bindarr-enhanced --json conclusion,headSha,jobs > "$RUNNER_TEMP/repair-result.json"
+      - name: Prepare bounded diagnostic comment
+        run: |
+          python3 <<'PY'
+          import os, json, re
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          log = (root / 'catalog-failure.log').read_text(errors='replace')
+          result = json.loads((root / 'repair-result.json').read_text())
+          excerpt = log[-40000:]
+          fence = '`' * max(3, max((len(m.group()) + 1 for m in re.finditer(r'`+', excerpt)), default=3))
+          if len(fence) > 100:
+              excerpt = excerpt.replace('`', "'")
+              fence = '```'
+          steps = [f"- {job['name']}: {job.get('conclusion')}" for job in result.get('jobs', [])]
+          body = '\n'.join([
+              '## Release diagnostics',
+              '',
+              'Repair run 42492824840: ' + str(result.get('conclusion')),
+              'Repair run input commit: ' + str(result.get('headSha')),
+              *steps,
+              '',
+              'Original catalog run 42456535223: failed-step log excerpt (last 40,000 characters; may be truncated).',
+              '',
+              fence + 'text', excerpt, fence,
+              '',
+              'This diagnostic did not rebuild, import, merge or deploy anything.',
+          ])
+          (root / 'release-diagnostics.md').write_text(body)
+          PY
+      - name: Post diagnostics to draft PR 13
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment 13 --repo jimbo19922003/bindarr-enhanced --body-file "$RUNNER_TEMP/release-diagnostics.md"
