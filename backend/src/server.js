@@ -323,6 +323,12 @@ db.initDb()
       });
     }
 
+    // Auto-sync local Pokémon catalog from TCGdex when POKEMON_LOCAL_CATALOG=1.
+    // Defaults to English; configure POKEMON_CATALOG_LANGUAGES for others.
+    // Syncs on startup and periodically checks for updates.
+    const catalogAutoSync = require('./utils/catalogAutoSync');
+    catalogAutoSync.initialize(() => require('./utils/salesRepository').openConnection(db.dbPath));
+
     // Warm the scan models and catalogs. Two ONNX sessions plus an embedding table
     // take ~400 ms to load; paying that on the first scan instead would make the
     // slowest scan of a session the one a user is most likely to judge. Not awaited
