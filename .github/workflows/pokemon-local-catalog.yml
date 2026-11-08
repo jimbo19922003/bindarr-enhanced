@@ -1,0 +1,30 @@
+name: Pokemon local catalog storage tests
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths:
+      - 'backend/src/utils/pokemonLocalCatalog*'
+      - '.github/workflows/pokemon-local-catalog.yml'
+  pull_request:
+    paths:
+      - 'backend/src/utils/pokemonLocalCatalog*'
+      - '.github/workflows/pokemon-local-catalog.yml'
+permissions:
+  contents: read
+jobs:
+  catalog-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated SQLite test dependency
+        run: npm install --prefix "$RUNNER_TEMP/catalog-deps" --no-audit --no-fund sqlite3@6.0.1
+      - name: Validate storage syntax and regression tests
+        env:
+          NODE_PATH: ${{ runner.temp }}/catalog-deps/node_modules
+        run: |
+          node --check backend/src/utils/pokemonLocalCatalog.js
+          node --test backend/src/utils/pokemonLocalCatalog.test.js
