@@ -111,6 +111,8 @@ router.get('/stats', async (req, res) => {
   } catch (error) { failure(res, error, 'Failed to compute statistics'); }
 });
 
+router.get('/stats/performance', require('../utils/performanceHistory').createPerformanceHandler({ db }));
+
 // Historical portfolio reconstruction is unchanged by this current-value fix.
 router.get('/stats/history', require('../utils/portfolioTimeline').createHistoryHandler({ db, resolveCardPrice, summarizeHoldings }));
 router.get('/stats/networth', async (req, res) => {
