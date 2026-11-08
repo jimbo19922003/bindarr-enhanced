@@ -5,6 +5,7 @@ const {resolveLanguage} = require('./localPokemonSets');
 function createLocalCatalogStatusRouter({connect, modeEnabled = () => process.env.POKEMON_LOCAL_CATALOG === '1'}) {
   const router = express.Router();
   router.use((req, res, next) => req.user?.role === 'admin' ? next() : res.status(req.user ? 403 : 401).json({error: 'Administrator access required'}));
+  router.use('/install', require('./localCatalogInstall').createLocalCatalogInstallRouter({connect}));
   router.get('/', async (req, res) => {
     res.set('Cache-Control', 'private, no-store');
     const language = resolveLanguage(req.query.lang);

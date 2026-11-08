@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import LocalCatalogImportPanel from './LocalCatalogImportPanel';
 
 export default function LocalCatalogStatusPanel() {
   const [language, setLanguage] = useState('en');
@@ -30,7 +31,7 @@ export default function LocalCatalogStatusPanel() {
     {error && <p role="alert">{error} No readiness claim is available.</p>}
     {data && <>
       <p>Local API preview: {data.localModeEnabled ? 'enabled' : 'disabled; existing provider paths remain active'}.</p>
-      {!data.snapshot ? <p role="status">No local snapshot is installed for this language. A successful repository build does not automatically install it here. Sync/import controls are not yet connected.</p> : <>
+      {!data.snapshot ? <p role="status">No local snapshot is installed for this language. A successful repository build does not automatically install it here. Use the staged-bundle preview/install controls below; automatic delivery is not connected.</p> : <>
         <p>Source revision: <code>{data.snapshot.commit}</code><br />Imported (database time): {data.snapshot.importedAt}</p>
         <p>Snapshot metadata: {data.summary.metadataCards} cards. Cached rows: {data.summary.cachedRows}. Artwork references: {data.summary.artworkReferences}. Missing references: {data.summary.missingReferences}. Missing cache rows: {data.summary.missingCacheRows}.</p>
         <div className="collection-table-wrapper" style={{maxHeight:260,overflow:'auto'}}>
@@ -43,5 +44,6 @@ export default function LocalCatalogStatusPanel() {
       <p>Image downloads and local image files are not verified by this status endpoint. An artwork URL may still fail to load. Scanner readiness is not verified here.</p>
       <p>Planned lookup order: local TCGdex cache, then CardDex, then PokéWallet. External fallback and image-repair controls are not connected yet.</p>
     </>}
+    <LocalCatalogImportPanel language={language} onImported={() => setRefresh(value => value + 1)} />
   </section>;
 }
