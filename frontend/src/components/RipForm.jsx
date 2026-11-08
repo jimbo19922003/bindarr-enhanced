@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { langCode } from '../utils/languages';
 import { draftOwnership, candidateOwnership } from '../utils/ripOwnership';
+import { sameDraftCard, stackRipCard } from '../utils/ripStacking';
 import CardImage from './CardImage';
 let nextLine = 0;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -58,8 +59,11 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
   const addCard = card => {
     const amount = Number(card.price_trend), sourceCurrency = String(card.price_currency || 'USD').toUpperCase(), sequence = ++nextLine;
     const price = amount > 0 && Number.isFinite(amount) && sourceCurrency === currency ? amount.toFixed(2) : '';
-    setPulls(current => [{ key: `new-${sequence}`, added_order: sequence, card_id: card.id, name: card.name, number: card.number || '', set_name: card.set_name || selected?.name || '',
-      image_url: /^https?:\/\//.test(card.image_url || '') ? card.image_url : '', quantity: '1', current_value: price, value_at_opening: '', bulk: false, lineMode: false, original_price: amount > 0 ? `${sourceCurrency} ${amount.toFixed(2)}` : '' }, ...current]);
+    const incoming = { key: `new-${sequence}`, added_order: sequence, card_id: card.id, name: card.name, number: card.number || '', set_name: card.set_name || selected?.name || '',
+      image_url: /^https?:\/\//.test(card.image_url || '') ? card.image_url : '', quantity: '1', current_value: price, value_at_opening: '', bulk: false, lineMode: false, original_price: amount > 0 ? `${sourceCurrency} ${amount.toFixed(2)}` : '',
+      printing: card.printing || 'Normal', language: card.language || product.language || 'English', condition: 'Near Mint' };
+    if (pulls.some(pull => sameDraftCard(pull, incoming) && Number(pull.quantity) >= 5000)) { showToast('A pull can contain at most 5,000 copies.'); return; }
+    setPulls(current => stackRipCard(current, incoming));
     setQuery(''); setMatches([]); inputRef.current?.focus();
   };
   const lookup = async () => {
@@ -128,7 +132,7 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
           {!pull.bulk && <small style={{ display: 'block' }}>{pull.id ? `${currency} ${pull.current_value || '—'}` : pull.original_price ? `${pull.original_price} source quote; valued in ${currency} on save` : 'Unpriced'}</small>}
           <label>{t('card.quantity')}<input className="input-control" type="number" min="1" max="5000" required value={pull.quantity} onChange={e => editPull(pull.key, 'quantity', e.target.value)} /></label>
           {pull.bulk && <label>{pull.id && !pull.lineMode ? t('sealed.pullValue') : t('sealed.lineValue')}<input className="input-control" value={pull.id && !pull.lineMode ? pull.current_value : pull.line_value} onChange={e => editPull(pull.key, pull.id && !pull.lineMode ? 'current_value' : 'line_value', e.target.value)} /></label>}
-          <button className="btn btn-secondary" type="button" onClick={() => remove(pull)}>{pull.id ? 'Remove from rip' : t('search.undo')}</button>
+          <button className="btn btn-secondary" type="button" onClick={() => remove(pull)}>{pull.id ? 'Remove from rip' : Number(pull.quantity) > 1 ? 'Remove line' : t('search.undo')}</button>
         </div>)}
       </div>
       {removed.length > 0 && <button className="btn btn-secondary" type="button" onClick={() => { const [last, ...rest] = removed; setPulls(current => [last, ...current]); setRemoved(rest); }}>Undo last removal</button>}
