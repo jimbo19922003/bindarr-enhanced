@@ -1,17 +1,19 @@
+// opening-sale-integration-v1
 'use strict';
 const { calculateSale } = require('./costBasis');
+const openingIntegration = require('./salesOpeningIntegration');
 const schema = `
 CREATE TABLE IF NOT EXISTS card_acquisition_lot (
  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id),
  collection_id INTEGER NOT NULL UNIQUE REFERENCES collection(id) ON DELETE RESTRICT,
- source TEXT NOT NULL CHECK(source IN ('direct','unknown')),
+ source TEXT NOT NULL CHECK(source IN ('direct','unknown','opening')),
  original_quantity INTEGER NOT NULL CHECK(original_quantity > 0),
  remaining_quantity INTEGER NOT NULL CHECK(remaining_quantity >= 0 AND remaining_quantity <= original_quantity),
  original_basis_cents INTEGER, remaining_basis_cents INTEGER,
  currency TEXT NOT NULL CHECK(currency = 'USD'),
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  CHECK((source = 'unknown' AND original_basis_cents IS NULL AND remaining_basis_cents IS NULL) OR
- (source = 'direct' AND original_basis_cents >= 0 AND remaining_basis_cents >= 0 AND remaining_basis_cents <= original_basis_cents AND original_basis_cents IS NOT NULL AND remaining_basis_cents IS NOT NULL))
+ (source IN ('direct','opening') AND original_basis_cents >= 0 AND remaining_basis_cents >= 0 AND remaining_basis_cents <= original_basis_cents AND original_basis_cents IS NOT NULL AND remaining_basis_cents IS NOT NULL))
 );
 CREATE TABLE IF NOT EXISTS card_sale_record (
  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id),
@@ -45,13 +47,16 @@ function createSalesRepository({ connect }) {
     const db = await connect(); let began = false;
     try {
       await db.run('BEGIN IMMEDIATE'); began = true;
-      await db.exec(schema);
+      await openingIntegration.prepareSchema(db, schema);
       const result = await work(db);
       await db.run('COMMIT'); began = false; return result;
     } catch (error) { if (began) await db.run('ROLLBACK').catch(() => {}); throw error; }
     finally { await db.close(); }
   }
   return {
+    createOpeningLot(userId, collectionId) {
+      return transaction(userId, db => openingIntegration.createOpeningLot(db, userId, collectionId));
+    },
     createLot(userId, { collectionId, source = 'unknown', basisCents = null }) {
       positive(collectionId, 'collection ID');
       if (!['direct', 'unknown'].includes(source)) throw problem(400, 'Opening allocations require a separate finalized allocation workflow');
@@ -61,6 +66,7 @@ function createSalesRepository({ connect }) {
         const entry = await db.get("SELECT * FROM collection WHERE id = ? AND user_id = ? AND list_type = 'collection'", [collectionId, userId]);
         if (!entry) throw problem(404, 'Owned collection copy not found');
         positive(entry.quantity, 'owned quantity');
+        await openingIntegration.rejectFrozenCopy(db, collectionId);
         if (await db.get('SELECT id FROM card_acquisition_lot WHERE collection_id = ?', [collectionId])) throw problem(409, 'Acquisition lot already exists');
         if (source === 'direct') {
           const pulls = await db.all('SELECT collection_id, filed_ids FROM sealed_pull WHERE user_id = ?', [userId]);
@@ -76,8 +82,8 @@ function createSalesRepository({ connect }) {
       if (typeof soldOn !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(soldOn) || !Number.isFinite(Date.parse(soldOn)) || new Date(soldOn).toISOString().slice(0, 10) !== soldOn) throw problem(400, 'Invalid sale date');
       const request = JSON.stringify({ lotId, soldOn, quantity, proceedsCents, feesCents });
       return transaction(userId, async db => {
-        const prior = await db.get('SELECT request_json, result_json FROM card_sale_record WHERE user_id = ? AND request_key = ?', [userId, requestKey]);
-        if (prior) { if (prior.request_json !== request) throw problem(409, 'Idempotency key reused with different sale details'); return JSON.parse(prior.result_json); }
+        const prior = await db.get('SELECT id, request_json, result_json FROM card_sale_record WHERE user_id = ? AND request_key = ?', [userId, requestKey]);
+        if (prior) { if (prior.request_json !== request) throw problem(409, 'Idempotency key reused with different sale details'); return { ...JSON.parse(prior.result_json), saleId: prior.id }; }
         const lot = await db.get('SELECT * FROM card_acquisition_lot WHERE id = ? AND user_id = ?', [lotId, userId]);
         if (!lot) throw problem(404, 'Acquisition lot not found');
         const entry = await db.get("SELECT * FROM collection WHERE id = ? AND user_id = ? AND list_type = 'collection'", [lot.collection_id, userId]);
@@ -92,4 +98,4 @@ function createSalesRepository({ connect }) {
     }
   };
 }
-module.exports = { createSalesRepository, openConnection };
+module.exports = { createSalesRepository, openConnection, schema };
