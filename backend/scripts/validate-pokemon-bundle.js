@@ -3,18 +3,21 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),{join}
 const {createCompiledSnapshotLoader}=require('../src/utils/pokemonCatalogBundle');
 const {normalize,createPokemonLocalCatalog}=require('../src/utils/pokemonLocalCatalog');
 const {openConnection}=require('../src/utils/salesRepository');
-async function correctionReport(directory){
+const ASIAN=new Set(['ja','ko','zh-tw','id','th','zh-cn']);
+async function correctionReport(directory,languages=['en','ja']){
  const file=join(directory,'UPSTREAM-CORRECTIONS.json');let stat;
- try{stat=await fs.lstat(file);}catch(error){if(error.code==='ENOENT')return [];throw error;}
- assert.ok(stat.isFile()&&!stat.isSymbolicLink()&&stat.size<=4096,'Invalid source correction report');
- const report=JSON.parse(await fs.readFile(file,'utf8'));assert.equal(report.schemaVersion,1);assert.ok(Array.isArray(report.corrections));assert.equal(report.corrections.length,1);
- const item=report.corrections[0];assert.equal(item.path,'data-asia/BW/BW3b.ts');assert.equal(item.beforeGitBlob,'e731fefb7dffb273cc92ae0415a063f7fe0680c8');assert.equal(item.afterGitBlob,'4fb8997cefb0ddd743cca660744201b35b800c3f');assert.equal(typeof item.applied,'boolean');
- return [{path:item.path,beforeGitBlob:item.beforeGitBlob,afterGitBlob:item.afterGitBlob,applied:item.applied}];
+ try{stat=await fs.lstat(file);}catch(error){if(error.code==='ENOENT')return {sourceCorrections:[],compilationScope:null};throw error;}
+ assert.ok(stat.isFile()&&!stat.isSymbolicLink()&&stat.size<=8192,'Invalid source correction report');
+ const report=JSON.parse(await fs.readFile(file,'utf8'));assert.equal(report.schemaVersion,1);assert.ok(Array.isArray(report.corrections));assert.equal(report.corrections.length,languages.some(l=>ASIAN.has(l))?1:0);
+ const sourceCorrections=report.corrections.map(item=>{assert.equal(item.path,'data-asia/BW/BW3b.ts');assert.equal(item.beforeGitBlob,'e731fefb7dffb273cc92ae0415a063f7fe0680c8');assert.equal(item.afterGitBlob,'4fb8997cefb0ddd743cca660744201b35b800c3f');assert.equal(typeof item.applied,'boolean');return {path:item.path,beforeGitBlob:item.beforeGitBlob,afterGitBlob:item.afterGitBlob,applied:item.applied};});
+ const scope=report.compilerScope||null;
+ if(scope){assert.deepEqual(scope.languages,languages);assert.deepEqual(scope.historyFolders,[...new Set(languages.map(l=>ASIAN.has(l)?'data-asia':'data'))]);assert.equal(scope.sourceEdits?.length,2);for(const [index,name,hash] of [[0,'server/compiler/index.ts','582d190542cac47c1a0ff9b378c72ad12d8e3ec5'],[1,'server/compiler/utils/util.ts','a3279e95b7d05542722121396c01bbf3b59c0a6d']]){assert.equal(scope.sourceEdits[index].path,name);assert.equal(scope.sourceEdits[index].beforeGitBlob,hash);assert.match(scope.sourceEdits[index].afterGitBlob,/^[a-f0-9]{40}$/);}}
+ return {sourceCorrections,compilationScope:scope};
 }
 async function main(){
  const [directory,commit,list,...extra]=process.argv.slice(2);if(!directory||!commit||!list||extra.length)throw new Error('Usage: node validate-pokemon-bundle.js <bundle-dir> <commit> <languages>');
  const languages=list.split(',');if(new Set(languages).size!==languages.length)throw new Error('Duplicate validation language');
- const sourceCorrections=await correctionReport(directory);
+ const audit=await correctionReport(directory,languages);
  const temporary=await fs.mkdtemp(join(tmpdir(),'catalog-validation-')),file=join(temporary,'catalog.db'),reports=[];
  try{
   await fs.writeFile(file,'');const connect=()=>openConnection(file),db=await connect();
@@ -29,7 +32,7 @@ async function main(){
    reports.push({language,physicalCards:imported.card_count,physicalSets:imported.set_count,withArtwork:data.cards.filter(c=>c.image_url).length,scannerIdPreserved:true,priceColumnsPreserved:true,collectionReferencePreserved:true,repeatImportUnchanged:true});
   }
  }finally{await fs.rm(temporary,{recursive:true,force:true});}
- console.log(JSON.stringify({upstreamCommit:commit,sourceCorrections,temporaryDatabaseOnly:true,languages:reports},null,2));
+ console.log(JSON.stringify({upstreamCommit:commit,...audit,temporaryDatabaseOnly:true,languages:reports},null,2));
 }
 if(require.main===module)main().catch(error=>{console.error(error.message);process.exitCode=1;});
 module.exports={main,correctionReport};

@@ -7,9 +7,9 @@ on:
         required: false
         default: ''
       languages:
-        description: 'Explicit comma-separated catalog languages'
+        description: 'Explicit comma-separated catalog languages; English only by default'
         required: true
-        default: 'en,ja'
+        default: 'en'
   schedule:
     - cron: '17 */6 * * *'
   push:
@@ -18,6 +18,7 @@ on:
       - '.github/workflows/build-pokemon-catalog.yml'
       - 'ci/tcgdex-compiler.Dockerfile'
       - 'ci/compile-tcgdex.sh'
+      - 'ci/apply-catalog-corrections.js'
       - 'backend/scripts/validate-pokemon-bundle.js'
 permissions:
   contents: read
@@ -41,7 +42,7 @@ jobs:
         id: input
         env:
           REVISION: ${{ inputs.upstream_commit || '' }}
-          LANGUAGES: ${{ inputs.languages || 'en,ja' }}
+          LANGUAGES: ${{ inputs.languages || 'en' }}
         run: |
           node <<'NODE'
           const fs=require('node:fs');
@@ -51,12 +52,12 @@ jobs:
           if(!languages.length||new Set(languages).size!==languages.length||languages.some(l=>!supported.has(l)))throw new Error('Invalid languages');
           fs.appendFileSync(process.env.GITHUB_OUTPUT,`ref=${revision||'master'}\ncsv=${languages.join(',')}\nspace=${languages.join(' ')}\n`);
           NODE
-      - name: Verify application catalog regressions before compiling upstream
+      - name: Verify catalog and compiler-scope regressions before compiling upstream
         env:
           NODE_PATH: ${{ runner.temp }}/catalog-deps/node_modules
         run: |
           npm install --prefix "$RUNNER_TEMP/catalog-deps" --no-audit --no-fund sqlite3@6.0.1
-          node --test app/backend/src/utils/pokemonLocalCatalog.test.js app/backend/src/utils/pokemonCatalogSync.test.js app/backend/src/utils/pokemonCatalogBundle.test.js
+          node --test app/backend/src/utils/pokemonLocalCatalog.test.js app/backend/src/utils/pokemonCatalogSync.test.js app/backend/src/utils/pokemonCatalogBundle.test.js app/backend/test/catalogSourceCorrections.test.js app/backend/test/catalogLanguageScope.test.js
       - name: Fetch the upstream repository without persisting credentials
         uses: actions/checkout@v4
         with:
@@ -73,7 +74,7 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
       - name: Build isolated compiler runtime
         run: docker build -f app/ci/tcgdex-compiler.Dockerfile -t bindarr-catalog-compiler app/ci
-      - name: Compile without production credentials or application database mounts
+      - name: Compile only requested languages without production credentials or database mounts
         env:
           BUNDLE_LANGUAGES: ${{ steps.input.outputs.space }}
         run: |
