@@ -2,56 +2,40 @@ name: Validate manual Admin catalogue installation
 on:
   push:
     branches: ['release/pokemon-local-first']
-    paths:
-      - '.github/workflows/wire-local-catalog-install.yml'
-      - 'scripts/wire-local-catalog-install.py'
-      - 'backend/src/utils/pokemonBundleInstall.js'
-      - 'backend/src/routes/localCatalogInstall.js'
-      - 'backend/test/pokemonBundleInstall.test.js'
-      - 'backend/test/localCatalogInstall.test.js'
-      - 'frontend/src/components/LocalCatalogImportPanel.jsx'
+  workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 concurrency:
-  group: wire-local-catalog-install
+  group: manual-catalog-install-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   manual-install:
-    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.actor != 'github-actions[bot]'
+    if: github.repository == 'jimbo19922003/bindarr-enhanced'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: release/pokemon-local-first
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: python3 scripts/wire-local-catalog-install.py
-      - name: Verify wiring is repeat-safe
+      - name: Verify committed wiring and repeat safety without changing tracked files
         run: |
-          git diff -- backend/src/routes/localCatalogStatus.js frontend/src/components/LocalCatalogStatusPanel.jsx > /tmp/catalog-install-first.diff
           python3 scripts/wire-local-catalog-install.py
-          git diff -- backend/src/routes/localCatalogStatus.js frontend/src/components/LocalCatalogStatusPanel.jsx > /tmp/catalog-install-second.diff
-          cmp /tmp/catalog-install-first.diff /tmp/catalog-install-second.diff
-      - run: git diff --check
+          git diff --exit-code
+          python3 scripts/wire-local-catalog-install.py
+          git diff --exit-code
       - run: node --check backend/src/utils/pokemonBundleInstall.js
       - run: node --check backend/src/routes/localCatalogInstall.js
       - run: npm ci --prefix backend
       - run: node --test backend/test/pokemonBundleInstall.test.js backend/test/localCatalogInstall.test.js backend/test/localCatalogStatus.test.js
-      - run: npm test --prefix backend
+      - name: Backend tests with failure-only Scryfall child-server diagnostics
+        working-directory: backend
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/backend/test/e2e/trace-server.cjs
+        run: npm test
       - run: npm ci --prefix frontend
       - run: npm run lint --prefix frontend
       - run: npm test --prefix frontend
       - run: npm run build --prefix frontend
-      - name: Commit validated import route and UI integration only if changed
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/src/routes/localCatalogStatus.js frontend/src/components/LocalCatalogStatusPanel.jsx
-          if git diff --cached --quiet; then
-            echo 'Catalogue installation wiring is already current.'
-            exit 0
-          fi
-          git commit -m 'feat: connect confirmed staged-bundle installation in Admin'
-          git push origin HEAD:release/pokemon-local-first
