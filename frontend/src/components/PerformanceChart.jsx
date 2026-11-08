@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useT } from '../utils/i18n';
+import BenchmarkComparison from './BenchmarkComparison';
 const ranges = ['7d', '30d', '90d', 'ytd', '1y', '5y', 'all'];
 export default function PerformanceChart({ statsTrigger }) {
   const { locale } = useT();
@@ -14,6 +15,7 @@ export default function PerformanceChart({ statsTrigger }) {
     const controller = new AbortController(); let current = true;
     setReport(null); setLoading(true); setError('');
     const params = new URLSearchParams({ range, currency: 'USD' });
+    if (view === 'sp500') params.set('benchmark', 'sp500');
     fetch(`/api/stats/performance?${params}`, { signal: controller.signal, cache: 'no-store' })
       .then(async response => {
         const data = await response.json();
@@ -25,7 +27,7 @@ export default function PerformanceChart({ statsTrigger }) {
       .catch(err => { if (current && err.name !== 'AbortError') setError(err.message); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; controller.abort(); };
-  }, [range, statsTrigger, refresh]);
+  }, [range, statsTrigger, refresh, view]);
   const money = value => new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(value);
   const percent = value => `${Number(value).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
   const day = value => new Intl.DateTimeFormat(locale, { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value}T00:00:00Z`));
@@ -38,7 +40,7 @@ export default function PerformanceChart({ statsTrigger }) {
       <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>All games: current holdings today and saved daily history in USD. Gain is compared with each day's recorded cost, not a cash-flow-adjusted investment return. These controls apply only to this panel.</p>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
         <div role="group" aria-label="Portfolio timeline view" style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          {[['value', 'Value + cost'], ['gain', 'Gain / loss ($)'], ['gainPct', 'Gain / loss (%)']].map(([id, label]) => (
+          {[['value', 'Value + cost'], ['gain', 'Gain / loss ($)'], ['gainPct', 'Gain / loss (%)'], ['sp500', 'S&P comparison']].map(([id, label]) => (
             <button key={id} type="button" aria-pressed={view === id} className={`btn ${view === id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView(id)}>{label}</button>
           ))}
         </div>
@@ -50,7 +52,7 @@ export default function PerformanceChart({ statsTrigger }) {
       {loading ? <p role="status">Loading daily snapshots...</p> : error ? <p role="alert">{error}</p> : !rows.length ? <p>No saved snapshots for this range. Earlier values are not reconstructed.</p> : <>
         <p>{latest.isLive ? 'Current holdings today' : 'Latest saved snapshot'}: {day(latest.date)} - value {money(latest.value)}, cost {money(latest.invested)}, gain {money(latest.gain)} ({latest.gainPct == null ? 'percentage unavailable: zero recorded cost' : percent(latest.gainPct)}).</p>
         {rows.length === 1 && <p style={{ color: 'var(--text-secondary)' }}>One daily snapshot is available. The dot shows the available observation; a history line will develop as more days are saved.</p>}
-        {view === 'gainPct' && rows.every(row => row.gainPct == null) ? <p>Gain percentage is unavailable because these snapshots have no recorded cost.</p> : <div style={{ width: '100%', height: 280, minWidth: 0 }}>
+        {view === 'sp500' ? <BenchmarkComparison benchmark={report.sp500} /> : view === 'gainPct' && rows.every(row => row.gainPct == null) ? <p>Gain percentage is unavailable because these snapshots have no recorded cost.</p> : <div style={{ width: '100%', height: 280, minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ top: 12, right: 20, left: 12, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-glass)" />
             <XAxis dataKey="date" tickFormatter={day} minTickGap={32} stroke="var(--text-secondary)" />
