@@ -36,7 +36,7 @@ export default function PerformanceChart({ statsTrigger, game = '' }) {
   const percent = value => `${Number(value).toLocaleString(locale,{maximumFractionDigits:2})}%`;
   const date = (value,full=false) => new Intl.DateTimeFormat(locale,{timeZone:'UTC',month:'short',day:'numeric',...(full ? {year:'numeric'} : {})}).format(new Date(`${value}T00:00:00Z`));
   const rows = report?.portfolio || [];
-  const labels = {value:'Market value',invested:'Remaining basis',gain:'Total Loss/Gain',gainPct:'Loss/Gain %',totalGain:'Total Loss/Gain',realizedGain:'Realized Loss/Gain',unrealizedGain:'Unrealized Loss/Gain'};
+  const labels = {value:'Market value',invested:'Investment Cost',gain:'Total Loss/Gain',gainPct:'Loss/Gain %',totalGain:'Total Loss/Gain',realizedGain:'Realized Loss/Gain',unrealizedGain:'Unrealized Loss/Gain'};
   const series = view === 'value' ? ['value','invested'] : view === 'gain' ? ['totalGain','realizedGain','unrealizedGain'] : [view];
   const incomplete = rows.some(row => row.staleRates || row.unpricedCards > 0 || row.unpricedSealed > 0 || row.unknownBasisCount > 0 || row.unknownSaleCount > 0);
   return <section className="glass-panel portfolio-timeline" aria-label="Portfolio timeline" aria-busy={loading}>
