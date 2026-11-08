@@ -1,0 +1,59 @@
+name: Inspect provider integration source
+on:
+  push:
+    branches: ['release/pokemon-local-first']
+    paths: ['.github/workflows/provider-source-inspection.yml']
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: provider-source-inspection
+  cancel-in-progress: false
+jobs:
+  inspect-source:
+    if: github.repository == 'jimbo19922003/bindarr-enhanced' && github.ref == 'refs/heads/release/pokemon-local-first'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Publish only allowlisted tracked source, never runtime configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 <<'PY'
+          import hashlib, os, re, subprocess, tempfile, time
+          from pathlib import Path
+          paths = [
+              'frontend/src/components/AdminPanel.jsx',
+              'frontend/src/components/Settings.jsx',
+              'backend/src/routes/collection.js',
+          ]
+          revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          prepared = []
+          for name in paths:
+              raw = subprocess.check_output(['git', 'show', revision + ':' + name])
+              if len(raw) > 240000:
+                  raise SystemExit('Source exceeds bounded inspection limit: ' + name)
+              text = raw.decode('utf-8')
+              chunks = [text[start:start + 8000] for start in range(0, len(text), 8000)]
+              prepared.append((name, hashlib.sha256(raw).hexdigest(), chunks))
+          with tempfile.TemporaryDirectory(dir=os.environ['RUNNER_TEMP']) as temporary:
+              for name, digest, chunks in prepared:
+                  for index, chunk in enumerate(chunks, 1):
+                      longest = max((len(match.group()) for match in re.finditer(r'`+', chunk)), default=0)
+                      fence = '`' * max(3, longest + 1)
+                      body = (
+                          '## Provider source inspection: ' + name + ' (' + str(index) + '/' + str(len(chunks)) + ')\n\n'
+                          + 'Revision: `' + revision + '`. File SHA-256: `' + digest + '`.\n'
+                          + 'Tracked source only. No runtime files, database, saved credentials or provider requests were accessed.\n\n'
+                          + '<details><summary>Source section</summary>\n\n'
+                          + fence + 'text\n' + chunk + '\n' + fence + '\n\n</details>\n'
+                      )
+                      report = Path(temporary) / 'section.md'
+                      report.write_text(body, encoding='utf-8')
+                      subprocess.run(['gh', 'pr', 'comment', '13', '--repo', 'jimbo19922003/bindarr-enhanced', '--body-file', str(report)], check=True)
+                      time.sleep(1.5)
+          PY
