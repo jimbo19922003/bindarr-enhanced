@@ -1,19 +1,21 @@
-# Missing English artwork repair: first increment
+# Missing English artwork repair
 
-This adds the server-side repair core and a dry-run-first CLI. Automatic browser repair and the CardDex adapter are NOT wired by this commit. There is no guarantee PokéWallet has an image for a particular card. CardDex may share TCGdex image gaps.
+The repair command now follows local artwork, then CardDex, then PokéWallet emergency fallback. Automatic browser repair is still NOT connected. No provider is guaranteed to have an image for a particular printing.
 
-From the repository root, with the same environment and database configuration as the running backend:
+From the repository root, with the running backend's database configuration:
 
     node backend/scripts/repair-pokemon-artwork.js tcgdex-en-30th-c-012
 
-Verify the printed database path and printing identity before explicitly applying:
+The preview lists the provider attempts. CardDex uses anonymous requests with no PokéWallet key. PokéWallet is contacted only after CardDex has no verified candidate or fails. Preview matches metadata but does not download image bytes. It can update response caches and provider request counters.
+
+Only after reviewing the database path and printing identity:
 
     node backend/scripts/repair-pokemon-artwork.js --apply tcgdex-en-30th-c-012
 
-Preview performs authenticated provider metadata requests and may update shared response caches and request-budget counters; it does not alter card records or artwork. The configured database PokéWallet key takes precedence over POKEWALLET_API_KEY. Never paste a key into command arguments or chat.
+Apply can try the emergency provider if downloading CardDex artwork fails. The existing image writer decodes and bounds the resulting image and installs a PNG atomically without replacing existing local art. It does not change card IDs, prices, collection rows or purchase records. Image decoder rejection after download does not yet attempt another provider. Failed full-chain attempts have a retry time; older PokéWallet-only negative attempts do not suppress the new CardDex lookup.
 
-Only cards in the active English physical catalogue with no provider image reference are eligible. A unique English set and a complete search result page must agree on printing identity. No name-only guess, cross-language substitution, sealed product or ambiguous variant is accepted.
+CardDex metadata responses are cached for one hour; request reservations are persisted with conservative ceilings of 25 per minute and 4,500 per day, including image downloads. A 429/503 establishes a shared CardDex cooldown. These limits apply to this adapter, not unrelated future CardDex clients. HTTPS image destinations are restricted to images.carddex.dev and English assets.tcgdex.net paths, with no redirects, URL credentials, query strings or arbitrary browser-supplied URL. Printing identity, English language context and complete result coverage are required.
 
-Image bytes stay server-side, are size/pixel/type/aspect bounded, decoded and re-encoded as PNG, and installed atomically without overwriting existing art. They use the existing local card-art serving path. Card IDs, card_cache metadata/price fields, collection quantities and purchase history are not modified. Apply records failures with a retry time. Existing cached art wins on later attempts.
+Data by CardDex: https://carddex.dev. Attribution is visible on Add Cards. PokéWallet keeps its existing database/environment key configuration and shared cache/budget tables. No key is sent to CardDex.
 
-Requests use the existing PokéWallet cache and budget tables, including hourly/day counters and shared cooldowns. Transport and quota integration still need additional regression coverage before automatic UI activation. Generated artwork is local instance data, not a repository asset; do not commit it or the metadata ZIP. Refresh the browser after a successful repair so its card-art index reloads. These files are not automatically included in scanner indexes, and provider-reference counts do not count custom/local artwork.
+After a CLI repair, restart the backend and refresh the browser: the existing card-art index cache is process-local. Repaired images are instance files, not repository assets or automatically updated scanner indexes. Do not commit artwork or the metadata ZIP. Provider-reference counts do not include locally cached contributed/fallback art.
