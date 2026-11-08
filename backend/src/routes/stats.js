@@ -1,621 +1,221 @@
 const express = require('express');
 const db = require('../db');
 const { resolveCardPrice, isVintageSet, parseSqliteUtc } = require('../utils/priceHelpers');
-const { summarizeHoldings, emptyHoldings, centsToMoney } = require('../utils/sealedInventory');
+const { summarizeHoldings, emptyHoldings } = require('../utils/sealedInventory');
 const { summarizePerformance } = require('../utils/openingPerformance');
-
+const { createReportingValuation } = require('../utils/reportingValuation');
 const router = express.Router();
+const round = n => Number(n.toFixed(2));
 
-// Remaining sealed stock for this user. Archived products and lots are out,
-// and a missing market quote stays null so it is not added as zero.
-async function sealedHoldingRows(userId) {
-  return db.all(
-    `SELECT l.remaining_quantity AS remainingQuantity,
-            l.remaining_cost_cents AS remainingCostCents,
-            l.currency AS currency,
-            p.market_price_cents AS marketPriceCents,
-            p.market_currency AS marketCurrency
-       FROM sealed_lot l
-       JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
-      WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL`,
-    [userId]
-  );
+async function cardRows(userId, game) {
+  return db.all(`SELECT cc.*, cc.id AS card_id, c.id AS entry_id, c.quantity, c.purchase_price,
+    c.added_at, c.printing, c.condition, c.market_value, c.language, c.is_trade, c.favorite,
+    c.list_type, c.grader, c.grade, c.location_id, l.name AS location_name, l.type AS location_type
+    FROM collection c JOIN card_cache cc ON cc.id = c.card_id
+    LEFT JOIN locations l ON l.id = c.location_id
+    WHERE c.user_id = ? AND c.list_type = 'collection'${game ? ' AND cc.game = ?' : ''}`,
+  game ? [userId, game] : [userId]);
+}
+
+async function sealedData(userId, game, valuation) {
+  if (game && game !== 'pokemon') return { holdings: emptyHoldings(), spent: 0, lines: [] };
+  const lots = await db.all(`SELECT l.*, p.name, p.set_id, p.set_name, p.image_url, p.product_type,
+    p.market_price_cents, p.market_currency FROM sealed_lot l
+    JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
+    WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL`, [userId]);
+  let spent = 0;
+  const holdingsRows = [];
+  const byProduct = new Map();
+  for (const lot of lots) {
+    spent += (await valuation.cents(lot.total_cost_cents, lot.currency)) / 100;
+    const price = await valuation.cents(lot.market_price_cents, lot.market_currency || 'USD');
+    holdingsRows.push({ remainingQuantity: lot.remaining_quantity,
+      remainingCostCents: await valuation.cents(lot.remaining_cost_cents, lot.currency),
+      currency: valuation.target, marketPriceCents: price, marketCurrency: valuation.target });
+    if (!(lot.remaining_quantity > 0)) continue;
+    const previous = byProduct.get(lot.product_id);
+    if (previous) previous.remaining += lot.remaining_quantity;
+    else byProduct.set(lot.product_id, { id: lot.product_id, name: lot.name, set_id: lot.set_id,
+      set_name: lot.set_name || '', image_url: lot.image_url || '', product_type: lot.product_type,
+      market_price_cents: price, market_price: price == null ? null : (price / 100).toFixed(2),
+      market_currency: valuation.target, remaining: lot.remaining_quantity });
+  }
+  const lines = [...byProduct.values()].map(line => ({ ...line,
+    line_value: line.market_price_cents == null ? null : round(line.market_price_cents * line.remaining / 100) }));
+  return { holdings: summarizeHoldings(holdingsRows), spent: round(spent), lines };
+}
+
+async function currentPortfolio(userId, game, valuation) {
+  const raw = await cardRows(userId, game);
+  const cards = [];
+  let cardValueCents = 0, cardSpentCents = 0, totalCards = 0;
+  const byGame = {};
+  for (const source of raw) {
+    const card = await valuation.card(source);
+    card.purchase_price = await valuation.money(source.purchase_price || 0, 'USD');
+    const quantity = source.quantity || 1;
+    const unitCents = Math.round(card.price_trend * 100);
+    totalCards += quantity;
+    cardValueCents += quantity * unitCents;
+    cardSpentCents += quantity * Math.round(card.purchase_price * 100);
+    if (!Number.isSafeInteger(cardValueCents) || !Number.isSafeInteger(cardSpentCents)) throw new RangeError('Portfolio value is too large');
+    const gameKey = source.game || 'unknown';
+    if (!byGame[gameKey]) byGame[gameKey] = { cards: 0, value: 0 };
+    byGame[gameKey].cards += quantity; byGame[gameKey].value += quantity * unitCents / 100;
+    cards.push(card);
+  }
+  const sealed = await sealedData(userId, game, valuation);
+  return { cards, totalCards, cardValue: cardValueCents / 100,
+    totalValue: round(cardValueCents / 100 + sealed.holdings.marketValue),
+    totalSpent: round(cardSpentCents / 100 + sealed.spent), sealed,
+    byGame: Object.fromEntries(Object.entries(byGame).map(([key, value]) => [key, { ...value, value: round(value.value) }])) };
 }
 
 async function openingPerformanceFor(userId, game) {
   if (game && game !== 'pokemon') return summarizePerformance([]);
-  const rows = await db.all(
-    `SELECT o.id AS opening_id, o.product_id, o.quantity AS units, o.cost_cents, o.currency,
-            o.entry_complete, p.set_name, p.product_type,
-            sp.quantity AS pull_quantity,
-            sp.current_unit_cents, sp.current_line_cents,
-            sp.opened_unit_cents, sp.opened_line_cents
-       FROM sealed_opening o
-       JOIN sealed_product p ON p.id = o.product_id AND p.user_id = o.user_id
-       LEFT JOIN sealed_pull sp ON sp.opening_id = o.id AND sp.user_id = o.user_id
-      WHERE o.user_id = ?
-      ORDER BY o.id, sp.id`,
-    [userId]
-  );
+  const rows = await db.all(`SELECT o.id AS opening_id, o.product_id, o.quantity AS units, o.cost_cents, o.currency,
+    o.entry_complete, p.set_name, p.product_type, sp.quantity AS pull_quantity,
+    sp.current_unit_cents, sp.current_line_cents, sp.opened_unit_cents, sp.opened_line_cents
+    FROM sealed_opening o JOIN sealed_product p ON p.id = o.product_id AND p.user_id = o.user_id
+    LEFT JOIN sealed_pull sp ON sp.opening_id = o.id AND sp.user_id = o.user_id
+    WHERE o.user_id = ? ORDER BY o.id, sp.id`, [userId]);
   return summarizePerformance(rows);
 }
 
-async function sealedFor(userId, game) {
-  if (game && game !== 'pokemon') return emptyHoldings();
-  return summarizeHoldings(await sealedHoldingRows(userId));
+function failure(res, error, fallback) {
+  console.error(error.code || fallback);
+  res.status(error.status || 500).json({ error: error.status ? error.message : fallback, code: error.code || 'STATISTICS_ERROR' });
 }
 
-// What was paid for sealed product, including units that have since been
-// opened. Remaining cost is a stock figure. This is the receipt. Archived
-// lots leave the portfolio. A lot that is fully opened stays, so ripping a
-// pack does not erase what it cost. Pulled cards are not given that cost as
-// a purchase price, so this is not added a second time through the collection.
-async function sealedInvestment(userId, game) {
-  if (game && game !== 'pokemon') return { spent: 0, currencies: [] };
-  const rows = await db.all(
-    `SELECT l.total_cost_cents AS totalCostCents, l.currency AS currency
-       FROM sealed_lot l
-       JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
-      WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL`,
-    [userId]
-  );
-  let cents = 0;
-  const currencies = new Set();
-  for (const row of rows) {
-    const line = Number(row.totalCostCents) || 0;
-    if (!Number.isSafeInteger(line) || !Number.isSafeInteger(cents + line)) {
-      throw new RangeError('Sealed spend is too large');
-    }
-    cents += line;
-    if (row.currency) currencies.add(row.currency);
-  }
-  return { spent: parseFloat((cents / 100).toFixed(2)), currencies: [...currencies].sort() };
-}
-
-// One row per sealed product still on hand. Market cents stay null when the
-// quote is unknown so a missing price is not added as zero.
-async function sealedLines(userId, game) {
-  if (game && game !== 'pokemon') return [];
-  return db.all(
-    `SELECT p.id, p.name, p.set_id, p.set_name, p.image_url, p.product_type,
-            p.market_price_cents, p.market_currency,
-            SUM(l.remaining_quantity) AS remaining
-       FROM sealed_lot l
-       JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
-      WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL
-        AND l.remaining_quantity > 0
-      GROUP BY p.id
-      ORDER BY p.name`,
-    [userId]
-  );
-}
-
-// 7. Get Collection Statistics & Analytics
 router.get('/stats', async (req, res) => {
   try {
-    // Optional per-game view (e.g. only Pokémon or only MTG). Absent = all games.
     const { game } = req.query;
-    const gameFilter = game ? ` AND cc.game = ?` : '';
-    const statsParams = game ? [req.user.id, game] : [req.user.id];
-
-    // Retrieve all collection items to compute statistics
-    const query = `
-      SELECT
-        c.quantity, c.purchase_price, c.added_at, c.printing, c.condition, c.card_id, c.market_value,
-        cc.types, cc.subtypes, cc.supertype, cc.game, cc.rarity, cc.set_name, cc.set_id, cc.price_trend, cc.price_normal, cc.price_holofoil, cc.price_reverse_holofoil, cc.price_1st_edition,
-        cc.price_avg1, cc.price_avg7, cc.price_avg30,
-        l.name as location_name
-      FROM collection c
-      JOIN card_cache cc ON c.card_id = cc.id
-      LEFT JOIN locations l ON c.location_id = l.id
-      WHERE c.user_id = ?${gameFilter}
-    `;
-    const rows = await db.all(query, statsParams);
-
-    let totalCards = 0;
-    let uniqueCards = rows.length;
-    let totalValue = 0;
-    let totalSpent = 0;
-    let unsortedCount = 0;
-    let nearMintCount = 0;
-    let vintageCount = 0;
-
+    const valuation = createReportingValuation(req.query.currency || 'USD');
+    const portfolio = await currentPortfolio(req.user.id, game, valuation);
+    const rows = portfolio.cards;
+    const types = {}, rarities = {}, sets = {}, locations = {};
+    let unsortedCount = 0, nearMintCount = 0, vintageCount = 0, unpricedCards = 0;
+    let value7dAgo = 0, valueNowFor7d = 0, value30dAgo = 0, valueNowFor30d = 0;
     const now = Date.now();
-    const oneDayMs = 24 * 60 * 60 * 1000;
-    const sevenDaysMs = 7 * oneDayMs;
-    const thirtyDaysMs = 30 * oneDayMs;
-
-    // Cardmarket's avg7/avg30 are the only genuine historical price data this
-    // app can get (nothing goes back further than 30 days from any source).
-    // Both the "now" and "then" totals below are summed over the SAME subset
-    // of cards that actually have that real data, so the percentage change
-    // isn't skewed by cards silently missing from one side of the comparison.
-    let value7dAgo = 0, valueNowFor7d = 0;
-    let value30dAgo = 0, valueNowFor30d = 0;
-
-    const typeCounts = {};
-    const rarityCounts = {};
-    const setCounts = {};
-    const locationCounts = {};
-
-    rows.forEach(row => {
-      const qty = row.quantity || 1;
-      const price = resolveCardPrice(row);
-      const addedTime = row.added_at ? parseSqliteUtc(row.added_at).getTime() : now;
-
-      totalCards += qty;
-      totalValue += qty * price;
-      totalSpent += qty * (row.purchase_price || 0);
-      if (!row.location_name) unsortedCount += qty;
-
-      if (row.condition === 'Near Mint') {
-        nearMintCount += qty;
-      }
-
-      if (isVintageSet(row.set_id)) {
-        vintageCount += qty;
-      }
-
-      // Only count a card toward the historical comparison if it was owned
-      // that long ago AND has real Cardmarket data for both ends of the
-      // window. Comparing avg7/avg30 against price_trend (usually TCGPlayer)
-      // would mix two different marketplaces' pricing and produce a "change"
-      // that's really just the static US/EU price gap, not real movement —
-      // avg1 keeps both sides of the comparison on Cardmarket.
-      if (addedTime <= now - sevenDaysMs && row.price_avg7 > 0 && row.price_avg1 > 0) {
-        value7dAgo += qty * row.price_avg7;
-        valueNowFor7d += qty * row.price_avg1;
-      }
-      if (addedTime <= now - thirtyDaysMs && row.price_avg30 > 0 && row.price_avg1 > 0) {
-        value30dAgo += qty * row.price_avg30;
-        valueNowFor30d += qty * row.price_avg1;
-      }
-
-      // Parse types
-      const types = JSON.parse(row.types || '[]');
+    for (const row of rows) {
+      const quantity = row.quantity || 1;
+      if (!row.location_name) unsortedCount += quantity;
+      if (row.condition === 'Near Mint') nearMintCount += quantity;
+      if (isVintageSet(row.set_id)) vintageCount += quantity;
+      if (!(row.price_trend > 0)) unpricedCards += quantity;
+      const cardTypes = JSON.parse(row.types || '[]');
       const subtypes = JSON.parse(row.subtypes || '[]');
-      const isMtg = row.game === 'mtg' || row.supertype === 'MTG';
-
-      if (isMtg) {
-        const isLand = subtypes.includes('Land') || row.supertype === 'Land' || (types.length === 0 && subtypes.some(s => ['Plains','Island','Swamp','Mountain','Forest','Land'].includes(s)));
-        if (isLand) {
-          typeCounts['Land'] = (typeCounts['Land'] || 0) + qty;
-        } else if (types.length === 0) {
-          typeCounts['Colorless'] = (typeCounts['Colorless'] || 0) + qty;
-        } else {
-          types.forEach(t => {
-            typeCounts[t] = (typeCounts[t] || 0) + qty;
-          });
-        }
-      } else {
-        types.forEach(t => {
-          typeCounts[t] = (typeCounts[t] || 0) + qty;
-        });
-        if (types.length === 0) {
-          typeCounts['Colorless'] = (typeCounts['Colorless'] || 0) + qty;
-        }
+      const mtg = row.game === 'mtg' || row.supertype === 'MTG';
+      const land = mtg && (subtypes.includes('Land') || row.supertype === 'Land' ||
+        (!cardTypes.length && subtypes.some(name => ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Land'].includes(name))));
+      for (const type of land ? ['Land'] : cardTypes.length ? cardTypes : [mtg ? 'Colorless' : 'Colorless']) types[type] = (types[type] || 0) + quantity;
+      const rarity = row.rarity || 'Unknown'; rarities[rarity] = (rarities[rarity] || 0) + quantity;
+      const location = row.location_name || 'Unassigned'; locations[location] = (locations[location] || 0) + quantity;
+      if (!sets[row.set_id]) sets[row.set_id] = { name: row.set_name || 'Other', count: 0, value: 0 };
+      sets[row.set_id].count += quantity; sets[row.set_id].value += quantity * row.price_trend;
+      // Historical averages retain their source currency and are converted
+      // before comparing amounts; current-FX basis, not historical-date FX.
+      const added = row.added_at ? parseSqliteUtc(row.added_at).getTime() : now;
+      if (row.price_avg1 > 0 && (row.price_avg7 > 0 || row.price_avg30 > 0)) {
+        const currency = row.source_quote.currency;
+        const avg1 = await valuation.money(row.price_avg1, currency);
+        if (added <= now - 7 * 86400000 && row.price_avg7 > 0) { value7dAgo += quantity * await valuation.money(row.price_avg7, currency); valueNowFor7d += quantity * avg1; }
+        if (added <= now - 30 * 86400000 && row.price_avg30 > 0) { value30dAgo += quantity * await valuation.money(row.price_avg30, currency); valueNowFor30d += quantity * avg1; }
       }
-
-      // Rarity
-      const rarity = row.rarity || 'Unknown';
-      rarityCounts[rarity] = (rarityCounts[rarity] || 0) + qty;
-
-      // Set
-      const set = row.set_name || 'Other';
-      if (!setCounts[row.set_id]) {
-        setCounts[row.set_id] = { name: set, count: 0, value: 0 };
-      }
-      setCounts[row.set_id].count += qty;
-      setCounts[row.set_id].value += qty * price;
-
-      // Location
-      const loc = row.location_name || 'Unassigned';
-      locationCounts[loc] = (locationCounts[loc] || 0) + qty;
-    });
-
-    const cardSets = Object.keys(setCounts).map(id => ({
-      id,
-      name: setCounts[id].name,
-      count: setCounts[id].count,
-      value: parseFloat(setCounts[id].value.toFixed(2)),
-    })).filter(row => row.count > 0).sort((a, b) => b.value - a.value).slice(0, 8);
-
-    // Sealed value joins the set it names. A box is not a card, so the card
-    // count on that set stays put and only the market value moves.
-    const sealedLinesRows = await sealedLines(req.user.id, game);
-    const sealedBySet = new Map();
-    const sealedByType = new Map();
-    const addSealedBucket = (map, key, name, units, value, unpriced) => {
-      const row = map.get(key) || { name, units: 0, value: 0, unpriced: 0 };
-      row.units += units;
-      row.value += value;
-      row.unpriced += unpriced;
-      map.set(key, row);
+    }
+    const listSets = () => Object.entries(sets).map(([id, value]) => ({ id, ...value, value: round(value.value) })).sort((a, b) => b.value - a.value).slice(0, 8);
+    const cardSets = listSets();
+    const sealedBySet = new Map(), sealedByType = new Map();
+    const addBucket = (map, key, name, line) => {
+      const bucket = map.get(key) || { name, units: 0, value: 0, unpriced: 0 };
+      bucket.units += line.remaining; bucket.value += line.line_value || 0;
+      if (line.line_value == null) bucket.unpriced += line.remaining; map.set(key, bucket);
     };
-    const setIdByName = new Map();
-    for (const [id, bucket] of Object.entries(setCounts)) {
-      setIdByName.set(String(bucket.name || '').trim().toLowerCase(), id);
+    for (const line of portfolio.sealed.lines) {
+      const name = line.set_name.toLowerCase().trim();
+      addBucket(sealedBySet, name, line.set_name, line); addBucket(sealedByType, line.product_type || 'other', line.product_type || 'other', line);
+      if (line.line_value == null) continue;
+      const matching = Object.keys(sets).find(id => sets[id].name.toLowerCase().trim() === name);
+      const key = sets[line.set_id] ? line.set_id : matching || `sealed:${line.set_id || line.set_name || line.id}`;
+      if (!sets[key]) sets[key] = { name: line.set_name || 'Sealed', count: 0, value: 0 };
+      sets[key].value += line.line_value;
     }
-    for (const line of sealedLinesRows) {
-      const units = line.remaining || 0;
-      const priced = line.market_price_cents != null;
-      const lineValue = priced ? (line.market_price_cents * units) / 100 : 0;
-      addSealedBucket(sealedBySet, String(line.set_name || '').trim().toLowerCase(), line.set_name || '', units, lineValue, priced ? 0 : units);
-      addSealedBucket(sealedByType, line.product_type || 'other', line.product_type || 'other', units, lineValue, priced ? 0 : units);
-      if (!priced) continue;
-      const value = lineValue;
-      const named = setIdByName.get(String(line.set_name || '').trim().toLowerCase());
-      const key = (line.set_id && setCounts[line.set_id]) ? line.set_id : (named || `sealed:${line.set_id || line.set_name || line.id}`);
-      if (!setCounts[key]) setCounts[key] = { name: line.set_name || 'Sealed', count: 0, value: 0 };
-      setCounts[key].value += value;
-    }
-    const topSealed = sealedLinesRows
-      .filter(line => line.market_price_cents != null && line.remaining > 0)
-      .map(line => ({
-        id: line.id,
-        name: line.name,
-        set_name: line.set_name || '',
-        image_url: line.image_url || '',
-        product_type: line.product_type,
-        market_price: centsToMoney(line.market_price_cents),
-        market_currency: line.market_currency || 'USD',
-        remaining: line.remaining,
-        line_value: parseFloat(((line.market_price_cents * line.remaining) / 100).toFixed(2)),
-      }))
-      .sort((a, b) => b.line_value - a.line_value)
-      .slice(0, 6);
-
-    // Get top most valuable cards (scoped to user)
-    const topValuableQuery = `
-      SELECT
-        c.id AS entry_id, c.location_id, (SELECT name FROM locations WHERE id = c.location_id) AS location_name,
-        (SELECT type FROM locations WHERE id = c.location_id) AS location_type,
-        c.quantity, c.condition, c.printing, c.language, c.purchase_price, c.is_trade, c.favorite, c.list_type,
-        c.grader, c.grade, c.market_value,
-        cc.id as card_id, cc.name, cc.printed_name, cc.rarity, cc.set_name, cc.set_id, cc.number, cc.image_url, cc.image_url_back,
-        cc.game, cc.supertype, cc.subtypes, cc.types, cc.cmc, cc.color_identity, cc.price_trend,
-        cc.price_normal, cc.price_holofoil, cc.price_reverse_holofoil, cc.price_1st_edition, cc.price_currency
-      FROM collection c
-      JOIN card_cache cc ON c.card_id = cc.id
-      WHERE c.user_id = ?${gameFilter}
-      ORDER BY CASE
-        -- Mirrors resolveCardPrice, market_value first. A PSA 10 valued at 40x its
-        -- raw price has to be able to reach this list, and ranking it by the raw
-        -- price is exactly how it never would.
-        WHEN c.market_value IS NOT NULL AND c.market_value > 0 THEN c.market_value
-        WHEN c.printing = 'Holofoil' AND cc.price_holofoil IS NOT NULL AND cc.price_holofoil > 0 THEN cc.price_holofoil
-        WHEN c.printing = 'Reverse Holofoil' AND cc.price_reverse_holofoil IS NOT NULL AND cc.price_reverse_holofoil > 0 THEN cc.price_reverse_holofoil
-        WHEN c.printing = 'Normal' AND cc.price_normal IS NOT NULL AND cc.price_normal > 0 THEN cc.price_normal
-        WHEN c.printing = '1st Edition' AND cc.price_1st_edition IS NOT NULL AND cc.price_1st_edition > 0 THEN cc.price_1st_edition
-        ELSE cc.price_trend
-      END DESC
-      LIMIT 6
-    `;
-    const topValuableRows = await db.all(topValuableQuery, statsParams);
-    const topValuable = topValuableRows.map(row => ({
-      ...row,
-      price_trend: resolveCardPrice(row)
-    }));
-
-    // Set completion.
-    //
-    // Sizes come from the `sets` table, which every provider sync fills in — not
-    // from a hand-kept map. That map listed thirteen Pokémon ids and fell back to a
-    // flat 150 for everything else, so every Magic set and every Pokémon set
-    // released after 151 was measured against a number nobody chose. printed_total
-    // is the right column (the number printed on the card, which is what a player
-    // counts to); `total` includes secret rares and is the fallback when a provider
-    // gives no printed count.
-    //
-    // One query for the whole thing, rather than one per set inside a loop: this
-    // ran a COUNT(DISTINCT) per set the user owns cards from, which on a broad
-    // collection is dozens of round trips to answer a single panel.
-    const setIds = Object.keys(setCounts);
     const setProgress = [];
-    if (setIds.length) {
-      const holes = setIds.map(() => '?').join(',');
-      const rows = await db.all(`
-        SELECT cc.set_id,
-               COUNT(DISTINCT c.card_id) AS owned,
-               (SELECT COALESCE(NULLIF(s.printed_total, 0), NULLIF(s.total, 0))
-                  FROM sets s WHERE s.id = cc.set_id) AS size
-        FROM collection c
-        JOIN card_cache cc ON c.card_id = cc.id
-        WHERE c.user_id = ? AND cc.set_id IN (${holes})
-        GROUP BY cc.set_id
-      `, [req.user.id, ...setIds]);
-
-      for (const row of rows) {
-        // A set the sync has not reached yet has no size, so it has no completion
-        // to report. Skipped rather than given a placeholder denominator: "3 / 150"
-        // for a set that actually holds 64 cards is a wrong answer presented as a
-        // measurement, which is what the old flat-150 fallback did.
-        if (!row.size) continue;
-        setProgress.push({
-          setId: row.set_id,
-          setName: setCounts[row.set_id].name,
-          ownedUnique: row.owned,
-          totalCards: row.size,
-          percent: Math.min(Math.round((row.owned / row.size) * 100), 100)
-        });
-      }
+    const ownedSetIds = [...new Set(rows.map(row => row.set_id).filter(Boolean))];
+    if (ownedSetIds.length) {
+      const progress = await db.all(`SELECT cc.set_id, COUNT(DISTINCT c.card_id) AS owned,
+        (SELECT COALESCE(NULLIF(s.printed_total, 0), NULLIF(s.total, 0)) FROM sets s WHERE s.id = cc.set_id) AS size
+        FROM collection c JOIN card_cache cc ON cc.id = c.card_id
+        WHERE c.user_id = ? AND c.list_type = 'collection' AND cc.set_id IN (${ownedSetIds.map(() => '?').join(',')}) GROUP BY cc.set_id`, [req.user.id, ...ownedSetIds]);
+      for (const row of progress) if (row.size) setProgress.push({ setId: row.set_id, setName: sets[row.set_id].name, ownedUnique: row.owned, totalCards: row.size, percent: Math.min(Math.round(row.owned / row.size * 100), 100) });
     }
-
-    // Sort set progress by completion percentage descending
-    setProgress.sort((a, b) => b.percent - a.percent);
-
-    const mintRate = totalCards > 0 ? parseFloat(((nearMintCount / totalCards) * 100).toFixed(1)) : 0.0;
-    const vintageRatio = totalCards > 0 ? parseFloat(((vintageCount / totalCards) * 100).toFixed(1)) : 0.0;
-
-    // Recently added cards (most useful "what did I just add" glance)
-    const recentRows = await db.all(`
-      SELECT c.id AS entry_id, c.location_id, (SELECT name FROM locations WHERE id = c.location_id) AS location_name,
-             (SELECT type FROM locations WHERE id = c.location_id) AS location_type,
-             c.quantity, c.condition, c.printing, c.language, c.added_at, c.is_trade, c.favorite, c.list_type,
-             c.grader, c.grade, c.market_value,
-             cc.id as card_id, cc.name, cc.printed_name, cc.rarity, cc.set_name, cc.set_id, cc.number, cc.image_url, cc.image_url_back,
-             cc.game, cc.supertype, cc.subtypes, cc.types, cc.cmc, cc.color_identity,
-             cc.price_trend, cc.price_normal, cc.price_holofoil, cc.price_reverse_holofoil, cc.price_1st_edition, cc.price_currency
-      FROM collection c
-      JOIN card_cache cc ON c.card_id = cc.id
-      WHERE c.user_id = ?${gameFilter}
-      ORDER BY c.added_at DESC
-      LIMIT 6
-    `, statsParams);
-    const recentAdditions = recentRows.map(row => ({ ...row, price_trend: resolveCardPrice(row) }));
-
-    const avgCardValue = totalCards > 0 ? parseFloat((totalValue / totalCards).toFixed(2)) : 0.0;
-    // Sealed market value is what is still on hand. Spent is the original lot
-    // cost, so opening a unit does not reduce total invested. Pulled cards
-    // carry no purchase price from that opening, and an unknown quote adds
-    // nothing to value.
-    const sealedHoldings = await sealedFor(req.user.id, game);
-    const sealedSpend = await sealedInvestment(req.user.id, game);
-    const openingPerformance = await openingPerformanceFor(req.user.id, game);
-    totalValue += sealedHoldings.marketValue;
-    totalSpent += sealedSpend.spent;
-    const gainAbs = totalValue - totalSpent;
-    const roi = {
-      abs: parseFloat(gainAbs.toFixed(2)),
-      pct: totalSpent > 0 ? parseFloat(((gainAbs / totalSpent) * 100).toFixed(1)) : null
-    };
-
-    res.json({
-      summary: {
-        totalCards,
-        uniqueCards,
-        totalValue: parseFloat(totalValue.toFixed(2)),
-        totalSpent: parseFloat(totalSpent.toFixed(2)),
-        roi,
-        avgCardValue,
-        unsortedCount,
-        duplicateCopies: Math.max(totalCards - uniqueCards, 0),
-        mintRate,
-        vintageRatio,
-        // change7d/change30d compare current vs. real Cardmarket avg7/avg30
-        // over the same subset of cards that have that data — never
-        // simulated. change1y/change5y have no real data source anywhere
-        // (no API here provides pricing history beyond 30 days), so they're
-        // marked unavailable instead of faked.
-        change7d: value7dAgo > 0 ? {
-          available: true,
-          abs: parseFloat((valueNowFor7d - value7dAgo).toFixed(2)),
-          pct: parseFloat((((valueNowFor7d - value7dAgo) / value7dAgo) * 100).toFixed(1))
-        } : { available: false, abs: null, pct: null },
-        change30d: value30dAgo > 0 ? {
-          available: true,
-          abs: parseFloat((valueNowFor30d - value30dAgo).toFixed(2)),
-          pct: parseFloat((((valueNowFor30d - value30dAgo) / value30dAgo) * 100).toFixed(1))
-        } : { available: false, abs: null, pct: null },
-        change1y: { available: false, abs: null, pct: null },
-        change5y: { available: false, abs: null, pct: null },
-        sealed: sealedHoldings
-      },
-      types: Object.keys(typeCounts).map(name => ({ name, value: typeCounts[name] })),
-      rarities: Object.keys(rarityCounts).map(name => ({ name, value: rarityCounts[name] })),
-      sets: Object.keys(setCounts).map(id => ({
-        id,
-        name: setCounts[id].name,
-        count: setCounts[id].count,
-        value: parseFloat(setCounts[id].value.toFixed(2))
-      })).sort((a, b) => b.value - a.value).slice(0, 8),
-      cardSets,
-      locations: Object.keys(locationCounts).map(name => ({ name, value: locationCounts[name] })),
-      topValuable,
-      topSealed,
-      recentAdditions,
-      setProgress: setProgress.slice(0, 12),
-      sealedBreakdown: {
-        sets: [...sealedBySet.values()].map(row => ({ ...row, value: parseFloat(row.value.toFixed(2)) })).sort((a, b) => b.value - a.value || b.units - a.units),
-        types: [...sealedByType.values()].map(row => ({ ...row, value: parseFloat(row.value.toFixed(2)) })).sort((a, b) => b.value - a.value || b.units - a.units),
-      },
-      openingPerformance,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to compute statistics' });
-  }
+    const change = (before, after) => before > 0 ? { available: true, abs: round(after - before), pct: round((after - before) / before * 100) } : { available: false, abs: null, pct: null };
+    const unavailable = () => ({ available: false, abs: null, pct: null });
+    const gain = round(portfolio.totalValue - portfolio.totalSpent);
+    const metadata = valuation.metadata();
+    const bucketList = map => [...map.values()].map(row => ({ ...row, value: round(row.value) })).sort((a, b) => b.value - a.value || b.units - a.units);
+    res.json({ summary: { totalCards: portfolio.totalCards, uniqueCards: rows.length, totalValue: portfolio.totalValue, totalSpent: portfolio.totalSpent,
+      roi: { abs: gain, pct: portfolio.totalSpent > 0 ? round(gain / portfolio.totalSpent * 100) : null },
+      avgCardValue: portfolio.totalCards ? round(portfolio.cardValue / portfolio.totalCards) : 0, unsortedCount,
+      duplicateCopies: Math.max(portfolio.totalCards - rows.length, 0),
+      mintRate: portfolio.totalCards ? round(nearMintCount / portfolio.totalCards * 100) : 0,
+      vintageRatio: portfolio.totalCards ? round(vintageCount / portfolio.totalCards * 100) : 0,
+      unpricedCards, ...metadata, change7d: change(value7dAgo, valueNowFor7d), change30d: change(value30dAgo, valueNowFor30d),
+      change1y: unavailable(), change5y: unavailable(), sealed: portfolio.sealed.holdings },
+      types: Object.entries(types).map(([name, value]) => ({ name, value })),
+      rarities: Object.entries(rarities).map(([name, value]) => ({ name, value })),
+      locations: Object.entries(locations).map(([name, value]) => ({ name, value })), sets: listSets(), cardSets,
+      topValuable: rows.slice().sort((a, b) => b.price_trend - a.price_trend).slice(0, 6),
+      recentAdditions: rows.slice().sort((a, b) => parseSqliteUtc(b.added_at) - parseSqliteUtc(a.added_at)).slice(0, 6),
+      topSealed: portfolio.sealed.lines.filter(line => line.line_value != null).sort((a, b) => b.line_value - a.line_value).slice(0, 6),
+      setProgress: setProgress.sort((a, b) => b.percent - a.percent).slice(0, 12),
+      sealedBreakdown: { sets: bucketList(sealedBySet), types: bucketList(sealedByType) },
+      openingPerformance: await openingPerformanceFor(req.user.id, game) });
+  } catch (error) { failure(res, error, 'Failed to compute statistics'); }
 });
 
-// 7b. Get Collection Net Worth Timeline History
-router.get('/stats/history', require('../utils/portfolioTimeline').createHistoryHandler({
-  db, resolveCardPrice, summarizeHoldings,
-}));
-
-// 7c. Net worth, on its own, for scripts and dashboards (issue #33).
-//
-// /stats already contains these numbers, but it also runs the type/rarity/set
-// aggregation, a per-set progress query and two top-N queries to get there —
-// which is the wrong thing to hand a finance tracker polling every five minutes.
-// This is one pass over the collection and nothing else.
-//
-// Pair it with an API key (Settings -> API access): that credential is read-only
-// and does not expire, so an external tracker keeps working without a login.
+// Historical portfolio reconstruction is unchanged by this current-value fix.
+router.get('/stats/history', require('../utils/portfolioTimeline').createHistoryHandler({ db, resolveCardPrice, summarizeHoldings }));
 router.get('/stats/networth', async (req, res) => {
   try {
-    const { game } = req.query;
-    const gameFilter = game ? ` AND cc.game = ?` : '';
-    const params = game ? [req.user.id, game] : [req.user.id];
-
-    const rows = await db.all(`
-      SELECT c.quantity, c.purchase_price, c.printing, c.market_value, cc.game, cc.price_currency,
-             cc.price_trend, cc.price_normal, cc.price_holofoil, cc.price_reverse_holofoil, cc.price_1st_edition
-      FROM collection c
-      JOIN card_cache cc ON c.card_id = cc.id
-      WHERE c.user_id = ? AND c.list_type = 'collection'${gameFilter}
-    `, params);
-
-    let totalCards = 0, totalValue = 0, totalSpent = 0;
-    const byGame = {};
-    const currencies = new Set();
-    for (const row of rows) {
-      const qty = row.quantity || 1;
-      const value = qty * resolveCardPrice(row);
-      totalCards += qty;
-      totalValue += value;
-      totalSpent += qty * (row.purchase_price || 0);
-      if (value > 0) currencies.add(row.price_currency || 'USD');
-      const g = row.game || 'unknown';
-      if (!byGame[g]) byGame[g] = { cards: 0, value: 0 };
-      byGame[g].cards += qty;
-      byGame[g].value += value;
-    }
-
-    const sealedHoldings = await sealedFor(req.user.id, game);
-    const sealedSpend = await sealedInvestment(req.user.id, game);
-    totalValue += sealedHoldings.marketValue;
-    totalSpent += sealedSpend.spent;
-    if (sealedHoldings.marketValue > 0 || sealedHoldings.cost > 0) {
-      for (const code of sealedHoldings.currencies) currencies.add(code);
-    }
-    if (sealedSpend.spent > 0) {
-      for (const code of sealedSpend.currencies) currencies.add(code);
-    }
-
-    const round = (n) => parseFloat(n.toFixed(2));
-    res.json({
-      totalValue: round(totalValue),
-      totalSpent: round(totalSpent),
-      // The unrealized gain, which is the number a finance tracker actually wants
-      // next to the total: value minus what it cost. Null percentage rather than
-      // zero when nothing has a purchase price, because "0% return" is a claim.
-      gain: round(totalValue - totalSpent),
-      gainPct: totalSpent > 0 ? parseFloat((((totalValue - totalSpent) / totalSpent) * 100).toFixed(1)) : null,
-      totalCards,
-      uniqueEntries: rows.length,
-      byGame: Object.fromEntries(Object.entries(byGame).map(([g, v]) => [g, { cards: v.cards, value: round(v.value) }])),
-      // Plural and honest: providers quote in different currencies (Scryfall and
-      // TCGplayer in USD, TCGdex in EUR), and the totals above sum them as-is —
-      // the same arithmetic the dashboard has always done. More than one entry
-      // here means the total is mixed, which a consumer converting it needs to know.
-      currencies: [...currencies].sort(),
-      sealed: sealedHoldings,
-      asOf: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to compute net worth' });
-  }
+    const valuation = createReportingValuation(req.query.currency || 'USD');
+    const portfolio = await currentPortfolio(req.user.id, req.query.game, valuation);
+    const gain = round(portfolio.totalValue - portfolio.totalSpent);
+    res.json({ totalValue: portfolio.totalValue, totalSpent: portfolio.totalSpent, gain,
+      gainPct: portfolio.totalSpent > 0 ? round(gain / portfolio.totalSpent * 100) : null,
+      totalCards: portfolio.totalCards, uniqueEntries: portfolio.cards.length, byGame: portfolio.byGame,
+      currencies: [valuation.target], ...valuation.metadata(), sealed: portfolio.sealed.holdings, asOf: new Date().toISOString() });
+  } catch (error) { failure(res, error, 'Failed to compute net worth'); }
 });
 
-// Two windows, because two is all anyone can actually fill:
-//   30d — Cardmarket publishes real rolling averages (avg30/avg7/avg1) that give
-//         a genuine month of trend for free, per request, with no storage.
-//   all — everything Bindarr has recorded itself.
-// 1y/5y are gone. No card API sells back-history: Scryfall returns only current
-// prices (usd/eur/tix, no historical field at all), so a 5-year MTG chart could
-// never be anything but the same line as the 30-day one.
-const PRICE_HISTORY_RANGES = { '30d': 30 };
-
-// Cardmarket's rolling averages, as real dated points. avg30 is the mean of the
-// last 30 days, so it is plotted at the middle of that span, not its start —
-// plotting a 30-day MEAN at "30 days ago" would misread as the price on that
-// day. Same for avg7. avg1 is yesterday's average.
+// Preserve original quote-currency history for the existing chart formatter.
 function marketAnchors(card, now) {
-  const pts = [];
-  if (!card) return pts;
-  if (card.price_avg30 > 0) pts.push({ price: card.price_avg30, time: now - 15 * 86400000, source: 'market' });
-  if (card.price_avg7 > 0) pts.push({ price: card.price_avg7, time: now - 3.5 * 86400000, source: 'market' });
-  if (card.price_avg1 > 0) pts.push({ price: card.price_avg1, time: now - 86400000, source: 'market' });
-  if (card.price_trend > 0) pts.push({ price: card.price_trend, time: now, source: 'current' });
-  return pts;
+  if (!card) return [];
+  const points = [];
+  if (card.price_avg30 > 0) points.push({ price: card.price_avg30, time: now - 15 * 86400000, source: 'market' });
+  if (card.price_avg7 > 0) points.push({ price: card.price_avg7, time: now - 3.5 * 86400000, source: 'market' });
+  if (card.price_avg1 > 0) points.push({ price: card.price_avg1, time: now - 86400000, source: 'market' });
+  if (card.price_trend > 0) points.push({ price: card.price_trend, time: now, source: 'current' });
+  return points;
 }
-
-// Get Card Price History
 router.get('/cards/:id/price-history', async (req, res) => {
-  const { id } = req.params;
-  const rangeKey = String(req.query.range || '30d').toLowerCase();
-  const days = PRICE_HISTORY_RANGES[rangeKey]; // undefined => 'all'
   try {
-    // Points in the card's current currency only — see the same filter in the
-    // timeline above. A card with no card_cache row keeps every point.
-    const sameCurrency = `(currency IS NULL OR currency = COALESCE(
-      (SELECT price_currency FROM card_cache WHERE id = price_history.card_id), currency))`;
-    const recorded = days
-      ? await db.all(`
-          SELECT price, recorded_at
-          FROM price_history
-          WHERE card_id = ? AND recorded_at >= datetime('now', ?) AND ${sameCurrency}
-          ORDER BY recorded_at ASC
-        `, [id, `-${days} days`])
-      : await db.all(`
-          SELECT price, recorded_at
-          FROM price_history
-          WHERE card_id = ? AND ${sameCurrency}
-          ORDER BY recorded_at ASC
-        `, [id]);
-
+    const { id } = req.params;
+    const rangeKey = String(req.query.range || '30d').toLowerCase();
+    const days = rangeKey === '30d' ? 30 : null;
+    const sameCurrency = `(currency IS NULL OR currency = COALESCE((SELECT price_currency FROM card_cache WHERE id = price_history.card_id), currency))`;
+    const recorded = await db.all(`SELECT price, recorded_at FROM price_history WHERE card_id = ?
+      ${days ? 'AND recorded_at >= datetime(\'now\', ?)' : ''} AND ${sameCurrency} ORDER BY recorded_at ASC`, days ? [id, `-${days} days`] : [id]);
     const now = Date.now();
-    const points = recorded.map(h => ({
-      price: h.price,
-      time: parseSqliteUtc(h.recorded_at).getTime(),
-      source: 'recorded'
-    }));
+    const points = recorded.map(row => ({ price: row.price, time: parseSqliteUtc(row.recorded_at).getTime(), source: 'recorded' })).filter(row => Number.isFinite(row.time));
     const recordedCount = points.length;
-
-    // Market averages only describe the last 30 days, so they belong on the
-    // 30-day window; on 'all' they would crowd the left edge of a longer line.
-    const anchors = rangeKey === '30d'
-      ? marketAnchors(await db.get(
-        `SELECT price_trend, price_avg1, price_avg7, price_avg30 FROM card_cache WHERE id = ?`, [id]
-      ), now)
-      : [];
-    const marketCount = anchors.filter(a => a.source === 'market').length;
-    points.push(...anchors);
-
-    points.sort((a, b) => a.time - b.time);
-
-    // Collapse flat runs. The sweep used to write a row on every boot whether or
-    // not the price moved, so cards carry hundreds of identical snapshots. Only
-    // the ENDS of a flat stretch carry information — the interior points draw
-    // the same horizontal line. Keeping both ends preserves its true duration.
-    const data = [];
-    for (let i = 0; i < points.length; i++) {
-      const prev = points[i - 1];
-      const next = points[i + 1];
-      if (prev && next && prev.price === points[i].price && next.price === points[i].price) continue;
-      data.push(points[i]);
-    }
-
-    const times = points.map(p => p.time);
-    const spanDays = times.length >= 2
-      ? Math.round((Math.max(...times) - Math.min(...times)) / 86400000)
-      : 0;
-
-    res.json({
-      data: data.map(p => ({ price: p.price, recorded_at: new Date(p.time).toISOString(), source: p.source })),
-      // What the line is actually made of, so the UI can say so rather than
-      // implying Bindarr knows more than it does.
-      marketCount,
-      recordedCount,
-      insufficientHistory: data.length < 2,
-      spanDays,
-      windowDays: days ?? null
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to retrieve price history' });
-  }
+    const anchors = days ? marketAnchors(await db.get('SELECT price_trend, price_avg1, price_avg7, price_avg30 FROM card_cache WHERE id = ?', [id]), now) : [];
+    const marketCount = anchors.filter(row => row.source === 'market').length;
+    points.push(...anchors); points.sort((a, b) => a.time - b.time);
+    const data = points.filter((point, index) => !(points[index - 1] && points[index + 1] && points[index - 1].price === point.price && points[index + 1].price === point.price));
+    const spanDays = points.length >= 2 ? Math.round((points[points.length - 1].time - points[0].time) / 86400000) : 0;
+    res.json({ data: data.map(point => ({ price: point.price, recorded_at: new Date(point.time).toISOString(), source: point.source })),
+      spanDays, windowDays: days, marketCount, recordedCount, insufficientHistory: data.length < 2 });
+  } catch (error) { failure(res, error, 'Failed to retrieve price history'); }
 });
-
 module.exports = router;
