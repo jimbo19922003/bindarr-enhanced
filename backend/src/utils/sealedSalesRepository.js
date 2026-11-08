@@ -1,3 +1,4 @@
+// sale-adjustments-v1
 // sales-ui-v1
 // sales-inventory-protection-v1
 'use strict';
@@ -55,7 +56,8 @@ function createSealedSalesRepository({connect}) {
       const db=await connect();
       try {
         if (!await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='sealed_sale_record'")) return [];
-        return await db.all('SELECT id,lot_id,sold_on,quantity,proceeds_cents,fees_cents,sold_basis_cents,realized_gain_cents,currency,product_name,notes FROM sealed_sale_record WHERE user_id=? AND id<? ORDER BY id DESC LIMIT ?',[userId,beforeId,limit]);
+        const source=await require('./saleAdjustments').effectiveSource(db,'sealed_sale_record');
+        return await db.all(`SELECT id,lot_id,sold_on,quantity,proceeds_cents,fees_cents,sold_basis_cents,realized_gain_cents,currency,product_name,notes FROM ${source} WHERE user_id=? AND id<? ORDER BY id DESC LIMIT ?`,[userId,beforeId,limit]);
       } finally {await db.close();}
     }
   };

@@ -1,3 +1,4 @@
+// dashboard-accounting-v1
 // contextual-sales-v1
 // sales-ui-v1
 // aligned-summary-v1
@@ -17,7 +18,7 @@ import CardInspectorModal from './CardInspectorModal';
 import CardImage from './CardImage';
 import OpenedPerformance from './OpenedPerformance';
 import PerformanceChart from './PerformanceChart';
-import RealizedGainCard from './RealizedGainCard';
+import PortfolioAccountingSummary from './PortfolioAccountingSummary';
 import './SummaryCards.css';
 
 const COLORS = [
@@ -137,7 +138,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
 
   const sealedUnits = stats && stats.summary.sealed ? stats.summary.sealed.remainingUnits : 0;
   const openedReports = stats && stats.openingPerformance ? stats.openingPerformance.reports : [];
-  if (!stats || (stats.summary.totalCards === 0 && sealedUnits === 0 && (!openedReports || openedReports.length === 0))) {
+  if (!stats) {
     const isFiltered = Boolean(gameFilter);
     const gameName = isFiltered ? gameLabel(gameFilter, true) : '';
     return (
@@ -206,23 +207,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
           </div>
         </div>
 
-        <div className="glass-panel metric-card accent-invested">
-          <div className="metric-header"><span title={t('dash.investedHint')}>{t('dash.totalInvested')}</span><span className="metric-icon"><Coins size={18} /></span></div>
-          <div className="metric-value">{currencySymbol()}{money(summary.totalSpent)}</div>
-          <div className="metric-footer" title="Total recorded card and sealed spending divided by currently owned physical card copies; includes sealed purchases.">{t('dash.avgInvestedShort', { price: priceText(cardAverages(summary).investedPerCard, summary.currency || reportingCurrency) })}</div>
-        </div>
-
-        {(() => {
-          const roi = summary.roi || { abs: 0, pct: null };
-          const isPositive = (roi.abs || 0) >= 0;
-          return <div className={`glass-panel metric-card ${isPositive ? 'accent-gain-up' : 'accent-gain-down'}`}>
-            <div className="metric-header"><span>{t('dash.unrealizedGain')}</span><span className="metric-icon"><ArrowUpRight size={18} style={{ transform: isPositive ? 'none' : 'rotate(90deg)' }} /></span></div>
-            <div className="metric-value" style={{ color: isPositive ? '#22c55e' : '#ef4444' }}>{isPositive ? '+' : '−'}{currencySymbol()}{money(Math.abs(roi.abs || 0))}</div>
-            <div className="metric-footer">{roi.pct === null ? t('dash.roiUnset') : t('dash.roiVsCost', { pct: `${isPositive ? '+' : ''}${roi.pct}` })}</div>
-          </div>;
-        })()}
-
-        <RealizedGainCard statsTrigger={statsTrigger} currency={summary.currency || reportingCurrency} />
+        <PortfolioAccountingSummary statsTrigger={statsTrigger} game={gameFilter} currency={summary.currency || reportingCurrency} />
 
         <div className="glass-panel metric-card accent-cards">
           <div className="metric-header"><span>{t('dash.totalCards')}</span><span className="metric-icon"><Library size={18} /></span></div>
@@ -234,7 +219,7 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
         </div>
       </div>
 
-      <PerformanceChart statsTrigger={statsTrigger} />
+      <PerformanceChart statsTrigger={statsTrigger} game={gameFilter} />
 
       <div className="dashboard-details">
         <div className="glass-panel">

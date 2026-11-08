@@ -1,10 +1,11 @@
+// sale-aware-timeline-v1
 'use strict';
 const { dailySchema, dailyUpsert } = require('../../../shared/investmentLedgerSchema.json');
 function createCollector({ db, getPortfolio, createValuation, connectRead, now = Date.now, timeZone = 'UTC', scopes = ['', 'pokemon', 'mtg', 'lorcana'] }) {
   const formatter = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
   let ready, inflight;
   async function run() {
-    if (!ready) ready = db.run(dailySchema).catch(error => { ready = null; throw error; });
+    if (!ready) ready = db.run(dailySchema).then(() => db.run(require('./timelineAccounting').schema)).catch(error => { ready = null; throw error; });
     await ready;
     const users = await db.all('SELECT id FROM users ORDER BY id');
     const result = { captured: 0, errors: [] };
@@ -15,6 +16,7 @@ function createCollector({ db, getPortfolio, createValuation, connectRead, now =
         const timestamp = now(), valuation = createValuation('USD');
         await connection.run('BEGIN'); reading = true;
         const portfolio = await getPortfolio(user.id, game, valuation, connection);
+        const accounting = await require('./timelineAccounting').readAccounting(connection,user.id,game,valuation,portfolio,require('./performanceHistory').dayAt(timestamp,timeZone));
         const ledger = await connection.get('SELECT COALESCE(MAX(id),0) AS ledger_id FROM investment_event WHERE user_id = ?', [user.id]);
         await connection.run('COMMIT'); reading = false;
         const value = Math.round(portfolio.totalValue * 100), invested = Math.round(portfolio.totalSpent * 100);
@@ -24,7 +26,10 @@ function createCollector({ db, getPortfolio, createValuation, connectRead, now =
         const day = `${parts.year}-${parts.month}-${parts.day}`, gain = value - invested;
         const roi = invested > 0 ? Number((gain / invested * 100).toFixed(6)) : null;
         const unpriced = (portfolio.cards || []).reduce((sum, card) => sum + (card.price_trend > 0 ? 0 : card.quantity || 1), 0);
+        await connection.run('BEGIN IMMEDIATE'); reading = true;
         await connection.run(dailyUpsert, [user.id, game, 'USD', timeZone, day, timestamp, value, cards, sealed, invested, gain, roi, ledger.ledger_id, valuation.metadata().staleRates ? 1 : 0, unpriced, portfolio.sealed.holdings.unpricedUnits || 0]);
+        await require('./timelineAccounting').save(connection,[user.id,game,'USD',timeZone,day,timestamp],accounting);
+        await connection.run('COMMIT'); reading = false;
         result.captured++;
       } catch (error) {
         if (reading) await connection.run('ROLLBACK').catch(() => {});

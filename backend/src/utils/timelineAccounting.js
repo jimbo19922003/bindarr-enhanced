@@ -1,3 +1,4 @@
+// sale-adjustments-v1
 'use strict';
 const schema=`CREATE TABLE IF NOT EXISTS portfolio_accounting_daily(user_id INTEGER NOT NULL,game TEXT NOT NULL,currency TEXT NOT NULL,time_zone TEXT NOT NULL,day TEXT NOT NULL,recorded_at INTEGER NOT NULL,accounting_json TEXT NOT NULL,PRIMARY KEY(user_id,game,currency,time_zone,day))`;
 const valid=n=>Number.isSafeInteger(n)&&n>=0;
@@ -39,7 +40,8 @@ async function readAccounting(db,user,game,valuation,portfolio,day){
  }
  async function sales(table,card){
   if(!await has(table))return;
-  const rows=await db.all(card?`SELECT r.* FROM ${table} r LEFT JOIN card_cache cc ON cc.id=r.card_id WHERE r.user_id=? AND r.sold_on<=?${game?' AND cc.game=?':''}`:`SELECT * FROM ${table} WHERE user_id=? AND sold_on<=?`,card&&game?[user,day,game]:[user,day]);
+  const source=await require('./saleAdjustments').effectiveSource(db,table);
+  const rows=await db.all(card?`SELECT r.* FROM ${source} r LEFT JOIN card_cache cc ON cc.id=r.card_id WHERE r.user_id=? AND r.sold_on<=?${game?' AND cc.game=?':''}`:`SELECT * FROM ${source} WHERE user_id=? AND sold_on<=?`,card&&game?[user,day,game]:[user,day]);
   for(const row of rows){if(row.currency!=='USD'||!valid(row.sold_basis_cents)||!valid(row.proceeds_cents)||!valid(row.fees_cents)||!Number.isSafeInteger(row.realized_gain_cents)){unknownSaleCount++;continue;}const gain=row.proceeds_cents-row.fees_cents-row.sold_basis_cents;if(gain!==row.realized_gain_cents)throw new Error('Recorded sale basis and gain differ');knownRealizedGainCents=sum(knownRealizedGainCents,gain);}
  }
  await sales('card_sale_record',true);if(!game||game==='pokemon')await sales('sealed_sale_record',false);

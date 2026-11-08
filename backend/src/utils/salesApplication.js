@@ -1,3 +1,4 @@
+// sale-adjustments-v1
 // completed-rip-basis-v1
 // contextual-sales-v1
 'use strict';
@@ -54,6 +55,9 @@ function createSalesApplication({connect}) {
   const db=await connect();let began=false;try{await db.run('BEGIN');began=true;const result=await work(db);await db.run('COMMIT');began=false;return result;}catch(e){if(began)await db.run('ROLLBACK').catch(()=>{});throw e;}finally{await db.close();}
  }
  return {
+  adjustmentPreview(user,id,body) {return require('./saleAdjustments').createSaleAdjustments({connect}).preview(user,id,body);},
+  adjustSale(user,id,body) {return require('./saleAdjustments').createSaleAdjustments({connect}).apply(user,id,body);},
+  saleAudit(user,id) {return require('./saleAdjustments').createSaleAdjustments({connect}).audit(user,id);},
   items(user,{kind='card',q=''}={}) {
    if(!['card','sealed'].includes(kind))throw fail(400,'Choose card or sealed');
    const term='%'+String(q).slice(0,100)+'%';

@@ -1,3 +1,4 @@
+// sale-aware-timeline-v1
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -11,8 +12,8 @@ test('snapshot day uses collector timezone, not browser timezone', () => {
   assert.throws(() => bounds('invalid', instant, 'UTC'));
 });
 test('gain uses each observation cost; zero cost has no percentage', () => {
-  assert.equal(point({ value_cents: 15000, invested_cents: 10000 }).gainPct, 50);
-  assert.equal(point({ value_cents: 30000, invested_cents: 20000 }).gainPct, 50);
+  assert.equal(point({ value_cents: 15000, invested_cents: 10000 }).legacyGainPct, 50);
+  assert.equal(point({ value_cents: 30000, invested_cents: 20000 }).legacyGainPct, 50);
   assert.equal(point({ value_cents: 100, invested_cents: 0 }).gainPct, null);
 });
 test('handler scopes reads to authenticated owner and canonical snapshot dimensions', async () => {

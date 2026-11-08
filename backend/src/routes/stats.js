@@ -1,3 +1,4 @@
+// dashboard-accounting-v1
 const express = require('express');
 const db = require('../db');
 const { resolveCardPrice, isVintageSet, parseSqliteUtc } = require('../utils/priceHelpers');
@@ -109,6 +110,12 @@ router.get('/stats', async (req, res) => {
       sealedBreakdown: { sets: bucketList(sealedBySet), types: bucketList(sealedByType) },
       openingPerformance: await openingPerformanceFor(req.user.id, game) });
   } catch (error) { failure(res, error, 'Failed to compute statistics'); }
+});
+
+router.get('/stats/accounting', async (req,res) => {
+  res.set('Cache-Control','no-store');
+  try { res.json(await require('../utils/dashboardAccounting').readSummary({connect:()=>require('../utils/salesRepository').openConnection(db.dbPath),user:req.user?.id,game:String(req.query.game||''),currency:String(req.query.currency||'USD')})); }
+  catch(error) { failure(res,error,'Failed to compute portfolio accounting'); }
 });
 
 router.get('/stats/performance', require('../utils/performanceHistory').createPerformanceHandler({ db }));

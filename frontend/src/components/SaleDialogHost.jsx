@@ -1,3 +1,4 @@
+// sale-adjustments-v1
 // completed-rip-basis-v1
 import {useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
@@ -41,7 +42,7 @@ export default function SaleDialogHost({showToast}) {
     <div className="sales-confirm-actions"><button type="button" className="btn btn-secondary" disabled={busy} onClick={reset}>Back</button><button type="button" className="btn btn-primary" disabled={busy||(preview.realizedGainCents==null&&!ack)} onClick={confirm}>{busy?'Saving...':'Confirm sale'}</button></div>
    </div>}
    {error&&<p role="alert">{error} Retry here or check Sales History before starting a new sale.</p>}
-   <small>Totals, not per-unit prices. The selected copy/lot is fixed. No automatic FIFO. Sale reversal is not available yet.</small>
+   <small>Totals, not per-unit prices. The selected copy/lot is fixed. No automatic FIFO. Correction and guarded undo are available in Sales History.</small>
    </form>
   </div>
  </div>,document.body);
