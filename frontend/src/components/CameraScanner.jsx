@@ -16,6 +16,7 @@ import { shouldCapture, shouldRearm, nextChangedFrames, autoStatusKey } from '..
 import { zoomRange, initialZoom } from '../utils/cameraZoom';
 import { pickPreferredCamera, nextCamera } from '../utils/cameraPick';
 import { assertCameraAllowed, cameraFailureMessage } from '../utils/cameraAccess';
+import { cameraRequestWithDeadline } from '../utils/cameraWait';
 import { defaultGame, gameOptions, showGamePicker, isGameEnabled } from '../utils/games';
 import { isNative } from '../apiBase';
 import { useT } from '../utils/i18n';
@@ -99,7 +100,7 @@ const stopTracks = (s) => s?.getTracks().forEach(track => track.stop());
 
 // One place for the stream constraints, so a picked lens gets the same
 // resolution and zoom request as the default one.
-const openCamera = (deviceId) => navigator.mediaDevices.getUserMedia({
+const openCamera = (deviceId) => cameraRequestWithDeadline(() => navigator.mediaDevices.getUserMedia({
   video: {
     // A picked lens is exact; otherwise use the back camera on phones.
     ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' }),
@@ -116,13 +117,13 @@ const openCamera = (deviceId) => navigator.mediaDevices.getUserMedia({
     zoom: true
   },
   audio: false
-});
+}));
 
 // Cameras for the lens picker. Never fails the camera open over it: a browser
 // without enumerateDevices just gets no picker.
 const listVideoInputs = async () => {
   try {
-    const devices = await navigator.mediaDevices.enumerateDevices?.();
+    const devices = await cameraRequestWithDeadline(() => navigator.mediaDevices.enumerateDevices?.(), { timeoutMs: 2000, stage: 'device enumeration' });
     return (devices || []).filter(d => d.kind === 'videoinput' && d.deviceId);
   } catch (err) {
     console.warn('enumerateDevices failed:', err);

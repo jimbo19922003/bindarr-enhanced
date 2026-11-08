@@ -11,6 +11,8 @@ export function cameraFailureMessage(error) {
   switch (error?.name) {
     case 'CameraPolicyError':
       return 'This page blocks camera access through its permissions policy. If using an embedded Codespaces preview, open the forwarded app URL in its own browser tab and allow camera access there.';
+    case 'CameraTimeoutError':
+      return error.message || 'The browser camera request timed out. Check site and operating-system camera permissions.';
     case 'NotAllowedError':
     case 'SecurityError':
       return 'Camera access was denied. Check camera permission for this site in Chrome and your operating system. If using an embedded Codespaces preview, open the forwarded app URL in its own browser tab.';
