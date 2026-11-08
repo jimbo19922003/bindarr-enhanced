@@ -1,0 +1,9 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createArtworkRepairClient} from '../src/utils/artworkRepairClient.mjs';
+const id='tcgdex-en-30th-c-012';
+const response=(state,status=200)=>({ok:status>=200&&status<300,status,json:async()=>state});
+test('duplicate cards share one repair and pending jobs are polled without extra starts',async()=>{const calls=[];const client=createArtworkRepairClient({sleep:async()=>{},request:async(url,options)=>{calls.push({url,options});return calls.length===1?response({state:'pending'},202):response({state:'available',url:'/api/card-art/'+id+'.png?v=1'});}});const [a,b]=await Promise.all([client.repair(id),client.repair(id)]);assert.equal(a.state,'available');assert.deepEqual(a,b);assert.equal(calls.length,2);assert.equal(calls[0].options.method,'POST');assert.equal(calls[1].options.method,'GET');await client.repair(id);assert.equal(calls.length,2);});
+test('unavailable and unauthorized results are cached instead of repeated on each render',async()=>{for(const result of [response({state:'unavailable'}),response({},403)]){let calls=0;const client=createArtworkRepairClient({request:async()=>{calls++;return result;}});await client.repair(id);await client.repair(id);assert.equal(calls,1);}});
+test('server-provided external URLs cannot become card images',async()=>{const client=createArtworkRepairClient({request:async()=>response({state:'available',url:'https://example.invalid/image'})});assert.equal((await client.repair(id)).state,'unavailable');});
+test('polling has a finite limit',async()=>{let calls=0;const client=createArtworkRepairClient({sleep:async()=>{},request:async()=>{calls++;return response({state:'pending'},202);}});assert.equal((await client.repair(id)).state,'unavailable');assert.equal(calls,40);});
