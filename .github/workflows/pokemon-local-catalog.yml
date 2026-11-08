@@ -1,18 +1,20 @@
-name: Pokemon local catalog storage tests
+name: Pokemon local catalog storage and sync tests
 on:
   push:
     branches: ['release/pokemon-local-first']
     paths:
       - 'backend/src/utils/pokemonLocalCatalog*'
+      - 'backend/src/utils/pokemonCatalogSync*'
       - '.github/workflows/pokemon-local-catalog.yml'
   pull_request:
     paths:
       - 'backend/src/utils/pokemonLocalCatalog*'
+      - 'backend/src/utils/pokemonCatalogSync*'
       - '.github/workflows/pokemon-local-catalog.yml'
 permissions:
   contents: read
 jobs:
-  catalog-storage:
+  catalog-storage-and-sync:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -22,9 +24,10 @@ jobs:
           node-version: '24'
       - name: Install isolated SQLite test dependency
         run: npm install --prefix "$RUNNER_TEMP/catalog-deps" --no-audit --no-fund sqlite3@6.0.1
-      - name: Validate storage syntax and regression tests
+      - name: Validate storage and synchronization regressions
         env:
           NODE_PATH: ${{ runner.temp }}/catalog-deps/node_modules
         run: |
           node --check backend/src/utils/pokemonLocalCatalog.js
-          node --test backend/src/utils/pokemonLocalCatalog.test.js
+          node --check backend/src/utils/pokemonCatalogSync.js
+          node --test backend/src/utils/pokemonLocalCatalog.test.js backend/src/utils/pokemonCatalogSync.test.js
