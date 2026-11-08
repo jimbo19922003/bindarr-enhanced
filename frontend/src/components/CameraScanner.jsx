@@ -99,7 +99,7 @@ const CAMERA_KEY = 'scan_camera_id';
 const stopTracks = (s) => s?.getTracks().forEach(track => track.stop());
 
 // One place for the stream constraints, so a picked lens gets the same
-// resolution and zoom request as the default one.
+// resolution preference as the default one; optional PTZ is not requested.
 const openCamera = (deviceId) => cameraRequestWithDeadline(() => navigator.mediaDevices.getUserMedia({
   video: {
     // A picked lens is exact; otherwise use the back camera on phones.
@@ -112,9 +112,7 @@ const openCamera = (deviceId) => cameraRequestWithDeadline(() => navigator.media
     // that cannot manage it degrades instead of failing getUserMedia.
     width: { ideal: 1920 },
     height: { ideal: 1080 },
-    // Chrome only reports caps.zoom (and honours zoom constraints) when the
-    // stream was requested with it. Browsers that don't know it ignore it.
-    zoom: true
+    // Basic startup does not request optional pan/tilt/zoom permission.
   },
   audio: false
 }));
