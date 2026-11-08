@@ -10,15 +10,17 @@ function createLocalPokemonCards({connect}){
  async function cached(db,id){if(typeof id!=='string'||!id||id.length>600||id.includes('\0'))return null;const row=await db.get("SELECT * FROM card_cache WHERE id=? AND game='pokemon'",[id]);if(!row)return null;if(id.startsWith('tcgdex-')){const identity=splitId(id);if(!identity||resolveLanguage(row.language)?.code!==identity.code)return null;}return parse(row);}
  return {
   getCardById(id){return read(db=>cached(db,id));},
-  printingInLanguage(card,target){return read(async db=>{
-   const identity=splitId(card?.id),want=resolveLanguage(target);
-   if(!identity||!want||identity.code===want.code||REGIONAL.has(identity.code)||REGIONAL.has(want.code))return null;
-   const source=await cached(db,card.id);if(!source)return null;
-   if(!await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='pokemon_catalog_active'"))return null;
-   const id='tcgdex-'+want.code+'-'+identity.providerId;
-   const member=await db.get("SELECT cc.id FROM pokemon_catalog_card pc JOIN pokemon_catalog_active a ON a.snapshot_id=pc.snapshot_id JOIN card_cache cc ON cc.id=pc.id WHERE a.language=? AND cc.id=? AND cc.game='pokemon' AND cc.language=?",[want.code,id,want.name]);
-   return member?cached(db,id):null;
-  }),}
+  printingInLanguage(card,target){
+   return read(async db=>{
+    const identity=splitId(card?.id),want=resolveLanguage(target);
+    if(!identity||!want||identity.code===want.code||REGIONAL.has(identity.code)||REGIONAL.has(want.code))return null;
+    const source=await cached(db,card.id);if(!source)return null;
+    if(!await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='pokemon_catalog_active'"))return null;
+    const id='tcgdex-'+want.code+'-'+identity.providerId;
+    const member=await db.get("SELECT cc.id FROM pokemon_catalog_card pc JOIN pokemon_catalog_active a ON a.snapshot_id=pc.snapshot_id JOIN card_cache cc ON cc.id=pc.id WHERE a.language=? AND cc.id=? AND cc.game='pokemon' AND cc.language=?",[want.code,id,want.name]);
+    return member?cached(db,id):null;
+   });
+  }
  };
 }
 let instance;
