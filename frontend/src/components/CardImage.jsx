@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { cardBackFor } from '../utils/cardBack';
 import { artUrl, useCardArtIndex } from '../utils/cardArt';
+import { useMissingArtwork } from '../utils/useMissingArtwork';
 
 // Every card image in the app. A drop-in for the plain <img src={card.image_url}>
 // this replaced: className, style, loading, draggable and the rest pass straight
@@ -30,11 +31,16 @@ export default function CardImage({ card, src, alt, game, ...imgProps }) {
   // `src` overrides rather than defaults, so passing src={null} explicitly still
   // means "no provider art" instead of falling through to card.image_url.
   const provider = src !== undefined ? src : card?.image_url;
+  // artwork-browser-v1: reuse local art and repair only missing English references.
+  const hasArt = !!cardId && index.has(cardId);
+  const repair = useMissingArtwork(cardId, !provider && !hasArt);
+  const repairedUrl = repair?.state === 'available' ? repair.url : null;
   const back = cardBackFor(game ?? card?.game);
 
   const chain = [
-    cardId && index.has(cardId) ? artUrl(cardId) : null,
+    hasArt ? (repairedUrl || artUrl(cardId)) : null,
     provider || null,
+    !hasArt ? repairedUrl : null,
     back,
   ].filter(Boolean);
 
@@ -61,6 +67,8 @@ export default function CardImage({ card, src, alt, game, ...imgProps }) {
       alt={alt ?? card?.name ?? ''}
       // Lets callers style or test the placeholder state without re-deriving it.
       data-card-back={isBack ? 'true' : undefined}
+      data-artwork-repair={hasArt ? 'available' : repair?.state}
+      title={imgProps.title ?? (!hasArt && repair?.state === 'unavailable' ? 'Artwork unavailable from configured sources.' : !hasArt && repair?.state === 'not_authorized' ? 'An administrator must repair missing artwork.' : undefined)}
       onError={(e) => {
         if (step < chain.length - 1) setStep(step + 1);
         imgProps.onError?.(e);

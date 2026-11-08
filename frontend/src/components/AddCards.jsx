@@ -41,7 +41,7 @@ function AddCards({ active = true, onAddSuccess, showToast, setActiveTab, initia
         {mode === 'slab' && <SlabLookup onAddSuccess={onAddSuccess} showToast={showToast} />}
       </div>
       <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>
-        Artwork fallback data: <a href="https://carddex.dev" target="_blank" rel="noopener noreferrer">Data by CardDex</a>. Coverage varies; automatic artwork repair is not connected yet.
+        Artwork fallback data: <a href="https://carddex.dev" target="_blank" rel="noopener noreferrer">Data by CardDex</a>. Missing English artwork can be repaired in the background for administrators. External lookups may use provider allowance; coverage varies.
       </p>
     </div>
   );
