@@ -1,6 +1,6 @@
 from pathlib import Path
 import hashlib
-EXPECTED={'frontend/src/components/SetupWizard.jsx':'eebde769ed754313c7f9e8c171d55822227d5bbc','frontend/src/components/LocalCatalogStatusPanel.jsx':'ee39a3cc2f1da101dd873b9daee91473df02e3ca','backend/src/routes/localCatalogStatus.js':'524b5e21605ccbe2c3c6b24918e38d013b6d924c'}
+EXPECTED={'frontend/src/components/SetupWizard.jsx':'eebde769ed754313c7f9e8c171d55822227d5bbc','frontend/src/components/LocalCatalogStatusPanel.jsx':'bed8e5a6ede60c7434ed409fec560b045624bfd5','backend/src/routes/localCatalogStatus.js':'524b5e21605ccbe2c3c6b24918e38d013b6d924c'}
 MARKER='// catalogue-setup-installed-v1'
 def once(text,old,new):
  if text.count(old)!=1:raise SystemExit('Reviewed setup integration point changed: '+old[:100])
