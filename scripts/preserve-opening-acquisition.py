@@ -11,7 +11,7 @@ def main():
  old_signature='async function addCardToCollection(user, body) {'
  new_signature='async function addCardToCollection(user, body, { openingPull = false } = {}) {'
  old_call="const added = await collection.addCardToCollection(user, { card_id: pull.cardId, quantity: pull.quantity, language: known?.language || 'English', purchase_price: 0, game: known?.game || 'pokemon', location_id: null });"
- new_call=old_call[:-3]+', { openingPull: true });'
+ new_call=old_call[:-2]+', { openingPull: true });'
  if new_signature in route and new_call in sealed:return
  if new_signature in route or new_call in sealed:raise SystemExit('Partial opening acquisition integration; refusing to rewrite')
  raw=opening.read_bytes();digest=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
