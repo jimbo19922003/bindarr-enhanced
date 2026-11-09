@@ -1,0 +1,10 @@
+import {useEffect,useState} from 'react';
+export default function OpeningBasisPanel({openingId,entryId}){
+ const [data,setData]=useState(null),[error,setError]=useState('');
+ useEffect(()=>{setData(null);setError('');if(!openingId&&!entryId)return undefined;const controller=new AbortController();const endpoint=openingId?`/api/sealed/openings/${openingId}/allocation`:`/api/sealed/copies/${entryId}/basis`;fetch(endpoint,{cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json();if(!response.ok)throw new Error(body.error||'Could not read allocated opening cost.');return body;}).then(body=>{if(!controller.signal.aborted)setData(body);}).catch(failure=>{if(!controller.signal.aborted)setError(failure.message);});return()=>controller.abort();},[openingId,entryId]);
+ if(!openingId&&!entryId||data?.status==='not_opening')return null;
+ const money=cents=>`${data?.currency||'USD'} ${(cents/100).toFixed(2)}`;
+ return <section style={{border:'1px solid var(--border-glass)',padding:'0.75rem',borderRadius:'var(--radius-sm)'}}><h4 style={{margin:'0 0 0.5rem'}}>Allocated opening cost</h4>
+  {error?<p role="status">{error}</p>:!data?<p>Checking saved rip allocation…</p>:data.status!=='allocated'?<p role="status">Pending: {data.reason}</p>:<>{entryId?<p>{money(data.allocatedCostCents)} for this physical copy.</p>:<><p>Original opening cost: {money(data.totalCostCents)}. {data.frozen?'Frozen acquisition allocation.':'Calculated from the saved rip; unsold edits are recalculated on save.'}</p><details><summary>Per-copy allocation</summary><ul style={{maxHeight:220,overflowY:'auto'}}>{data.lines.map(line=><li key={line.pullId}>{line.cardId||'Unlinked/bulk pull'}: {money(line.costCents)} across {line.quantity} copy/copies.<ul>{line.copies.map(copy=><li key={copy.collectionId}>Collection #{copy.collectionId}: {money(copy.costCents)}</li>)}</ul>{line.unlinkedBasisCents>0&&<span>Unlinked cost: {money(line.unlinkedBasisCents)}</span>}</li>)}</ul></details></>}<p>This is allocated acquisition basis, not a second purchase or the card’s market value.</p></>}
+ </section>;
+}
