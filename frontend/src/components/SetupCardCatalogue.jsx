@@ -1,0 +1,22 @@
+import { useCallback, useEffect, useState } from 'react';
+const endpoint='/api/admin/local-catalog/setup';
+async function request(path='',body){const response=await fetch(endpoint+path,{method:body?'POST':'GET',cache:'no-store',...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Catalogue request failed.');return result;}
+export default function SetupCardCatalogue({active=true}){
+ const [data,setData]=useState(null),[selected,setSelected]=useState([]),[state,setState]=useState({running:false,job:null}),[message,setMessage]=useState(''),[loading,setLoading]=useState(false),[refresh,setRefresh]=useState(0);
+ const load=useCallback(async()=>{setLoading(true);try{const value=await request();setData(value);setState({running:value.running,job:value.job});setSelected(previous=>previous.length?previous:value.languages.some(row=>row.code==='en'&&row.available&&!row.installed)?['en']:[]);setRefresh(value=>value+1);}catch(error){setMessage(error.message);}finally{setLoading(false);}},[]);
+ useEffect(()=>{if(active)load();},[active,load]);
+ useEffect(()=>{if(!active||!state.running)return undefined;let live=true,inflight=false,polls=0;const timer=setInterval(async()=>{if(inflight)return;if(++polls>120){clearInterval(timer);if(live)setMessage('Installation may still be running. Refresh status to check; no additional install was started.');return;}inflight=true;try{const value=await request('/job');if(live){setState(value);if(!value.running){clearInterval(timer);await load();}}}catch(error){if(live)setMessage(error.message);}finally{inflight=false;}},1500);return ()=>{live=false;clearInterval(timer);};},[active,state.running,state.job?.id,refresh,load]);
+ if(!active)return null;
+ const wanted=(data?.languages||[]).filter(row=>selected.includes(row.code)&&row.available&&!row.installed&&!row.needsRepair);
+ async function install(){if(!wanted.length||!window.confirm('Install missing local card catalogues for '+wanted.map(row=>row.name).join(', ')+'? This downloads metadata only. Existing installed catalogues and collection records will not be replaced.'))return;setMessage('');setLoading(true);try{setState(await request('',{languages:wanted.map(row=>row.code),confirmed:true}));}catch(error){setMessage(error.message);}finally{setLoading(false);}}
+ return <section><h3>Card catalogue languages</h3><p>This is the language printed on your cards, not the menu language. Existing catalogues are reused. Metadata, prices, artwork and scanner indexes are separate.</p>
+  {data&&!data.sourceAvailable&&<p role="status">No published catalogue download is available right now. Existing installed data can still be used. Refresh after a validated catalogue release is published; no commit ID or server path is needed here.</p>}
+  {(data?.languages||[]).map(row=><label key={row.code} style={{display:'block',margin:'0.5rem 0'}}><input type="checkbox" checked={row.installed||selected.includes(row.code)} disabled={state.running||row.installed||!row.available||row.needsRepair} onChange={event=>setSelected(previous=>event.target.checked?[...previous,row.code]:previous.filter(code=>code!==row.code))} />{' '}{row.name} — {row.installed?'installed':row.needsRepair?'needs reviewed repair':row.available?'available to download and verify':'not in the published source'}</label>)}
+  <button type="button" className="btn btn-primary" disabled={loading||state.running||!wanted.length||wanted.length>5} onClick={install}>Install missing catalogues</button>{' '}<button type="button" className="btn btn-secondary" disabled={loading} onClick={load}>Refresh status</button>
+  {wanted.length>5&&<p>Select at most five languages per installation.</p>}
+  {state.job&&<div role="status"><p>Installation: {state.job.phase}</p><ul>{state.job.languages.map(row=><li key={row.code}>{row.code}: {row.state}{row.message?' — '+row.message:''}{row.code&&row.state==='failed'&&row.code.startsWith('CATALOG_')?' ('+row.code+')':''}</li>)}</ul></div>}
+  {data&&<p>Local-search mode: {data.localModeEnabled?'enabled':'disabled; installing metadata does not change provider routing'}.</p>}
+  {message&&<p role="alert">{message}</p>}
+  <p>Accepted installations continue on the server if you close setup. After a server restart, refresh status and install only the languages still missing. You can also set this up later in Admin.</p>
+ </section>;
+}
