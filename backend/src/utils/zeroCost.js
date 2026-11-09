@@ -19,5 +19,6 @@ async function prepare(db){
  SELECT CASE WHEN NEW.purchase_price IS NULL OR NEW.purchase_price!=0 OR NEW.list_type!='collection' THEN RAISE(ABORT,'Invalid confirmed zero acquisition') END;
  INSERT INTO card_acquisition_lot(user_id,collection_id,source,original_quantity,remaining_quantity,original_basis_cents,remaining_basis_cents,currency) VALUES(NEW.user_id,NEW.id,'direct',NEW.quantity,NEW.quantity,0,0,'USD');
  END`);
+ await require('./collectionRemoval').prepare(db);
 }
 module.exports={parsePurchaseCost,prepare};

@@ -35,6 +35,7 @@ async function install(db) {
     BEGIN SELECT RAISE(ABORT,'This lot has sales; acquisition changes and restocking require a correction workflow'); END;
     `);
   }
+  await require('./collectionRemoval').prepare(db);
 }
 async function hasSealedSales(db,lotId,userId) {
   if (!await exists(db,'sealed_sale_record')) return false;
