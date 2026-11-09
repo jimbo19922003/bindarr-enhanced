@@ -1,12 +1,14 @@
+// catalogue-setup-installed-v1
 import { useEffect, useState } from 'react';
 import { Cpu, Download, Check, X, Layers, MapPin, Trash2, Pencil, ArrowLeft, ArrowRight, Camera, Database, Swords, LayoutDashboard, Settings as SettingsIcon, Languages } from 'lucide-react';
 import { GAMES, enabledGames, setGameEnabled, defaultGame, gameLabel } from '../utils/games';
 import { containerTypeKey } from '../utils/cardOptions';
 import { LOCALES, localeName, useT } from '../utils/i18n';
 import SetupProviderKeys from './SetupProviderKeys';
+import SetupCardCatalogue from './SetupCardCatalogue';
 
 const NEW_LOCATION_TYPES = ['Binder', 'Box', 'Deck Box'];
-const STEPS = ['language', 'cards', 'scanning', 'keys', 'storage', 'tour'];
+const STEPS = ['language', 'cards', 'catalogue', 'scanning', 'keys', 'storage', 'tour'];
 const markComplete = () => fetch('/api/settings', {
   method: 'PUT', headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ setup_complete: true }),
@@ -219,19 +221,20 @@ export default function SetupWizard({ user, onUpdateUser, onClose, showToast }) 
   </>;
   const last = step === STEPS.length - 1;
   // Keep the key component mounted so navigating back does not discard unsaved entries.
-  const content = [language, cardsStep, scanning, null, storage, tour][step];
+  const content = [language, cardsStep, null, scanning, null, storage, tour][step];
   return <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}>
     <div style={{ width: '100%', maxWidth: 580, maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: '1.25rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-glow)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
         <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
-          {STEPS.map((s, i) => <div key={s} title={t(`setup.step.${s}`)} style={{ width: i === step ? 20 : 8, height: 8, borderRadius: 4, background: i === step ? 'var(--accent-red)' : i < step ? 'var(--type-grass)' : 'var(--surface-3)', transition: 'width 0.15s' }} />)}
-          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: '0.4rem' }}>{t(`setup.step.${STEPS[step]}`)} · {t('setup.stepCount', { step: step + 1, total: STEPS.length })}</span>
+          {STEPS.map((s, i) => <div key={s} title={s === 'catalogue' ? 'Card catalogue' : t(`setup.step.${s}`)} style={{ width: i === step ? 20 : 8, height: 8, borderRadius: 4, background: i === step ? 'var(--accent-red)' : i < step ? 'var(--type-grass)' : 'var(--surface-3)', transition: 'width 0.15s' }} />)}
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: '0.4rem' }}>{STEPS[step] === 'catalogue' ? 'Card catalogue' : t(`setup.step.${STEPS[step]}`)} · {t('setup.stepCount', { step: step + 1, total: STEPS.length })}</span>
         </div>
         <button type="button" onClick={onClose} aria-label={t('common.close')} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}><X size={18} /></button>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.25rem' }}>
         {content}
-        <div hidden={step !== 3} style={{ display: step === 3 ? 'flex' : 'none', flexDirection: 'column', gap: '1rem' }}>
+        <SetupCardCatalogue active={step === STEPS.indexOf('catalogue')} />
+        <div hidden={step !== STEPS.indexOf('keys')} style={{ display: step === STEPS.indexOf('keys') ? 'flex' : 'none', flexDirection: 'column', gap: '1rem' }}>
           <SetupProviderKeys user={user} onUpdateUser={onUpdateUser} showToast={showToast} />
         </div>
       </div>
