@@ -1,20 +1,19 @@
-name: Deploy Demo to GitHub Pages
+name: Build demo and optionally deploy to GitHub Pages
 
-# Builds the frontend in demo mode (fixture-backed, no backend) and publishes it
-# to GitHub Pages. Manual dispatch, plus any push to main that touches the
-# frontend. Enable Pages -> Source: GitHub Actions in repo settings once.
+# The fixture-backed demo has no backend and is unrelated to self-hosted readiness.
+# Publication is opt-in: enable Pages with Source: GitHub Actions and set the
+# repository Actions variable ENABLE_PAGES_DEMO=true. Only main may publish.
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-    paths: [ 'frontend/**' ]
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/pages-demo.yml'
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
-# One live deploy at a time; don't cancel an in-progress one.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -27,24 +26,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Build demo bundle
+      - name: Build demo bundle without requiring Pages
         working-directory: frontend
         env:
           VITE_DEMO: '1'
         run: |
           npm ci
           npm run build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - name: Explain disabled optional publication
+        if: vars.ENABLE_PAGES_DEMO != 'true' || github.ref != 'refs/heads/main'
+        run: echo 'Demo build completed. Pages publication is skipped unless ENABLE_PAGES_DEMO=true on main. No Pages site is required for self-hosting.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Package explicitly enabled Pages deployment
+        if: vars.ENABLE_PAGES_DEMO == 'true' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist
 
   deploy:
     needs: build
+    if: vars.ENABLE_PAGES_DEMO == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Configure the explicitly enabled Pages site
+        uses: actions/configure-pages@v5
       - id: deployment
         uses: actions/deploy-pages@v4
