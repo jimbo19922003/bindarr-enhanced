@@ -44,14 +44,29 @@ test('finalized provenance rejects edits/deletions but current market quotes may
   } finally { await db.close(); }
   assert.equal((await repo.finalize(1,1)).lines.find(line => line.pullId===1).costCents,900);
 });
-test('incomplete or unpriced contents do not create finalized snapshots', async t => {
+test('incomplete or genuinely unpriced contents do not create finalized snapshots', async t => {
   const { connect, repo } = await fixture(t); let db = await connect();
   await db.run('UPDATE sealed_opening SET entry_complete=0'); await db.close();
   assert.equal((await repo.finalize(1,1)).status,'pending');
-  db = await connect(); await db.run('UPDATE sealed_opening SET entry_complete=1'); await db.run('UPDATE sealed_pull SET opened_line_cents=NULL WHERE id=2'); await db.close();
+  db = await connect(); await db.run('UPDATE sealed_opening SET entry_complete=1');
+  await db.run('UPDATE sealed_pull SET opened_line_cents=NULL,opened_unit_cents=NULL WHERE id=2'); await db.close();
   assert.equal((await repo.finalize(1,1)).status,'pending');
   db = await connect();
   try { assert.equal((await db.get('SELECT COUNT(*) AS n FROM opening_basis_snapshot')).n,0); } finally { await db.close(); }
+});
+test('saved unit-only opening values finalize and preserve the full opening cost', async t => {
+  const {connect,repo}=await fixture(t),db=await connect();
+  await db.run('UPDATE sealed_pull SET opened_line_cents=NULL');await db.close();
+  const result=await repo.finalize(1,1);
+  assert.equal(result.status,'finalized');
+  assert.equal(result.lines.reduce((sum,line)=>sum+line.costCents,0),1000);
+  assert.equal(result.lines.find(line=>line.pullId===1).copies[0].costCents,900);
+  assert.equal(result.lines.find(line=>line.pullId===2).unlinkedBasisCents,100);
+});
+test('conflicting saved opening unit and line values fail without finalizing a snapshot',async t=>{
+ const {connect,repo}=await fixture(t),db=await connect();await db.run('UPDATE sealed_pull SET opened_line_cents=8000 WHERE id=1');await db.close();
+ await assert.rejects(repo.finalize(1,1),{status:409});
+ const check=await connect();try{const table=await check.get("SELECT name FROM sqlite_master WHERE type='table' AND name='opening_basis_snapshot'");if(table)assert.equal((await check.get('SELECT COUNT(*) AS n FROM opening_basis_snapshot')).n,0);}finally{await check.close();}
 });
 test('cross-owner finalization and changed filed copies are rejected', async t => {
   const { connect, repo } = await fixture(t);
