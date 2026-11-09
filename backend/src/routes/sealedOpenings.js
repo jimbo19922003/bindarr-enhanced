@@ -36,7 +36,7 @@ async function forgetFiled(userId, ids) {
 async function filePull(user, pull, currency) {
   if (!pull.cardId || pull.collectionId) return;
   const known = await cardFor(pull.cardId);
-  const added = await collection.addCardToCollection(user, { card_id: pull.cardId, quantity: pull.quantity, language: known?.language || 'English', purchase_price: 0, game: known?.game || 'pokemon', location_id: null });
+  const added = await collection.addCardToCollection(user, { card_id: pull.cardId, quantity: pull.quantity, language: known?.language || 'English', purchase_price: 0, game: known?.game || 'pokemon', location_id: null }, { openingPull: true });
   pull.filedIds = added.ids?.length ? added.ids : [added.id]; pull.collectionId = added.id;
   const owned = await db.get('SELECT card_id FROM collection WHERE id = ? AND user_id = ?', [added.id, user.id]);
   if (owned?.card_id) pull.cardId = owned.card_id;

@@ -1,3 +1,5 @@
+// zero-cost-confirmation-v1
+import { installZeroCostConfirmation } from './utils/zeroCostConfirmation.mjs';
 import { Capacitor } from '@capacitor/core';
 
 // Web build is served same-origin as the API, so relative `/api/...` paths work
@@ -23,3 +25,5 @@ if (isNative) {
     return orig(input, init);
   };
 }
+
+installZeroCostConfirmation(window);

@@ -1,3 +1,5 @@
+// zero-cost-confirmation-v1
+const zeroCost = require('../utils/zeroCost');
 const express = require('express');
 const db = require('../db');
 const tcgApi = require('../tcgApi');
@@ -684,7 +686,7 @@ class AddCardError extends Error {
 // and means an ungraded card, not a missing value.
 const GRADERS = ['Raw', 'PSA', 'BGS', 'CGC', 'SGC', 'TAG'];
 
-async function addCardToCollection(user, body) {
+async function addCardToCollection(user, body, { openingPull = false } = {}) {
   const {
     card_id,
     quantity = 1,
@@ -706,6 +708,9 @@ async function addCardToCollection(user, body) {
   if (!card_id) {
     throw new AddCardError(400, 'card_id is required');
   }
+
+  const cost = zeroCost.parsePurchaseCost(body, { openingPull });
+  if (!cost.ok) { const error = new AddCardError(cost.status, cost.error); error.code = cost.code; throw error; }
 
   // Grading, validated here rather than at the two call sites, so the single add
   // and the bulk add cannot disagree about what a slab is.
@@ -815,19 +820,19 @@ async function addCardToCollection(user, body) {
     // Stacking is quantity-on-one-row, which is meaningful only for interchangeable
     // copies. Two slabs are never interchangeable: they have different certs, and
     // usually different grades.
-    const stack = stackable && !isGraded;
+    const stack = stackable && !isGraded && !cost.confirmedZero;
 
     if (stack) {
       const result = await db.run(`
         INSERT INTO collection (
           card_id, user_id, quantity, condition, printing, language, purchase_price,
           location_id, compartment_id, position, is_trade, list_type, game,
-          grader, grade, cert_number
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          grader, grade, cert_number, zero_cost_confirmed
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        cardId, req.user.id, count, condition, printing, language, purchase_price || 0,
+        cardId, req.user.id, count, condition, printing, language, cost.amount,
         targetLocationId, resolved.compartment_id, resolved.position, is_trade ? 1 : 0, list_type, effectiveGame,
-        grader, gradeValue, certValue
+        grader, gradeValue, certValue, cost.confirmedZero && list_type === 'collection' ? 1 : 0
       ]);
       lastInsertedId = result.lastID;
       insertedIds.push(lastInsertedId);
@@ -837,12 +842,12 @@ async function addCardToCollection(user, body) {
           INSERT INTO collection (
             card_id, user_id, quantity, condition, printing, language, purchase_price,
             location_id, compartment_id, position, is_trade, list_type, game,
-            grader, grade, cert_number
-          ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            grader, grade, cert_number, zero_cost_confirmed
+          ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          cardId, req.user.id, condition, printing, language, purchase_price || 0,
+          cardId, req.user.id, condition, printing, language, cost.amount,
           targetLocationId, resolved.compartment_id, resolved.position + (i * 0.001), is_trade ? 1 : 0, list_type, effectiveGame,
-          grader, gradeValue, certValue
+          grader, gradeValue, certValue, cost.confirmedZero && list_type === 'collection' ? 1 : 0
         ]);
         lastInsertedId = result.lastID;
         insertedIds.push(lastInsertedId);
@@ -911,7 +916,7 @@ router.post('/collection', async (req, res) => {
     res.status(200).json(await addCardToCollection(req.user, req.body));
   } catch (error) {
     if (error instanceof AddCardError) {
-      return res.status(error.status).json({ error: error.message });
+      return res.status(error.status).json({ error: error.message, code: error.code });
     }
     console.error(error);
     res.status(500).json({ error: 'Failed to add card' });
@@ -937,6 +942,8 @@ router.post('/collection/bulk-add', async (req, res) => {
   }
   // Sequential on purpose: placement resolves against the rows already inserted,
   // so adds must not race each other for the same compartment slot.
+  const costCheck = zeroCost.parsePurchaseCost(shared);
+  if (!costCheck.ok) return res.status(costCheck.status).json({error:costCheck.error,code:costCheck.code});
   const added = [];
   const failed = [];
   for (const card_id of card_ids) {

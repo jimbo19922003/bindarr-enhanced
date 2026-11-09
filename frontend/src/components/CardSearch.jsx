@@ -1,3 +1,4 @@
+// zero-cost-confirmation-v1
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Plus, X, ShieldAlert, Check, MousePointerClick, Zap, Undo2, Maximize2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -307,7 +308,7 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
           condition,
           printing,
           language,
-          purchase_price: parseFloat(purchasePrice) || 0,
+          purchase_price: purchasePrice === '' ? null : Number(purchasePrice),
           game
         })
       });
@@ -345,7 +346,7 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
         condition,
         printing,
         language,
-        purchase_price: parseFloat(purchasePrice) || 0,
+        purchase_price: purchasePrice === '' ? null : Number(purchasePrice),
         game,
         location_id: null
       })
@@ -500,7 +501,7 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
           condition,
           printing,
           language,
-          purchase_price: parseFloat(purchasePrice) || 0,
+          purchase_price: purchasePrice === '' ? null : Number(purchasePrice),
           location_id: null,
           grader,
           grade: grade === '' ? null : parseFloat(grade),
