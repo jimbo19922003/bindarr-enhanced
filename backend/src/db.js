@@ -1,3 +1,4 @@
+// zero-cost-confirmation-v1
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
@@ -426,6 +427,7 @@ async function initDb() {
   `);
 
   // --- MIGRATIONS ---
+  await require('./utils/zeroCost').prepare({run,get,all});
   // When each game's price sweep last ran. Scryfall updates prices once a day,
   // so a sweep more often than that cannot return anything new — and the boot
   // sweep would otherwise re-run on every restart (constantly, under nodemon).
