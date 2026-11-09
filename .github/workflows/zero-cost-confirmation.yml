@@ -21,13 +21,17 @@ jobs:
           node-version: '20'
       - run: |
           python3 scripts/activate-zero-cost.py
+          python3 scripts/preserve-opening-acquisition.py
           git diff > /tmp/zero-first.diff
           python3 scripts/activate-zero-cost.py
+          python3 scripts/preserve-opening-acquisition.py
           git diff > /tmp/zero-second.diff
           cmp /tmp/zero-first.diff /tmp/zero-second.diff
           git diff --check
       - run: npm ci --prefix backend
-      - run: node --test backend/test/zeroCost.test.js frontend/test/zeroCostConfirmation.test.mjs
+      - run: node --test backend/test/zeroCost.test.js backend/test/zeroCostOpening.test.js frontend/test/zeroCostConfirmation.test.mjs
+      - name: Recheck the unchanged sealed-opening regression test
+        run: node backend/test/sealedOpening.test.js
       - run: npm test --prefix backend
       - run: npm ci --prefix frontend
       - run: npm run lint --prefix frontend
@@ -37,7 +41,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/src/db.js backend/src/routes/collection.js frontend/src/apiBase.js frontend/src/components/CardSearch.jsx
+          git add backend/src/db.js backend/src/routes/collection.js backend/src/routes/sealedOpenings.js frontend/src/apiBase.js frontend/src/components/CardSearch.jsx
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'fix: activate confirmed zero-basis card additions'
+          git commit -m 'fix: activate confirmed zero-basis additions without changing opening costs'
           git push origin HEAD:fix/confirmed-zero-cost

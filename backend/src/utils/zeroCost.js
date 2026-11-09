@@ -1,6 +1,8 @@
 'use strict';
-function parsePurchaseCost(body={}){
+function parsePurchaseCost(body={}, {openingPull=false}={}){
  const raw=body.purchase_price;
+ // Only trusted internal callers supply this second argument; never read it from JSON.
+ if(openingPull===true&&raw===0)return {ok:true,amount:null,confirmedZero:false};
  if(raw==null||typeof raw==='string'&&!raw.trim())return {ok:true,amount:null,confirmedZero:false};
  const invalid=()=>({ok:false,status:400,code:'INVALID_PURCHASE_COST',error:'Enter a valid nonnegative purchase cost with at most two decimal places, or leave it blank for unknown cost.'});
  if(!['string','number'].includes(typeof raw)||typeof raw==='string'&&!/^\d+(?:\.\d{1,2})?$/.test(raw.trim()))return invalid();
