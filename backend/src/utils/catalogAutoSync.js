@@ -14,7 +14,7 @@ let languageQueue = new Set();
 let onDemandInProgress = false;
 
 function isEnabled() {
-  return process.env.POKEMON_LOCAL_CATALOG === '1';
+  return process.env.POKEMON_CATALOG_AUTOSYNC !== '0';
 }
 
 function getConfiguredLanguages() {
@@ -42,7 +42,7 @@ function createService(connect) {
 
 async function runInitialSync(connect) {
   if (!isEnabled()) {
-    console.log('[catalog-auto-sync] Local catalog mode not enabled (POKEMON_LOCAL_CATALOG != 1)');
+    console.log('[catalog-auto-sync] Disabled (POKEMON_CATALOG_AUTOSYNC=0)');
     return { skipped: true, reason: 'not_enabled' };
   }
 
@@ -83,7 +83,7 @@ function stopPeriodicSync() {
 
 function status() {
   if (!isEnabled()) {
-    return { enabled: false, reason: 'POKEMON_LOCAL_CATALOG not set to 1' };
+    return { enabled: false, reason: 'POKEMON_CATALOG_AUTOSYNC=0' };
   }
 
   if (!syncService) {
@@ -107,7 +107,7 @@ async function addLanguage(connect, languageCode) {
   }
 
   if (!isEnabled()) {
-    throw new Error('Local catalog mode is not enabled');
+    throw new Error('Catalog auto-sync is disabled');
   }
 
   const code = lang.code;
@@ -163,13 +163,27 @@ async function addLanguage(connect, languageCode) {
   }
 }
 
+function startSync(connect) {
+  if (!isEnabled()) return { started: false, reason: 'disabled' };
+  if (!syncService) syncService = createService(connect);
+  const current = syncService.status();
+  if (current.running) return { started: false, alreadyRunning: true, ...current };
+  const pending = syncService.sync();
+  const snapshot = syncService.status();
+  if (!snapshot.running) return { started: false, deferred: true, ...snapshot };
+  pending.catch((err) => {
+    console.error('[catalog-auto-sync] Sync failed:', err.message);
+  });
+  return { started: true, ...snapshot };
+}
+
 async function initialize(connect) {
   if (!isEnabled()) {
-    console.log('[catalog-auto-sync] Disabled (POKEMON_LOCAL_CATALOG != 1)');
+    console.log('[catalog-auto-sync] Disabled (POKEMON_CATALOG_AUTOSYNC=0)');
     return;
   }
 
-  console.log('[catalog-auto-sync] Initializing...');
+  console.log('[catalog-auto-sync] Initializing English catalogue sync...');
 
   setTimeout(async () => {
     try {
@@ -185,6 +199,7 @@ async function initialize(connect) {
 module.exports = {
   initialize,
   runInitialSync,
+  startSync,
   startPeriodicSync,
   stopPeriodicSync,
   addLanguage,

@@ -323,9 +323,9 @@ db.initDb()
       });
     }
 
-    // Auto-sync local Pokémon catalog from TCGdex when POKEMON_LOCAL_CATALOG=1.
-    // Defaults to English; configure POKEMON_CATALOG_LANGUAGES for others.
-    // Syncs on startup and periodically checks for updates.
+    // Fill the English Pokémon catalogue from TCGdex on startup, then every 6 hours.
+    // Set POKEMON_CATALOG_AUTOSYNC=0 to leave this to the Admin catalogue button.
+    // POKEMON_LOCAL_CATALOG=1 is separate: it switches search onto the local snapshot.
     const catalogAutoSync = require('./utils/catalogAutoSync');
     catalogAutoSync.initialize(() => require('./utils/salesRepository').openConnection(db.dbPath));
 
