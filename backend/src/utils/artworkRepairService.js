@@ -1,3 +1,4 @@
+// artwork-catalogue-repair-v1
 'use strict';
 const {randomUUID}=require('node:crypto');
 const {createArtworkClient,findArtwork,saveMissingArtwork}=require('./pokemonArtworkRepair');
@@ -14,7 +15,7 @@ function createArtworkRepairService({connect,art,providers,saveArtwork=saveMissi
  const valid=id=>typeof id==='string'&&id.startsWith('tcgdex-en-')&&art.isValidId(id);
  const logId=id=>valid(id)?id:'invalid';
  async function using(work){const db=await connect();try{await db.exec(schema);return await work(db);}finally{await db.close();}}
- const eligible=id=>using(db=>db.get("SELECT cc.* FROM card_cache cc JOIN pokemon_catalog_card pc ON pc.id=cc.id JOIN pokemon_catalog_active a ON a.snapshot_id=pc.snapshot_id WHERE cc.id=? AND a.language='en' AND cc.language='English' AND cc.game='pokemon'",[id]));
+ const eligible=id=>using(db=>db.get("SELECT cc.* FROM card_cache cc WHERE cc.id=? AND cc.language='English' AND cc.game='pokemon'",[id]));
  const available=(id,provider='local',at=now())=>({state:'available',provider,url:'/api/card-art/'+encodeURIComponent(id)+'.png?v='+at});
  function attemptsOf(value){return Array.isArray(value)?value.slice(0,2).map(item=>({provider:['carddex','pokewallet'].includes(item?.provider)?item.provider:'unknown',status:allowed.has(item?.status)?item.status:'upstream'})):[];}
  async function record(id,state,provider,attempts,retry){await using(db=>db.run('INSERT INTO pokemon_artwork_repair_job VALUES(?,?,?,?,?,?) ON CONFLICT(card_id) DO UPDATE SET state=excluded.state,provider=excluded.provider,attempts_json=excluded.attempts_json,checked_at=excluded.checked_at,retry_at=excluded.retry_at',[id,state,provider,JSON.stringify(attempts),now(),retry]));}
@@ -28,7 +29,7 @@ function createArtworkRepairService({connect,art,providers,saveArtwork=saveMissi
  }
  async function startJob(id){
   const existing=await status(id);if(existing.state!=='unknown'){audit('cached_or_existing_result',{cardId:logId(id),state:existing.state,attempts:existing.attempts||[],retryAt:existing.retryAt||null});return existing;}
-  const card=await eligible(id);if(!card||String(card.image_url||'').trim()){const reason=card?'provider_reference_present':'not_in_active_snapshot';audit('not_eligible',{cardId:logId(id),reason});return {state:'not_eligible',reason};}
+  const card=await eligible(id);if(!card||String(card.image_url||'').trim()){const reason=card?'provider_reference_present':'not_cached';audit('not_eligible',{cardId:logId(id),reason});return {state:'not_eligible',reason};}
   if(pending.has(id))return {state:'pending',jobId:pending.get(id).jobId};
   if(pending.size>=2){audit('busy',{cardId:id});return {state:'busy',reason:'job_limit'};}
   const jobId=randomUUID();

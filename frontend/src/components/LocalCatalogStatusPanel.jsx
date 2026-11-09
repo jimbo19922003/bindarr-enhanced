@@ -1,3 +1,5 @@
+// catalogue-setup-installed-v1
+import SetupCardCatalogue from './SetupCardCatalogue';
 // provider-keys-consolidated-v1
 import { useEffect, useState } from 'react';
 import LocalCatalogImportPanel from './LocalCatalogImportPanel';
@@ -25,6 +27,7 @@ export default function LocalCatalogStatusPanel() {
   const choices = [{code:'en',name:'English'}, ...(data?.availableLanguages || []).filter(item => item.code !== 'en')];
   return <section className="glass-panel" style={{marginBottom:'1rem'}}>
     <h3 style={{marginTop:0}}>Pokémon catalogue</h3>
+    <SetupCardCatalogue />
     <div style={{display:'flex',gap:'0.75rem',alignItems:'center',flexWrap:'wrap'}}>
       <label>Language <select className="input-control" value={language} onChange={event => setLanguage(event.target.value)}>
         {choices.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
