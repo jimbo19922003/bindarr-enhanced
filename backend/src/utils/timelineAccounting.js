@@ -1,5 +1,6 @@
 // sale-adjustments-v1
 'use strict';
+const {wholeOpeningBasis}=require('./openingGroupBasis');
 const schema=`CREATE TABLE IF NOT EXISTS portfolio_accounting_daily(user_id INTEGER NOT NULL,game TEXT NOT NULL,currency TEXT NOT NULL,time_zone TEXT NOT NULL,day TEXT NOT NULL,recorded_at INTEGER NOT NULL,accounting_json TEXT NOT NULL,PRIMARY KEY(user_id,game,currency,time_zone,day))`;
 const valid=n=>Number.isSafeInteger(n)&&n>=0;
 const sum=(a,b)=>{const n=a+b;if(!Number.isSafeInteger(n))throw new RangeError('Timeline amount exceeds safe numeric range');return n;};
@@ -13,22 +14,37 @@ async function readAccounting(db,user,game,valuation,portfolio,day){
  const pullCopies=new Set();for(const p of pulls){if(p.collection_id)pullCopies.add(p.collection_id);for(const id of String(p.filed_ids||'').split(',').map(Number))if(id>0)pullCopies.add(id);}
  const snapshots=new Map();
  if(await has('opening_basis_snapshot'))for(const row of await db.all('SELECT opening_id,snapshot_json FROM opening_basis_snapshot WHERE user_id=?',[user]))snapshots.set(row.opening_id,JSON.parse(row.snapshot_json));
+ const groupedCopies=new Set();
+ let groupedOpeningCount=0,pendingAllocationCount=0,unresolvedOpeningCount=0;
  let unknownBasisCount=0,unknownSaleCount=0,remainingBasisCents=0,knownRealizedGainCents=0,extraUnpriced=0;
  if((!game||game==='pokemon')&&await has('sealed_opening')){
   for(const opening of await db.all('SELECT * FROM sealed_opening WHERE user_id=? ORDER BY id',[user])){
+   const openingPulls=pulls.filter(p=>p.opening_id===opening.id);
+   let allocationPending=false;
    if(!snapshots.has(opening.id)){
-    const ids=pulls.filter(p=>p.opening_id===opening.id).flatMap(p=>String(p.filed_ids||'').split(',').map(Number));
+    const ids=openingPulls.flatMap(p=>String(p.filed_ids||'').split(',').map(Number));
     const candidate=ids.map(id=>ownedById.get(id)).find(Boolean);
-    if(candidate){try{const result=await require('./completedRipBasis').forCopy(db,user,{...candidate,id:candidate.entry_id},opening.id);if(result.snapshot)snapshots.set(opening.id,result.snapshot);}catch(e){if(e.status!==409)throw e;}}
+    if(candidate){try{const result=await require('./completedRipBasis').forCopy(db,user,{...candidate,id:candidate.entry_id},opening.id);if(result.snapshot)snapshots.set(opening.id,result.snapshot);else allocationPending=['Some opening-time values are missing; multi-pull allocation is pending','Multi-pull opening values do not support an allocation'].includes(result.reason);}catch(e){if(e.status!==409)throw e;}}
    }
    const snapshot=snapshots.get(opening.id);
-   if(!snapshot){unknownBasisCount++;continue;}
+   if(!snapshot){
+    const group=allocationPending?wholeOpeningBasis(opening,openingPulls,ownedById,byLot,pulls):null;
+    if(group){
+     for(const id of group.copyIds){if(groupedCopies.has(id))throw new Error('Conflicting grouped opening provenance');groupedCopies.add(id);}
+     remainingBasisCents=sum(remainingBasisCents,group.costCents);groupedOpeningCount++;pendingAllocationCount++;continue;
+    }
+    unresolvedOpeningCount++;
+    const hasOwnedCopy=openingPulls.some(p=>[p.collection_id,...String(p.filed_ids||'').split(',').map(Number)].some(id=>ownedById.has(id)));
+    if(!hasOwnedCopy)unknownBasisCount++;
+    continue;
+   }
    if(snapshot.currency!=='USD'||!Array.isArray(snapshot.lines))throw new Error('Invalid opening basis snapshot');
    for(const line of snapshot.lines){if(!valid(line.unlinkedBasisCents))throw new Error('Invalid unlinked opening basis');remainingBasisCents=sum(remainingBasisCents,line.unlinkedBasisCents);if(!line.copies.length)extraUnpriced+=line.quantity;}
   }
  }
- const byCopy=new Map();for(const snapshot of snapshots.values())for(const line of snapshot.lines)for(const copy of line.copies){if(byCopy.has(copy.collectionId))throw new Error('Conflicting opening provenance');byCopy.set(copy.collectionId,{cost:copy.costCents,cardId:line.cardId});}
+ const byCopy=new Map();for(const snapshot of snapshots.values())for(const line of snapshot.lines)for(const copy of line.copies){if(byCopy.has(copy.collectionId)||groupedCopies.has(copy.collectionId))throw new Error('Conflicting opening provenance');byCopy.set(copy.collectionId,{cost:copy.costCents,cardId:line.cardId});}
  for(const card of owned){
+  if(groupedCopies.has(card.entry_id))continue;
   const quantity=card.quantity||1,lot=byLot.get(card.entry_id),mapping=byCopy.get(card.entry_id);let basis=null;
   if(lot){if(lot.currency==='USD'&&lot.remaining_quantity===quantity&&valid(lot.remaining_basis_cents)&&(!mapping||(lot.source==='opening'&&lot.original_basis_cents===mapping.cost&&mapping.cardId===card.card_id)))basis=lot.remaining_basis_cents;}
   else if(mapping){if(quantity===1&&mapping.cardId===card.card_id&&valid(mapping.cost))basis=mapping.cost;}
@@ -49,7 +65,7 @@ async function readAccounting(db,user,game,valuation,portfolio,day){
  const value=Math.round(portfolio.totalValue*100);if(!valid(value))throw new Error('Invalid holdings value');
  const unrealizedGainCents=unknownBasisCount||unpricedCards||unpricedSealed||extraUnpriced?null:sum(value,-remainingBasisCents);
  const realizedGainCents=unknownSaleCount?null:knownRealizedGainCents;
- return {version:2,remainingBasisCents,unknownBasisCount,unknownSaleCount,knownRealizedGainCents,realizedGainCents,unrealizedGainCents,totalGainCents:realizedGainCents==null||unrealizedGainCents==null?null:sum(realizedGainCents,unrealizedGainCents),extraUnpriced};
+ return {version:2,remainingBasisCents,unknownBasisCount,unknownSaleCount,knownRealizedGainCents,realizedGainCents,unrealizedGainCents,totalGainCents:realizedGainCents==null||unrealizedGainCents==null?null:sum(realizedGainCents,unrealizedGainCents),extraUnpriced,groupedOpeningCount,pendingAllocationCount,unresolvedOpeningCount};
 }
 function decoratePoint(legacy,row){
  const a=row.accounting||(row.accounting_json?JSON.parse(row.accounting_json):null);
