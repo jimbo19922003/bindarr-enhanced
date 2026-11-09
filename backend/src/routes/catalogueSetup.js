@@ -1,3 +1,4 @@
+// artwork-catalogue-repair-v1
 'use strict';
 const express=require('express');
 const {randomUUID}=require('node:crypto');
@@ -9,7 +10,7 @@ function createCatalogueSetup({store,source}){
  let task=null,job=null;
  const status=()=>({running:!!task,job:job?JSON.parse(JSON.stringify(job)):null});
  return {status,
-  async options(){const rows=[];for(const language of LANGUAGES)rows.push({code:language.code,name:language.name,record:await store.status(language.code)});let available=null;try{available=await source.discover();}catch{}return {...status(),localModeEnabled:process.env.POKEMON_LOCAL_CATALOG==='1',sourceAvailable:!!available,languages:rows.map(row=>({code:row.code,name:row.name,installed:healthy(row.record),needsRepair:!!row.record&&!healthy(row.record),available:!!available?.languages.includes(row.code)}))};},
+  async options(){const rows=[];for(const language of LANGUAGES)rows.push({code:language.code,name:language.name,record:await store.status(language.code)});let available=null,sourceErrorCode=null;try{available=await source.discover();}catch(error){const codes=new Set(['CATALOG_RELEASE_MISSING','CATALOG_ASSET_MISSING','CATALOG_MANIFEST_INVALID','CATALOG_SOURCE_COOLDOWN','CATALOG_REDIRECT_BLOCKED','CATALOG_SOURCE_INVALID','CATALOG_DOWNLOAD_TOO_LARGE']);sourceErrorCode=codes.has(error?.code)?error.code:'CATALOG_SOURCE_UNAVAILABLE';}return {...status(),localModeEnabled:process.env.POKEMON_LOCAL_CATALOG==='1',sourceAvailable:!!available,sourceErrorCode,languages:rows.map(row=>({code:row.code,name:row.name,installed:healthy(row.record),needsRepair:!!row.record&&!healthy(row.record),available:!!available?.languages.includes(row.code)}))};},
   start(body){
    if(!body||Array.isArray(body)||Object.keys(body).some(key=>!['languages','confirmed'].includes(key))||body.confirmed!==true||!Array.isArray(body.languages)||!body.languages.length||body.languages.length>5||new Set(body.languages).size!==body.languages.length||body.languages.some(code=>!LANGUAGES.some(row=>row.code===code)))throw Object.assign(new Error('Confirm one to five supported, unique catalogue languages.'),{status:400});
    if(task)throw Object.assign(new Error('A catalogue installation is already running.'),{status:409});

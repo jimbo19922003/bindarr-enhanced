@@ -1,7 +1,9 @@
+// artwork-catalogue-repair-v1
 'use strict';
 const express=require('express');
 const {createArtworkRetry}=require('../utils/artworkRetry');
-function createArtworkRepairRouter({service,enabled=()=>process.env.POKEMON_LOCAL_CATALOG==='1',logger=entry=>console.info('[artwork-repair-route] '+JSON.stringify(entry)),retryController}){
+function artworkRepairEnabled(env=process.env){return env.POKEMON_ARTWORK_REPAIR!=='0';}
+function createArtworkRepairRouter({service,enabled=artworkRepairEnabled,logger=entry=>console.info('[artwork-repair-route] '+JSON.stringify(entry)),retryController}){
  const router=express.Router(),audit=entry=>{try{logger(entry);}catch{}};
  const recovery=retryController||createArtworkRetry({service});
  const cardId=req=>/^tcgdex-en-[A-Za-z0-9._-]{1,110}$/.test(req.params.cardId||'')&&!req.params.cardId.includes('..')?req.params.cardId:'invalid';
@@ -15,4 +17,4 @@ function createArtworkRepairRouter({service,enabled=()=>process.env.POKEMON_LOCA
  router.post('/:cardId',async(req,res)=>{if(unexpected(req)){audit({event:'blocked',reason:'unexpected_input',cardId:cardId(req)});return res.status(400).json({state:'not_eligible',reason:'unexpected_input',code:'NO_ARTWORK_INPUT_ACCEPTED'});}try{return send(res,await service.start(req.params.cardId));}catch{audit({event:'start_failed',cardId:cardId(req)});return res.status(503).json({state:'unavailable',reason:'start_unavailable',code:'ARTWORK_REPAIR_UNAVAILABLE'});}});
  return router;
 }
-module.exports={createArtworkRepairRouter};
+module.exports={createArtworkRepairRouter,artworkRepairEnabled};
