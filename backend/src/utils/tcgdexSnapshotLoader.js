@@ -84,7 +84,7 @@ async function fetchSets(lang) {
       detail = r.data;
     } catch { /* use brief data */ }
 
-    sets.push({
+    const row = {
       id: s.id,
       name: s.name || s.id,
       serie: bySet.get(s.id) || null,
@@ -93,44 +93,62 @@ async function fetchSets(lang) {
         official: s.cardCount?.official || detail?.cardCount?.official || 0,
         total: s.cardCount?.total || detail?.cardCount?.total || 0,
       },
-    });
+    };
+    if (Array.isArray(detail?.cards)) row.cards = detail.cards;
+    sets.push(row);
   }
 
   return sets;
 }
 
+function trustedImage(value) {
+  if (typeof value !== 'string' || !value) return '';
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.hostname !== 'assets.tcgdex.net') return '';
+    if (url.username || url.password || url.port || url.search || url.hash) return '';
+    return value.replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function cardFromBrief(set, brief) {
+  if (!brief || typeof brief.id !== 'string' || !brief.id.trim()) return null;
+  if (brief.localId == null || String(brief.localId).trim() === '') return null;
+  if (typeof brief.name !== 'string' || !brief.name.trim()) return null;
+  const card = {
+    id: brief.id,
+    localId: String(brief.localId),
+    name: brief.name,
+    category: brief.category,
+    stage: brief.stage,
+    types: brief.types,
+    rarity: brief.rarity,
+    set: { id: set.id, name: set.name },
+  };
+  const image = trustedImage(brief.image);
+  if (image) card.image = image;
+  return card;
+}
+
 async function fetchCards(lang, sets) {
   const cards = [];
-
   await mapLimited(sets, async (set) => {
-    const { data } = await client.get(`/${lang}/sets/${encodeURIComponent(set.id)}`);
-    const setCards = data?.cards || [];
-
-    for (const brief of setCards) {
-      if (!brief?.id) continue;
-
-      let full = null;
+    let briefs = Array.isArray(set.cards) ? set.cards : null;
+    if (!briefs) {
       try {
-        const r = await client.get(`/${lang}/cards/${encodeURIComponent(brief.id)}`);
-        full = r.data;
-      } catch { /* use brief */ }
-
-      const card = full || brief;
-      cards.push({
-        id: card.id || brief.id,
-        localId: card.localId ?? brief.localId,
-        name: card.name || brief.name,
-        category: card.category,
-        stage: card.stage,
-        types: card.types,
-        rarity: card.rarity,
-        image: card.image || brief.image,
-        set: { id: set.id, name: set.name },
-        pricing: card.pricing,
-      });
+        const { data } = await client.get(`/${lang}/sets/${encodeURIComponent(set.id)}`);
+        briefs = data?.cards || [];
+      } catch {
+        briefs = [];
+      }
+    }
+    for (const brief of briefs) {
+      const card = cardFromBrief(set, brief);
+      if (card) cards.push(card);
     }
   });
-
   return cards;
 }
 
@@ -141,10 +159,11 @@ function createTcgdexSnapshotLoader({ githubToken = process.env.TCGDEX_GITHUB_TO
 
     console.log(`[tcgdex-sync] Loading snapshot for ${language} at commit ${commit.slice(0, 8)}...`);
 
-    const sets = await fetchSets(language);
-    console.log(`[tcgdex-sync] Fetched ${sets.length} sets for ${language}`);
+    const fetched = await fetchSets(language);
+    console.log(`[tcgdex-sync] Fetched ${fetched.length} sets for ${language}`);
 
-    const cards = await fetchCards(language, sets);
+    const cards = await fetchCards(language, fetched);
+    const sets = fetched.map(({ cards: _cards, ...set }) => set);
     console.log(`[tcgdex-sync] Fetched ${cards.length} cards for ${language}`);
 
     return { commit, language, sets, cards };
@@ -201,4 +220,6 @@ module.exports = {
   fetchLatestCommit,
   fetchSets,
   fetchCards,
+  cardFromBrief,
+  trustedImage,
 };

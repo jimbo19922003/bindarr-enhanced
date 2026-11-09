@@ -15,10 +15,9 @@ function createLocalCatalogStatusRouter({connect, modeEnabled = () => process.en
 
   router.post('/sync', async (req, res) => {
     res.set('Cache-Control', 'private, no-store');
-    if (!modeEnabled()) return res.status(400).json({error: 'Local catalog mode is not enabled (POKEMON_LOCAL_CATALOG != 1)'});
+    if (!catalogAutoSync.isEnabled()) return res.status(400).json({error: 'Catalog auto-sync is disabled (POKEMON_CATALOG_AUTOSYNC=0)'});
     try {
-      const result = await catalogAutoSync.runInitialSync(connect);
-      return res.json(result);
+      return res.status(202).json(catalogAutoSync.startSync(connect));
     } catch (error) {
       console.error('Manual catalog sync failed:', error.message);
       return res.status(503).json({error: 'Catalog sync failed', message: error.message});
