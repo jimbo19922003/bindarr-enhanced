@@ -26,17 +26,15 @@ const { runSequential, PRICE_SWEEP_ORDER, safeErrorMessage } = require('./utils/
 const pokemonSetSource = async () =>
   require('./utils/pokemonProvider').apiFor('English');
 
-// One function per sweep name. PokéWallet is last in PRICE_SWEEP_ORDER: it
-// fills TCGdex rows that still have no positive price and does not replace a
-// quote another writer managed to store.
+// The CardDex sweep performs its own per-card PokéWallet fallback.
 const PRICE_SWEEPS = {
   pokemon: () => tcgApi.updateCollectionPrices(),
   mtg: () => scryfallApi.updateCollectionPrices(),
   lorcana: () => lorcastApi.updateCollectionPrices(),
   tcgdex: () => require('./tcgdexApi').updateCollectionPrices(),
   pokemontcgapi: () => require('./pokemontcgapi').updateCollectionPrices(),
-  tcgcsv: () => require('./tcgcsvApi').updateCollectionPrices(),
-  pokewallet: () => require('./pokewalletApi').updateCollectionPrices(),
+  tcgcsv: () => require('./tcgcsvApi').updateCollectionPrices(false, 'owned', true),
+  carddex: () => require('./pokemonPrices').getPokemonPrices().sweep(),
 };
 
 function runPriceSweeps() {
@@ -366,11 +364,9 @@ db.initDb()
     // Prices. Hourly tick, and NOT forced — shouldSweepPrices decides whether
     // each provider is actually due, from the admin's price_refresh_days.
     //
-    // The writers run one after another. TCGCSV is ahead of PokéWallet so a
-    // quote it actually writes is already on the row when PokéWallet looks,
-    // and PokéWallet's update refuses to replace a positive price. A blocked
-    // TCGCSV run leaves those zeros for PokéWallet to fill. A tick that arrives
-    // while a pass is still going does not start a second one.
+    // The writers run one after another, and overlapping ticks do not start
+    // another pass. CardDex handles English TCGdex IDs and tries PokéWallet
+    // when it cannot supply a usable quote.
     //
     // This used to tick daily and pass `force: true`, on the reasoning that the
     // timer was itself the right cadence. Two things came of that. The interval

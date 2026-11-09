@@ -268,6 +268,7 @@ async function initDb() {
       game TEXT DEFAULT 'pokemon',
       language TEXT DEFAULT 'English',
       printed_name TEXT,
+      available_printings TEXT,
       tcgplayer_product_id INTEGER,
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -511,6 +512,9 @@ async function initDb() {
   if (!appSettingsCols.some(c => c.name === 'price_refresh_days')) {
     await run(`ALTER TABLE app_settings ADD COLUMN price_refresh_days INTEGER NOT NULL DEFAULT 1`);
   }
+  if (!appSettingsCols.some(c => c.name === 'portfolio_time_zone')) {
+    await run(`ALTER TABLE app_settings ADD COLUMN portfolio_time_zone TEXT`);
+  }
   if (!appSettingsCols.some(c => c.name === 'lorcana_prices_swept_at')) {
     await run(`ALTER TABLE app_settings ADD COLUMN lorcana_prices_swept_at DATETIME`);
   }
@@ -598,6 +602,10 @@ async function initDb() {
           OR (SELECT COUNT(*) FROM card_cache WHERE game = 'pokemon') > 0
     `);
   }
+  if (!appSettingsCols.some(c => c.name === 'pokemon_local_catalog_enabled')) {
+    const enabled = process.env.POKEMON_LOCAL_CATALOG === '1' ? 1 : 0;
+    await run(`ALTER TABLE app_settings ADD COLUMN pokemon_local_catalog_enabled INTEGER NOT NULL DEFAULT ${enabled}`);
+  }
   if (!appSettingsCols.some(c => c.name === 'scan_exclude_tokens')) {
     await run(`ALTER TABLE app_settings ADD COLUMN scan_exclude_tokens INTEGER NOT NULL DEFAULT 0`);
   }
@@ -651,6 +659,9 @@ async function initDb() {
   // what the user OWNS), and `printed_name` holds the localized name — `name`
   // stays English so search, deck lists and marketplace links keep working.
   const cardCacheCols = await all(`PRAGMA table_info(card_cache)`);
+  if (!cardCacheCols.some(c => c.name === 'available_printings')) {
+    await run(`ALTER TABLE card_cache ADD COLUMN available_printings TEXT`);
+  }
   if (!cardCacheCols.some(c => c.name === 'language')) {
     await run(`ALTER TABLE card_cache ADD COLUMN language TEXT DEFAULT 'English'`);
   }

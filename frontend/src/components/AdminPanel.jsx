@@ -39,6 +39,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
   const [pokemonProvider, setPokemonProvider] = useState('pokemontcg');
   const [mtgPriceSource, setMtgPriceSource] = useState('tcgplayer');
   const [priceRefreshDays, setPriceRefreshDays] = useState(1);
+  const [portfolioTimeZone, setPortfolioTimeZone] = useState('America/Chicago');
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [pokewallet, setPokewallet] = useState(null);
   const [pokewalletLoading, setPokewalletLoading] = useState(false);
@@ -174,6 +175,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
         setPokemonProvider(data.pokemon_provider || 'pokemontcg');
         setMtgPriceSource(data.mtg_price_source || 'tcgplayer');
         setPriceRefreshDays(data.price_refresh_days ?? 1);
+        setPortfolioTimeZone(data.portfolio_time_zone);
       }
     } catch (err) {
       console.error(err);
@@ -250,6 +252,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
           pokemon_provider: pokemonProvider,
           mtg_price_source: mtgPriceSource,
           price_refresh_days: Number(priceRefreshDays),
+          portfolio_time_zone: portfolioTimeZone,
         })
       });
 
@@ -259,6 +262,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
         setPokemonProvider(data.pokemon_provider || 'pokemontcg');
         setMtgPriceSource(data.mtg_price_source || 'tcgplayer');
         setPriceRefreshDays(data.price_refresh_days ?? 1);
+        setPortfolioTimeZone(data.portfolio_time_zone);
         await fetchPokewallet();
         showToast(t('admin.settingsUpdated'));
       } else {
@@ -526,29 +530,28 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
                 disabled={settingsLoading}
               />
             </div>
-            {/* Which Pokémon API this install speaks to. It has always been a column
-                in app_settings and a branch in utils/pokemonProvider, with no way
-                to set it — so every install ran on pokemontcg.io whether or not it
-                suited them. The two are not interchangeable: they number the same
-                sets differently, so switching re-syncs the set table and rebuilds
-                the TCGplayer product map behind it. */}
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label htmlFor="admin-pokemon-provider">{t('admin.pokemonProvider')}</label>
-              <select
-                id="admin-pokemon-provider"
-                className="select-control"
-                value={pokemonProvider}
-                onChange={(e) => setPokemonProvider(e.target.value)}
-                disabled={settingsLoading}
-              >
-                <option value="pokemontcg">{t('admin.providerPokemontcg')}</option>
-                <option value="tcgdex">{t('admin.providerTcgdex')}</option>
-                <option value="pokemontcgapi">pokemontcgapi.com</option>
-              </select>
-              <p style={{ margin: '0.4rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                {t(pokemonProvider === 'pokemontcgapi' ? 'admin.pokemontcgapiHint' : 'admin.pokemonProviderHint')}
-              </p>
-            </div>
+            <details>
+              <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                {t('admin.pokemonProviderAdvanced')}
+              </summary>
+              <div className="form-group" style={{ margin: '0.75rem 0 0' }}>
+                <label htmlFor="admin-pokemon-provider">{t('admin.pokemonProvider')}</label>
+                <select
+                  id="admin-pokemon-provider"
+                  className="select-control"
+                  value={pokemonProvider}
+                  onChange={(e) => setPokemonProvider(e.target.value)}
+                  disabled={settingsLoading}
+                >
+                  <option value="pokemontcg">{t('admin.providerPokemontcg')}</option>
+                  <option value="tcgdex">{t('admin.providerTcgdex')}</option>
+                  <option value="pokemontcgapi">pokemontcgapi.com</option>
+                </select>
+                <p style={{ margin: '0.4rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                  {t(pokemonProvider === 'pokemontcgapi' ? 'admin.pokemontcgapiHint' : 'admin.pokemonProviderHint')} {t('admin.pokemonProviderSyncNote')}
+                </p>
+              </div>
+            </details>
             {/* Which marketplace Magic prices are read from first (#93). Scryfall
                 quotes TCGplayer in USD and Cardmarket in EUR; reading USD first left
                 European collections a mix of the two, summed as one number on the
@@ -578,6 +581,23 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
                 than a recurring courtesy. Daily stays the default — that is what
                 every install did before this existed — but someone who checks
                 their collection value monthly can now say so. */}
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label htmlFor="admin-portfolio-time-zone">{t('admin.portfolioTimeZone')}</label>
+              <input
+                id="admin-portfolio-time-zone"
+                className="input-control"
+                type="text"
+                value={portfolioTimeZone}
+                onChange={(e) => setPortfolioTimeZone(e.target.value)}
+                disabled={settingsLoading}
+                required
+                maxLength={80}
+                placeholder="America/Chicago"
+              />
+              <p style={{ margin: '0.4rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                {t('admin.portfolioTimeZoneHint')}
+              </p>
+            </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label htmlFor="admin-price-refresh">{t('admin.priceRefresh')}</label>
               <select

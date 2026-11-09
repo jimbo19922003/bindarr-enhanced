@@ -643,6 +643,9 @@ function CardInspectorModal({ card, onClose, onUpdate, onDeleted, showToast, onV
                       {t('inspector.priceVia', { source: priceSource(activeCard).name, currency: priceSource(activeCard).currency })}
                     </div>
                   )}
+                  {activeCard.price_source?.startsWith('carddex-') && (
+                    <a href="https://carddex.dev" target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.62rem' }}>Data by CardDex</a>
+                  )}
                   {/* Every price source this app has — TCGplayer, Scryfall,
                       Cardmarket — quotes RAW singles. None of them price slabs, and
                       a PSA 10 is worth a multiple of its raw copy. So for a graded

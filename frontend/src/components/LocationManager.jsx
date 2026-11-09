@@ -15,6 +15,7 @@ import PageColumnsSelect from './PageColumnsSelect';
 import CardImage from './CardImage';
 import { useBackGuard } from '../utils/useBackGuard';
 import { useT } from '../utils/i18n';
+import { priceText } from '../utils/formatPrice';
 
 // An Unsorted-queue card that can be dragged into a binder pocket. Split in two
 // so the hook only mounts when dragging is on — the queue also renders for
@@ -2196,7 +2197,7 @@ function LocationManager({ statsTrigger, onUpdate, showToast, selectedLocationId
                         </div>
                         <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name || ''}</span>
-                          {card.price_trend > 0 && <span style={{ color: 'var(--accent-yellow)', fontWeight: 600, flexShrink: 0 }}>${card.price_trend.toFixed(2)}</span>}
+                          {card.price_trend > 0 && <span style={{ color: 'var(--accent-yellow)', fontWeight: 600, flexShrink: 0 }}>{priceText(card.price_trend, card.price_currency)}</span>}
                         </div>
                       </div>
                     </DraggableCard>
@@ -2270,7 +2271,7 @@ function LocationManager({ statsTrigger, onUpdate, showToast, selectedLocationId
 
                       {card.price_trend > 0 && (
                         <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--accent-yellow)', flexShrink: 0 }}>
-                          ${card.price_trend.toFixed(2)}
+                          {priceText(card.price_trend, card.price_currency)}
                         </span>
                       )}
                     </DraggableCard>

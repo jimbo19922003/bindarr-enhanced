@@ -22,3 +22,18 @@ test('failed valuation does not save a fake daily value', async () => {
   assert.equal(result.captured, 0); assert.equal(result.errors.length, 1);
   assert.equal(writes.some(sql => sql.startsWith('INSERT')), false); assert.ok(writes.includes('ROLLBACK'));
 });
+test('timezone changes apply to the next sample without restarting', async () => {
+  const records = [];
+  let zone = 'America/Chicago';
+  const connection = { run: async (sql, params) => { if (sql.startsWith('INSERT INTO portfolio_daily_performance')) records.push(params); }, get: async () => ({ ledger_id: 0 }), close: async () => {} };
+  const collector = createCollector({
+    db: { run: async () => {}, all: async () => [{ id: 1 }] }, scopes: [''],
+    getTimeZone: async () => zone, now: () => Date.parse('2026-11-09T03:22:24Z'),
+    connectRead: async () => connection, createValuation: () => ({ metadata: () => ({ staleRates: false }) }),
+    getPortfolio: async () => ({ totalValue: 20, totalSpent: 10, cardValue: 0, cards: [], sealed: { holdings: { marketValue: 20, unpricedUnits: 0 } } }),
+  });
+  assert.equal((await collector.tick()).captured, 1);
+  zone = 'UTC';
+  assert.equal((await collector.tick()).captured, 1);
+  assert.deepEqual(records.map(row => row.slice(3, 5)), [['America/Chicago', '2026-11-08'], ['UTC', '2026-11-09']]);
+});

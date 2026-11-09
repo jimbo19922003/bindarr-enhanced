@@ -15,7 +15,7 @@ const quotes = Object.fromEntries(Object.entries(rates).map(([code, rate]) => [c
 localStorage.setItem('bindarr_fx_rates_v1', JSON.stringify({ at: Date.now(), quotes }));
 const {
   CURRENCIES, DEFAULT_CURRENCY, SYMBOLS, getCurrency, setCurrency,
-  currencySymbol, activeCurrencySymbol, formatPrice, priceText, convertDisplayAmount,
+  currencySymbol, activeCurrencySymbol, formatPrice, priceText, convertDisplayAmount, reportingTotal, reportingTotalText,
 } = await import('./formatPrice.js');
 
 test('formatPrice: formats numbers and handles legacy edge cases', () => {
@@ -102,6 +102,18 @@ test('conversion requires both positive rates and does not modify quotes', () =>
   assert.equal(convertDisplayAmount(3, 'USD', 'GBP', { USD: { rate: 1 }, GBP: { rate: 0 } }), null);
   assert.equal(convertDisplayAmount('invalid', 'USD', 'GBP', quotes), null);
   assert.equal(JSON.stringify(quotes), before);
+});
+
+test('collection totals convert each quote to the selected currency before summing', () => {
+  setCurrency('EUR');
+  assert.equal(reportingTotal([
+    { price_trend: 10, price_currency: 'USD', quantity: 2 },
+    { price_trend: 5, price_currency: 'EUR', quantity: 1 },
+  ]), 21);
+  assert.equal(reportingTotal([{ price_trend: 3, price_currency: 'XYZ' }]), null);
+  assert.equal(reportingTotalText(null), '— (FX unavailable)');
+  assert.equal(reportingTotalText(21), '€21.00');
+  localStorage.clear();
 });
 
 test('CURRENCIES list has valid codes, symbols and labels', () => {

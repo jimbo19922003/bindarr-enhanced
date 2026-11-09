@@ -52,7 +52,7 @@ const TYPE_COLORS = {
   'Steel': '#94a3b8'
 };
 
-function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEntryId, onUpdate, showToast }) {
+function Dashboard({ statsTrigger, onNavigate, onNavigateToSet, setSelectedLocationId, setFocusEntryId, onUpdate, showToast }) {
   const { t, locale } = useT();
   // Money and dates follow the interface language, not the browser's: a user who
   // picked German sees 1.234,56 and 3.8.2026 even on an en-US browser.
@@ -386,7 +386,13 @@ function Dashboard({ statsTrigger, onNavigate, setSelectedLocationId, setFocusEn
                 {setProgress.map((set, idx) => (
                   <div key={idx} className="set-progress-item">
                     <div className="set-progress-header">
-                      <span style={{ color: 'var(--text-strong)' }}>{set.setName}</span>
+                      <button
+                        type="button"
+                        onClick={() => onNavigateToSet?.({ setId: set.setId, game: set.setGame })}
+                        style={{ border: 0, padding: 0, background: 'none', color: 'var(--text-strong)', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+                      >
+                        {set.setName}
+                      </button>
                       <span style={{ color: 'var(--text-secondary)' }}>{set.ownedUnique} / {set.totalCards} ({set.percent}%)</span>
                     </div>
                     <div className="set-progress-bar-bg">

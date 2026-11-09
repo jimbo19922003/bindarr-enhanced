@@ -18,7 +18,7 @@ router.get('/index', (req, res) => {
     res.json({ ids: cardArt.listIds() });
   } catch (error) {
     console.error('Failed to list card art:', error.message);
-    res.json({ ids: [] }); // a broken index must not blank every card image
+    res.status(503).json({ error: 'Could not list card artwork' });
   }
 });
 

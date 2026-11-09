@@ -85,7 +85,11 @@ const isVintageSet = (setId) => {
 async function recordPrice(cardId, price) {
   if (!cardId || !(price > 0)) return false;
   const db = require('../db');
-  const card = await db.get(`SELECT price_currency FROM card_cache WHERE id = ?`, [cardId]);
+  const card = await db.get(`SELECT price_currency, price_source, price_trend FROM card_cache WHERE id = ?`, [cardId]);
+  // CardDex history is read from its own endpoint rather than accumulated as
+  // local snapshots; a recovered history point must not be re-recorded either.
+  if (card?.price_source?.startsWith('carddex-') || card?.price_source === 'cached-history') return false;
+  if (card?.price_source?.startsWith('pokewallet') && Number(card.price_trend) !== Number(price)) return false;
   const currency = (card && card.price_currency) || 'USD';
   const last = await db.get(
     `SELECT price, currency FROM price_history WHERE card_id = ? ORDER BY recorded_at DESC LIMIT 1`,

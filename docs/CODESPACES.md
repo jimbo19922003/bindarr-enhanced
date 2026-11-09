@@ -56,6 +56,18 @@ There is no Vite dev server and no hot reload. A frontend edit rebuilds the
 production bundle; refresh the browser after that build finishes. A backend
 JavaScript edit restarts through nodemon.
 
+Portfolio snapshots use `America/Chicago` by default. Change the instance-wide
+portfolio timezone in Admin → Instance Settings, or set `PORTFOLIO_TIMEZONE`
+before an admin saves an override. The chart shows only snapshots recorded in
+the selected timezone; changing it does not rebuild missing past days. Samples
+run at startup and every 15 minutes while the server is running.
+
+For Pokémon catalogue artwork, Admin → Scan catalogs shows provider-reference,
+local-art and missing-image counts by language and set. References are not
+availability checks. Select a set there to review cards with neither and upload
+images you have permission to use. Re-syncing a set can pick up new TCGdex
+references; it does not download the images or guarantee complete coverage.
+
 ## First account and data
 
 The database is `.devcontainer/data/bindarr.db`. Git ignores that directory.
@@ -70,9 +82,14 @@ restart, so you log in on the next resume instead of creating it again.
 
 ## Secrets
 
-Put `POKEWALLET_API_KEY` in a repository Codespaces secret if you want live
-price lookups. The server reads it. The browser bundle does not. A missing
-key leaves prices unchanged and the Admin page says the key is not configured.
+CardDex price reads work without a key; put `CARDDEX_API_KEY` in a repository
+Codespaces secret for keyed access. Put `POKEWALLET_API_KEY` there to enable
+the fallback. The server reads these keys; the browser bundle does not. If
+neither provider returns a usable price, an existing quote is retained.
+TCGdex's English 30th Celebration set (`30th`) maps to CardDex's `30c`;
+individual quotes still require matching card details and a confirmed finish.
+Quotes retain their source currency and are converted for display; a quote in a
+different currency replaces incompatible older finish prices.
 Do not commit `.env` or paste the key into chat, logs, or screenshots.
 
 Provider calls and scanner model downloads may still use external services.

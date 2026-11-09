@@ -7,6 +7,8 @@ const express = require('express');
 process.env.DB_PATH = path.join(os.tmpdir(), `bindarr-rip-fx-${process.pid}.db`);
 process.env.DEFAULT_ADMIN_PASSWORD = 'test-admin-password';
 const db = require('../src/db');
+require('../src/utils/cardApi').hydrate = async () => {};
+require('../src/pokemonPrices').getPokemonPrices = () => ({ refreshCard: async () => {} });
 let available = true;
 require('../src/utils/currencyConversion').convertCents = async (amount, from, to) => ({
   convertedCents: !available && from !== to ? null : Math.round(amount * (from === to ? 1 : 1.25)), stale: false,
@@ -77,6 +79,21 @@ async function main() {
     assert.strictEqual((await send('DELETE', `/api/sealed/openings/${opening.id}`)).status, 200);
     assert.strictEqual((await db.get('SELECT COUNT(*) AS n FROM collection WHERE user_id = ?', [admin.id])).n, 0);
     assert.strictEqual((await db.get('SELECT remaining_quantity FROM sealed_lot WHERE id = ?', [lotId])).remaining_quantity, 2);
+    await db.run(`UPDATE card_cache SET available_printings = '["Holofoil","Reverse Holofoil"]', price_holofoil = 8, price_reverse_holofoil = NULL WHERE id = 'tcgdex-en-rip-eur'`);
+    const invalidPrinting = await send('POST', `/api/sealed/lots/${lotId}/openings`, { pulls: [{ card_id: 'tcgdex-en-rip-eur', quantity: 1, printing: 'Normal' }] });
+    assert.strictEqual(invalidPrinting.status, 400);
+    const finishes = await send('POST', `/api/sealed/lots/${lotId}/openings`, { pulls: [
+      { card_id: 'tcgdex-en-rip-eur', quantity: 2, printing: 'Holofoil' },
+      { card_id: 'tcgdex-en-rip-eur', quantity: 1, printing: 'Reverse Holofoil' },
+    ] });
+    assert.strictEqual(finishes.status, 201, JSON.stringify(finishes.body));
+    const finishPulls = finishes.body.opening.pulls;
+    assert.strictEqual(finishPulls[0].current_value, '10.00');
+    assert.strictEqual(finishPulls[1].current_value, null);
+    const copies = await db.all('SELECT printing FROM collection WHERE user_id = ? ORDER BY id', [admin.id]);
+    assert.deepStrictEqual(copies.map(row => row.printing), ['Holofoil', 'Holofoil', 'Reverse Holofoil']);
+    await send('GET', `/api/sealed/products/${productId}/openings`);
+    assert.strictEqual((await db.get('SELECT current_unit_cents FROM sealed_pull WHERE id = ?', [finishPulls[1].id])).current_unit_cents, null);
   } finally { await new Promise(resolve => server.close(resolve)); }
   console.log('sealedOpening.test.js: all assertions passed');
 }

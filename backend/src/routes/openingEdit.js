@@ -7,6 +7,7 @@ const { createHash } = require('crypto');
 const db = require('../db');
 const opening = require('../utils/sealedOpening');
 const { applyPullPrice } = require('../utils/ripValuation');
+const { validatePrinting } = require('../utils/cardPrintings');
 const router = express.Router();
 const canon = value => Array.isArray(value) ? value.map(canon) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canon(value[key])])) : value;
 const digest = value => createHash('sha256').update(JSON.stringify(canon(value))).digest('hex');
@@ -84,11 +85,12 @@ router.put('/sealed/openings/:id/edit', async (req, res) => {
       if (!pull.savedId && pull.cardId) {
         const card = cards.get(pull.cardId);
         if (!card) throw fail('Card not found');
+        if (raw.printing != null) validatePrinting(card, pull.printing);
         if (pull.collectionId) throw fail('New entries must not supply existing collection links');
         opening.fillFromCard(pull, card);
         pull.currentUnit = null; pull.currentLine = null; pull.currentBlank = true;
         pull.openedUnit = null; pull.openedLine = null;
-        await applyPullPrice(pull, { ...card, printing: 'Normal' }, original.currency);
+        await applyPullPrice(pull, { ...card, printing: pull.printing }, original.currency, { exactPrinting: true });
         opening.snapshotOpeningValue(pull);
       } else if (!pull.savedId) opening.snapshotOpeningValue(pull);
       if (!pull.name) throw fail('Pull name is required');
@@ -149,7 +151,7 @@ router.put('/sealed/openings/:id/edit', async (req, res) => {
       const filed = [];
       if (pull.cardId) {
         if (changes.addedCopies + pull.quantity > 500) throw fail('Add at most 500 collection copies per edit');
-        for (let i = 0; i < pull.quantity; i++) filed.push(await copyCard(tx, userId, cards.get(pull.cardId)));
+        for (let i = 0; i < pull.quantity; i++) filed.push(await copyCard(tx, userId, { ...cards.get(pull.cardId), printing: pull.printing }));
         changes.addedCopies += filed.length;
       }
       await tx.run(`INSERT INTO sealed_pull (user_id, opening_id, card_id, collection_id, name, set_name, number, image_url, quantity, current_unit_cents, current_line_cents, opened_unit_cents, opened_line_cents, filed_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -32,6 +32,7 @@ Try it without installing anything at **[thenotoriousjeremy.github.io/bindarr](h
 - **Physical location tracking** — binders by page and slot (1–9), boxes by row and divider, with layout and scalable image-list views. Drag cards between pockets to arrange a binder, or file them by tapping on a phone.
 - **Deck Builder & checkout** — build decks, edit their properties, import ManaBox decklists, reserve cards for play, and see exactly which checked-out deck makes a copy unavailable.
 - **Search and bulk add** — search or browse a whole set with multi-select; pin a set and add by collector number one keystroke at a time.
+- **Collection filters** — find duplicates of the same catalog card across conditions and finishes, or cards with no provider artwork reference and no local artwork. Image links are not checked for availability.
 - **Dashboard** — Executive (net worth, total invested, timeline), Sealed (what is still on the shelf), Rip report (opened product against its cost), and Cards (set completion, rarity, type, and where copies live).
 - **Sealed product** — a Pokémon catalog and the purchase lots you bought, kept apart from loose cards. Open a unit, record the pulls, and file those cards into the collection.
 - **Graded slabs** — record grader, grade and cert number per copy (PSA cert lookup fills them in), and give a slab its own value instead of the raw card's price.
@@ -156,8 +157,11 @@ All optional.
 | `DEFAULT_ADMIN_PASSWORD` | — | Create the `admin` account with this password at startup instead of letting the first browser visit create the owner account. Only applied while the `users` table is empty — changing it later does nothing to an existing account. |
 | `POKEMON_TCG_API_KEY` | — | **Only for installs still on the pokemontcg.io provider.** Raises its rate limit from 1,000 to 20,000 requests/day. pokemontcg.io is deprecated: [new registrations are closed](https://dev.pokemontcg.io/) and existing keys stop working on **1 March 2027**. New installs default to TCGdex, which needs no key — leave this unset. |
 | `POKEMONTCGAPI_KEY` | unset | Server-side key for the optional [pokemontcgapi.com provider](#pokemon-data-providers). Setting a key alone does not enable it. |
-| `POKEWALLET_API_KEY` | unset | Server-side key for PokéWallet price lookups. When set, Admin → PokéWallet prices can fill English TCGdex cards that still have no positive price. Card ids are not changed, and a price already stored from another source is left alone. The key is never returned to the browser. |
+| `POKEWALLET_API_KEY` | unset | Server-side key for PokéWallet price lookups, including fallback when CardDex cannot price a supported card. Card IDs are not changed. The key is never returned to the browser. |
+| `CARDDEX_API_KEY` | unset | Optional server-side CardDex key; public reads work without one. A key saved in Settings takes precedence. |
 | `PUBLIC_BASE_URL` | — | External URL behind a proxy, e.g. `https://cards.example.com`. Used for share links and auto-allowed as a CORS origin, so proxied logins work with just this. Also editable in the Admin panel. |
+| `PORTFOLIO_TIMEZONE` | `America/Chicago` | IANA timezone for daily portfolio snapshots and sale accounting. An admin's saved portfolio timezone takes precedence. Existing snapshots remain in their original timezone and are only shown when that timezone is selected; missing days are not reconstructed. |
+| `PORTFOLIO_SAMPLE_MINUTES` | `15` | Interval between portfolio samples while the server is running (1–1440 minutes); a sample also runs at startup. |
 | `CORS_ORIGIN` | — | Extra allowed origins, comma-separated. Localhost and private-LAN origins are always allowed. |
 | `ALLOW_REGISTRATION` | unset | `true` allows self-registration. Unset means invite-only: admins create accounts. |
 | `OIDC_ENABLED` | `false` | Set to `true` to enable OpenID Connect / SSO login (Authelia, Authentik, Keycloak, etc.). |
@@ -277,6 +281,24 @@ API contract and coverage: [documentation](https://pokemontcgapi.com/docs),
 [OpenAPI](https://pokemontcgapi.com/openapi.json),
 [regional coverage](https://pokemontcgapi.com/coverage).
 
+For English `tcgdex-en-` Pokémon card IDs, owned and decked cards use CardDex
+first and then PokéWallet when CardDex cannot provide a confirmed, fresh base
+printing price. Existing positive quotes are retained when both fail. If the
+current price is empty, the latest compatible positive recorded or cached
+history point is restored when available; otherwise the card remains unpriced.
+Current quotes keep their source and currency.
+Only confirmed base finishes are written; other editions and languages can
+remain unpriced or rely on their retained compatibility paths. CardDex history
+for an owned card is fetched on demand and cached as a replaceable provider
+response; existing local history is not deleted. CardDex publishes at most
+365 days of history through this endpoint.
+
+CardDex and artwork requests share a conservative budget of 25 requests per
+minute and 4,500 per rolling day, and respect cooldowns. Automatic pricing
+handles at most 25 cards per hourly tick and follows the admin refresh interval.
+These limits also apply when no CardDex key is configured. Data by
+[CardDex](https://carddex.dev); prices name Cardmarket or TCGplayer.
+
 PokéWallet is a separate price lookup, not another catalogue. Set
 `POKEWALLET_API_KEY` on the server and restart, then use **Admin → PokéWallet
 prices**. It can fill an English TCGdex card that still has no positive price
@@ -356,6 +378,14 @@ sealed units still on hand.
 sealed, and that value against the remaining cost. Opened units leave this
 tab. Their results are on the Rip report.
 
+When adding a card manually or recording a new rip pull, choose its printing.
+Where TCGdex supplies verified availability, the picker only offers those
+printings; otherwise it warns that the choices are unverified. Older local
+catalogues acquire this metadata when re-imported or their sets are synced.
+New rip pulls use the selected printing's quote in the opening currency, and
+stay unpriced if that specific quote is unavailable. Existing recorded pulls
+are not changed.
+
 **Rip report** compares the known value of pulls with what the opened units
 cost. Missing prices are left out of the value. The set chart ranks that gap
 as a percentage of what the set cost, so a larger purchase is judged by the
@@ -366,6 +396,12 @@ share of cost the known pulls cover, so 100% there is even.
 
 **Cards** is the collection: set completion, rarity, type or color,
 condition, extra copies, and which containers hold the cards.
+
+Set-value charts combine card and sealed set names within each game when they
+match after Unicode, whitespace, and case normalization, even if their source
+set IDs differ. Identically named but unrelated sets in the same game therefore
+share a value bar. Set completion remains separate by game and set ID. If one ID
+has conflicting names, those names remain separate and the server logs a warning.
 
 ## Card scanning
 
@@ -423,16 +459,17 @@ Which marketplace can price a printing depends on where it is sold, so the sourc
 | --- | --- |
 | Magic, any language | Scryfall — TCGplayer's USD price, or Cardmarket's EUR one when TCGplayer has no listing (most non-English printings). **Admin → Instance Settings → Magic price source** flips this to Cardmarket EUR first, TCGplayer USD as the fallback |
 | Pokémon via pokemontcgapi.com | Cardmarket EUR when available, otherwise TCGplayer USD, for the printing's language |
-| Pokémon via existing providers, English or Japanese | TCGplayer, via TCGCSV, in USD |
+| Pokémon English TCGdex IDs | CardDex, then PokéWallet; previously cached price on failure |
+| Pokémon via other existing providers, English or Japanese | TCGplayer, via TCGCSV, in USD |
 | Pokémon via existing providers, other languages | the **English** printing's TCGplayer price, labelled as such — TCGplayer runs no German, Korean or Chinese catalogue |
 
-Prices are stored in the currency they were quoted in and never converted — an exchange rate is a live number Bindarr has no source for — so each card shows its own symbol (`$4.50`, `€4.50`) and the card inspector names the marketplace. Collection totals sum the currencies as-is; `currencies` in the API response says when a total is mixed.
+Prices retain their original quote currency and marketplace. Displays and portfolio totals convert them to the selected currency using cached exchange rates; when rates are unavailable, conversion is shown as unavailable rather than mixing currencies. A fresh quote in a different currency can replace the previous quote; finish prices not provided in the new currency are cleared rather than relabelled.
 
 A price only exists once something fetched it. The Pokémon price sweep covers the sets you own cards from, so browsing a set you own nothing in shows `0.00` until a card from it lands in your collection.
 
 ### How often prices refresh
 
-Owned and decked cards have their prices re-fetched automatically, and only where the stored price has aged past three days — a sweep never re-asks about a card it refreshed yesterday. **Admin → Instance Settings → Refresh prices** sets how often that runs: daily (the default), every 3 days, weekly, every 30 days, or never.
+Owned and decked cards have their prices re-fetched automatically. **Admin → Instance Settings → Refresh prices** sets how often that runs: daily (the default), every 3 days, weekly, every 30 days, or never. CardDex processes up to 25 due cards per hourly tick; unsuccessful attempts can retry on a subsequent tick. Legacy providers have their own freshness gates.
 
 Daily is what the free providers publish, so leave it there unless you have a reason. Turn it down if you are on a provider that charges per card refreshed, or if you have a very large collection and only look at its value occasionally. **Never** stops automatic refreshes entirely; prices already stored stay as they are.
 

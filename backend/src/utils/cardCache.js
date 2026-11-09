@@ -12,7 +12,7 @@ const COLUMNS = [
   'price_reverse_holofoil', 'price_avg1', 'price_avg7', 'price_avg30', 'cmc',
   'color_identity', 'game', 'language', 'printed_name',
   'tcgplayer_url', 'cardmarket_url', 'tcgplayer_product_id',
-  'price_currency', 'price_source',
+  'price_currency', 'price_source', 'available_printings',
 ];
 
 // A page of results can be 250 cards and one round trip per card cost more than
@@ -28,8 +28,9 @@ const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Nu
 // re-cache, and would cost the English name learned below the same way.
 // A later catalogue refresh often has no market price (TCGdex returns nulls,
 // which normalize as 0). That refresh still updates the name and the artwork.
-// It must not wipe a PokéWallet quote that was matched onto this same card id.
-const PRESERVE_WHEN_POKEWALLET = new Set([
+// It must not wipe a previously cached Pokémon quote merely because this
+// metadata response has no usable price.
+const PRESERVE_WITH_PRICE = new Set([
   'price_trend', 'price_normal', 'price_holofoil', 'price_reverse_holofoil',
   'price_avg1', 'price_avg7', 'price_avg30', 'price_currency', 'price_source',
   'tcgplayer_url', 'cardmarket_url', 'tcgplayer_product_id',
@@ -39,11 +40,29 @@ const SET_CLAUSE = COLUMNS
   .filter(c => c !== 'id' && c !== 'name')
   .map(c => {
     if (c === 'image_url') return "image_url = CASE WHEN NULLIF(TRIM(excluded.image_url), '') IS NULL THEN card_cache.image_url ELSE excluded.image_url END";
-    if (!PRESERVE_WHEN_POKEWALLET.has(c)) return `${c} = excluded.${c}`;
+    if (c === 'available_printings') return 'available_printings = COALESCE(excluded.available_printings, card_cache.available_printings)';
+    if (!PRESERVE_WITH_PRICE.has(c)) return `${c} = excluded.${c}`;
     return `${c} = CASE
+      WHEN card_cache.game = 'pokemon'
+       AND (card_cache.price_source LIKE 'carddex-%' OR card_cache.price_source LIKE 'pokewallet%'
+         OR card_cache.price_source = 'cached-history')
+       AND COALESCE(card_cache.price_trend, 0) > 0
+       AND excluded.price_source IS NOT card_cache.price_source
+      THEN card_cache.${c}
       WHEN card_cache.price_source LIKE 'pokewallet%'
        AND COALESCE(card_cache.price_trend, 0) > 0
        AND COALESCE(excluded.price_trend, 0) <= 0
+      THEN card_cache.${c}
+      WHEN card_cache.game = 'pokemon' AND excluded.game = 'pokemon'
+       AND (COALESCE(card_cache.price_trend, 0) > 0
+         OR COALESCE(card_cache.price_normal, 0) > 0
+         OR COALESCE(card_cache.price_holofoil, 0) > 0
+         OR COALESCE(card_cache.price_reverse_holofoil, 0) > 0
+         OR COALESCE(card_cache.price_1st_edition, 0) > 0)
+       AND COALESCE(excluded.price_trend, 0) <= 0
+       AND COALESCE(excluded.price_normal, 0) <= 0
+       AND COALESCE(excluded.price_holofoil, 0) <= 0
+       AND COALESCE(excluded.price_reverse_holofoil, 0) <= 0
       THEN card_cache.${c}
       ELSE excluded.${c}
     END`;
@@ -89,6 +108,7 @@ async function cacheNormalizedCards(cards, game, opts = {}) {
         c.tcgplayer_url || null, c.cardmarket_url || null,
         num(c.tcgplayer_product_id),
         c.price_currency || 'USD', c.price_source || null,
+        Array.isArray(c.available_printings) && c.available_printings.length ? JSON.stringify(c.available_printings) : null,
       );
     }
     await db.run(

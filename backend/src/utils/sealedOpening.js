@@ -57,6 +57,7 @@ function normalizePull(body, currency) {
     name: bound(input.name, 'Pull name', 200, false),
     cardId: bound(input.card_id, 'Card', 80, false),
     collectionId,
+    printing: blank(input.printing) ? 'Normal' : bound(input.printing, 'Printing', 40, true),
     setName: bound(input.set_name, 'Set', 120, false),
     number: bound(input.number, 'Number', 20, false),
     imageUrl: imageUrl(input.image_url),

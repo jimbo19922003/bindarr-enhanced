@@ -1,19 +1,23 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { Search, Trash2, Edit2, LayoutGrid, List, SlidersHorizontal, X, MousePointerClick } from 'lucide-react';
 import { getCardDisplayName, translateJapaneseName } from '../utils/langHelper';
-import { priceText } from '../utils/formatPrice';
-import { CONDITIONS, PRINTINGS, GRADERS, getLanguageNamesForGame } from '../utils/cardOptions';
+import { priceText, reportingTotal, reportingTotalText, subscribeCurrency, currencyRevision } from '../utils/formatPrice';
+import { CONDITIONS, PRINTINGS, GRADERS, getLanguageNamesForGame, getLanguagesForGame } from '../utils/cardOptions';
 import { getPrintingBadgeLabel, getPrintingBadgeStyle, getFoilOverlayClass } from '../utils/cardPrinting';
 import { getCardRarityBorder, getRarityBadgeLabel, getRarityBadgeStyle } from '../utils/cardRarity';
 import { sortCardsByOrder } from '../utils/cardSort';
+import { sortCardsBySetNumber } from '../utils/setCardOrder';
 import { useMultiSelect } from '../utils/useMultiSelect';
-import { defaultGameFilter, gameOptions, isGameEnabled, showGamePicker } from '../utils/games';
+import { defaultGameFilter, gameOptions, GAMES, isGameEnabled, showGamePicker } from '../utils/games';
+import { langCode } from '../utils/languages';
 import { useT } from '../utils/i18n';
 import CardInspectorModal from './CardInspectorModal';
 import AddToDeckSelect from './AddToDeckSelect';
 import PackPriceSplitter from './PackPriceSplitter';
 import CardImage from './CardImage';
 import MultiSelectDropdown from './MultiSelectDropdown';
+import { duplicateCardIds, missingArtwork } from '../utils/collectionFilters';
+import { refreshCardArtIndex, useCardArtIndexState } from '../utils/cardArt';
 
 const labelStyle = { fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.03em' };
 
@@ -40,6 +44,7 @@ const SORT_CRITERIA = {
   'language-asc': [{ by: 'language', dir: 'asc' }, { by: 'name', dir: 'asc' }],
   'favorite-first': [{ by: 'favorite', dir: 'desc' }, { by: 'added_at', dir: 'desc' }],
 };
+const setKey = (set) => `${set.game || 'pokemon'}:${set.id}`;
 
 // Small labelled field wrapper to keep the filter grid uniform.
 function Field({ label, children }) {
@@ -51,11 +56,20 @@ function Field({ label, children }) {
   );
 }
 
-function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter, setSelectedCardFilter, onNavigate, setSelectedLocationId, setFocusEntryId }) {
+function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter, setSelectedCardFilter, onNavigate, setSelectedLocationId, setFocusEntryId, collectionSetNavigation, onSetNavigationHandled }) {
   const { t } = useT();
+  const fxRevision = useSyncExternalStore(subscribeCurrency, currencyRevision, () => 0);
+  const artworkIndex = useCardArtIndexState();
   const [collection, setCollection] = useState([]);
   const [locations, setLocations] = useState([]);
   const [setsList, setSetsList] = useState([]);
+  const [availableSets, setAvailableSets] = useState([]);
+  const [selectedSetKey, setSelectedSetKey] = useState('');
+  const [setViewGame, setSetViewGame] = useState('pokemon');
+  const [setViewLanguage, setSetViewLanguage] = useState('English');
+  const [setCards, setSetCards] = useState([]);
+  const [setCardsLoading, setSetCardsLoading] = useState(false);
+  const [setCardsError, setSetCardsError] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -71,7 +85,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   const [viewMode, setViewMode] = useState('gallery'); // 'gallery' or 'list'
   const [inspectorCard, setInspectorCard] = useState(null);
   const [inspectorStartEdit, setInspectorStartEdit] = useState(false);
-  const [subTab, setSubTab] = useState('collection'); // 'collection', 'wishlist'
+  const [subTab, setSubTab] = useState('collection'); // 'collection', 'wishlist', 'sets'
   const [showFilters, setShowFilters] = useState(false);
 
   // Search & Filter state
@@ -95,6 +109,12 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   const [tradeOnly, setTradeOnly] = useState(false);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [notCheckedOutOnly, setNotCheckedOutOnly] = useState(false);
+  const [duplicatesOnly, setDuplicatesOnly] = useState(false);
+  const [missingArtworkOnly, setMissingArtworkOnly] = useState(false);
+  const selectedSet = useMemo(
+    () => availableSets.find(set => setKey(set) === selectedSetKey) || null,
+    [availableSets, selectedSetKey]
+  );
 
   // Stacking state (default to stacked)
   const [stackCards, setStackCards] = useState(true);
@@ -108,11 +128,42 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   } = useMultiSelect({ showToast, onChanged: () => { onUpdate(); fetchCollection(); } });
 
   useEffect(() => {
-    fetchCollection();
+    if (subTab !== 'sets') fetchCollection();
     fetchLocations();
     fetchSets();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statsTrigger, subTab, tradeOnly]);
+  }, [statsTrigger, subTab]);
+
+  useEffect(() => {
+    if (!collectionSetNavigation) return;
+    setSetViewGame(collectionSetNavigation.game || 'pokemon');
+    setSetViewLanguage('English');
+    setSelectedSetKey(`${collectionSetNavigation.game || 'pokemon'}:${collectionSetNavigation.setId}`);
+    setSubTab('sets');
+    onSetNavigationHandled?.();
+  }, [collectionSetNavigation, onSetNavigationHandled]);
+
+  useEffect(() => {
+    if (subTab !== 'sets') return undefined;
+
+    let active = true;
+    const fetchAvailableSets = async () => {
+      setAvailableSets([]);
+      try {
+        const query = new URLSearchParams({ game: setViewGame, lang: langCode(setViewLanguage) });
+        const response = await fetch(`/api/sets?${query}`);
+        if (!response.ok) throw new Error(`Set list request failed: ${response.status}`);
+        const sets = await response.json();
+        if (!Array.isArray(sets)) throw new Error('Set list response was not an array');
+        if (active) setAvailableSets(sets);
+      } catch (error) {
+        console.error('Error fetching available sets:', error);
+        if (active) showToast(t('common.errBackend'));
+      }
+    };
+    fetchAvailableSets();
+    return () => { active = false; };
+  }, [setViewGame, setViewLanguage, showToast, subTab, t]);
 
   const fetchCollection = async () => {
     try {
@@ -121,10 +172,6 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
       if (subTab === 'wishlist') {
         url = '/api/collection?list_type=wishlist';
       }
-      if (tradeOnly) {
-        url += '&is_trade=1';
-      }
-
       const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
@@ -158,6 +205,41 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
       console.error('Error fetching sets:', err);
     }
   };
+
+  useEffect(() => {
+    if (subTab !== 'sets' || !selectedSet) {
+      setSetCards([]);
+      setSetCardsError('');
+      setSetCardsLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    const fetchCachedSetCards = async () => {
+      setSetCardsLoading(true);
+      setSetCardsError('');
+      try {
+        const query = new URLSearchParams({
+          game: selectedSet.game || 'pokemon',
+          lang: langCode(setViewLanguage),
+        });
+        const response = await fetch(`/api/collection/sets/${encodeURIComponent(selectedSet.id)}/cards?${query}`);
+        if (!response.ok) throw new Error(t('collection.setCardsError'));
+        const cards = await response.json();
+        if (active) setSetCards(cards);
+      } catch (error) {
+        console.error('Error fetching cached set cards:', error);
+        if (active) {
+          setSetCards([]);
+          setSetCardsError(t('collection.setCardsError'));
+        }
+      } finally {
+        if (active) setSetCardsLoading(false);
+      }
+    };
+    fetchCachedSetCards();
+    return () => { active = false; };
+  }, [selectedSet, setViewLanguage, statsTrigger, subTab, t]);
 
   const handleDelete = async (entryId, cardName) => {
     if (!window.confirm(t('collection.confirmDeleteCard', { name: cardName }))) {
@@ -232,6 +314,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
     () => Array.from(new Set(collection.map(item => item.cmc).filter(v => v !== null && v !== undefined))).sort((a, b) => a - b),
     [collection]
   );
+  const duplicateIds = useMemo(() => duplicateCardIds(collection), [collection]);
 
   const activeFilterCount =
     [locationFilter, rarityFilter, conditionFilter, graderFilter, printingFilter,
@@ -242,7 +325,9 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
     + (maxPriceFilter !== '' ? 1 : 0)
     + (tradeOnly ? 1 : 0)
     + (favoriteOnly ? 1 : 0)
-    + (notCheckedOutOnly ? 1 : 0);
+    + (notCheckedOutOnly ? 1 : 0)
+    + (duplicatesOnly ? 1 : 0)
+    + (missingArtworkOnly ? 1 : 0);
 
   const clearAllFilters = () => {
     setSearchFilter('');
@@ -253,6 +338,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
     setMinPriceFilter(''); setMaxPriceFilter('');
     setTradeOnly(false); setFavoriteOnly(false);
     setNotCheckedOutOnly(false);
+    setDuplicatesOnly(false); setMissingArtworkOnly(false);
   };
 
   // Filter + sort
@@ -292,11 +378,14 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
       const matchesMinPrice = minPriceFilter === '' ? true : price >= parseFloat(minPriceFilter);
       const matchesMaxPrice = maxPriceFilter === '' ? true : price <= parseFloat(maxPriceFilter);
       const matchesNotCheckedOut = !notCheckedOutOnly || (item.checked_out_qty || 0) === 0;
+      const matchesTrade = !tradeOnly || item.is_trade === 1;
+      const matchesDuplicates = !duplicatesOnly || duplicateIds.has(item.card_id);
+      const matchesArtwork = !missingArtworkOnly || (artworkIndex.status === 'ready' && missingArtwork(item, artworkIndex.ids));
 
       return matchesSearch && matchesGame && matchesLocation && matchesRarity && matchesCondition &&
              matchesPrinting && matchesSet && matchesType && matchesSupertype &&
              matchesCmc && matchesLanguage && matchesFavorite && matchesGrader && matchesMinPrice && matchesMaxPrice &&
-             matchesNotCheckedOut;
+             matchesNotCheckedOut && matchesTrade && matchesDuplicates && matchesArtwork;
     });
 
     if (sortBy === 'qty-desc') {
@@ -305,7 +394,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
       sortCardsByOrder(result, SORT_CRITERIA[sortBy] || SORT_CRITERIA['added-newest'], undefined, setsList);
     }
     return result;
-  }, [collection, searchFilter, gameFilter, locationFilter, rarityFilter, conditionFilter, printingFilter, setFilter, typeFilter, supertypeFilter, cmcFilter, languageFilter, favoriteOnly, graderFilter, minPriceFilter, maxPriceFilter, notCheckedOutOnly, sortBy, setsList]);
+  }, [collection, searchFilter, gameFilter, locationFilter, rarityFilter, conditionFilter, printingFilter, setFilter, typeFilter, supertypeFilter, cmcFilter, languageFilter, favoriteOnly, graderFilter, minPriceFilter, maxPriceFilter, notCheckedOutOnly, tradeOnly, duplicatesOnly, duplicateIds, missingArtworkOnly, artworkIndex, sortBy, setsList]);
 
   // Group duplicate cards if stack option is active
   const processedCollection = useMemo(() => {
@@ -331,9 +420,19 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   const displayCards = selectMode ? filteredCollection : processedCollection;
 
   const totalValue = useMemo(
-    () => displayCards.reduce((sum, item) => sum + (item.price_trend || 0) * (item.quantity || 1), 0),
-    [displayCards]
+    () => reportingTotal(displayCards),
+    // Recalculate when rates or the selected currency change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [displayCards, fxRevision]
   );
+  const orderedSetCards = useMemo(
+    () => sortCardsBySetNumber(setCards),
+    [setCards]
+  );
+  const ownedSetCardCount = orderedSetCards.filter(card => card.owned).length;
+  const setProgressPercent = orderedSetCards.length
+    ? Math.round(ownedSetCardCount / orderedSetCards.length * 100)
+    : 0;
 
   return (
     <div>
@@ -354,9 +453,16 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
           >
             {t('collection.wishlist')}
           </button>
+          <button
+            className={`btn ${subTab === 'sets' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setSubTab('sets')}
+            style={{ fontSize: '0.85rem', padding: '0.45rem 1.25rem', borderRadius: 'var(--radius-sm)' }}
+          >
+            {t('collection.sets')}
+          </button>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        {subTab !== 'sets' && <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           {/* Multi-select toggle (long-press cards is the primary path) */}
           <button
             className={`btn ${selectMode ? 'btn-primary' : 'btn-secondary'}`}
@@ -387,9 +493,119 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
               <List size={14} />
             </button>
           </div>
-        </div>
+        </div>}
       </div>
 
+      {subTab === 'sets' ? (
+        <div>
+          <div className="glass-panel" style={{ marginBottom: '1.25rem', padding: '1rem 1.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <h3 className="chart-title" style={{ margin: 0 }}>{t('collection.setViewTitle')}</h3>
+              <Field label={t('catalog.thGame')}>
+                <select
+                  className="select-control"
+                  value={setViewGame}
+                  onChange={(event) => {
+                    setSetViewGame(event.target.value);
+                    setSetViewLanguage('English');
+                    setSelectedSetKey('');
+                  }}
+                  aria-label={t('catalog.thGame')}
+                >
+                  {GAMES.map(game => <option key={game.value} value={game.value}>{game.label}</option>)}
+                </select>
+              </Field>
+              <Field label={t('card.language')}>
+                <select
+                  className="select-control"
+                  value={setViewLanguage}
+                  onChange={(event) => {
+                    setSetViewLanguage(event.target.value);
+                    setSelectedSetKey('');
+                  }}
+                  aria-label={t('card.language')}
+                >
+                  {getLanguagesForGame(setViewGame).map(language => (
+                    <option key={language.code} value={language.name}>{language.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <select
+                className="select-control"
+                value={selectedSetKey}
+                onChange={(event) => setSelectedSetKey(event.target.value)}
+                aria-label={t('collection.selectSet')}
+                style={{ minWidth: 'min(100%, 18rem)' }}
+              >
+                <option value="">{t('collection.selectSet')}</option>
+                {availableSets.map(set => (
+                  <option key={setKey(set)} value={setKey(set)}>{set.name}</option>
+                ))}
+              </select>
+            </div>
+            {selectedSet && !setCardsLoading && !setCardsError && orderedSetCards.length > 0 && (
+              <p style={{ margin: '0.85rem 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                {t('collection.setProgressSummary', {
+                  owned: ownedSetCardCount,
+                  total: orderedSetCards.length,
+                  percent: setProgressPercent,
+                })}
+              </p>
+            )}
+          </div>
+
+          {setCardsLoading ? (
+            <div className="spinner"></div>
+          ) : setCardsError ? (
+            <div className="glass-panel" role="alert" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
+              {setCardsError}
+            </div>
+          ) : !selectedSet ? (
+            <div className="glass-panel" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
+              {t('collection.selectSet')}
+            </div>
+          ) : orderedSetCards.length === 0 ? (
+            <div className="glass-panel" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
+              {t('collection.noSetCards')}
+            </div>
+          ) : (
+            <div className="card-grid">
+              {orderedSetCards.map(card => (
+                <div
+                  key={card.id}
+                  className="tcg-card"
+                  style={{ opacity: card.owned ? 1 : 0.32, filter: card.owned ? undefined : 'grayscale(1)' }}
+                >
+                  <div className="tcg-card-inner">
+                    <CardImage card={card} className="tcg-card-image" loading="lazy" draggable={false} />
+                    <span style={{
+                      position: 'absolute',
+                      top: '6px',
+                      left: '6px',
+                      zIndex: 10,
+                      padding: '2px 5px',
+                      borderRadius: '3px',
+                      fontSize: '0.6rem',
+                      fontWeight: 800,
+                      color: 'var(--text-strong)',
+                      background: card.owned ? 'var(--accent-green, var(--accent-blue))' : 'var(--bg-secondary)',
+                    }}>
+                      {t(card.owned ? 'collection.setCardOwned' : 'collection.setCardMissing')}
+                    </span>
+                  </div>
+                  <div className="tcg-card-info">
+                    <div className="tcg-card-name">{getCardDisplayName(card.name, card.language, card.printed_name)}</div>
+                    <div className="tcg-card-meta">
+                      <span>#{card.number}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+      <>
       {/* Filter Panel */}
       <div className="glass-panel" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem' }}>
         {/* Always-visible top bar: search + sort + filters toggle */}
@@ -605,6 +821,19 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                 </label>
               </div>
 
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input type="checkbox" id="duplicatesOnlyOpt" checked={duplicatesOnly} onChange={(e) => setDuplicatesOnly(e.target.checked)} />
+                <label htmlFor="duplicatesOnlyOpt" style={{ cursor: 'pointer', margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }} title={t('collection.duplicatesHint')}>
+                  {t('collection.duplicatesOnly')}
+                </label>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input type="checkbox" id="missingArtworkOnlyOpt" checked={missingArtworkOnly} onChange={(e) => { setMissingArtworkOnly(e.target.checked); if (e.target.checked) void refreshCardArtIndex(); }} />
+                <label htmlFor="missingArtworkOnlyOpt" style={{ cursor: 'pointer', margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }} title={t('collection.missingArtworkHint')}>
+                  {t('collection.missingArtworkOnly')}
+                </label>
+              </div>
+
               {subTab === 'collection' && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <input type="checkbox" id="notCheckedOutOpt" checked={notCheckedOutOnly} onChange={(e) => setNotCheckedOutOnly(e.target.checked)} style={{ width: '14px', height: '14px', cursor: 'pointer' }} />
@@ -620,6 +849,14 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                 </button>
               )}
             </div>
+            {missingArtworkOnly && artworkIndex.status !== 'ready' && (
+              <div role={artworkIndex.status === 'error' ? 'alert' : 'status'}>
+                {artworkIndex.status === 'error' ? t('collection.artworkIndexError') : t('collection.artworkIndexLoading')}
+                {artworkIndex.status === 'error' && <button type="button" className="btn btn-secondary btn-sm" onClick={() => void refreshCardArtIndex()}>{t('dash.retry')}</button>}
+              </div>
+            )}
+            {duplicatesOnly && <small style={{ color: 'var(--text-secondary)' }}>{t('collection.duplicatesHint')}</small>}
+            {missingArtworkOnly && <small style={{ color: 'var(--text-secondary)' }}>{t('collection.missingArtworkHint')}</small>}
           </div>
         )}
       </div>
@@ -628,7 +865,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
       {!loading && !selectMode && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', fontSize: '0.78rem', color: 'var(--text-secondary)', flexWrap: 'wrap', gap: '0.5rem' }}>
           <span><strong style={{ color: 'var(--text-strong)' }}>{displayCards.length}</strong> {t('collection.cardUnit', { count: displayCards.length })}</span>
-          <span>{t('collection.totalValue')} <strong style={{ color: 'var(--accent-yellow)' }}>{priceText(totalValue)}</strong></span>
+          <span>{t('collection.totalValue')} <strong style={{ color: 'var(--accent-yellow)' }}>{reportingTotalText(totalValue)}</strong></span>
         </div>
       )}
 
@@ -873,6 +1110,8 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
             </table>
           </div>
         </div>
+      )}
+      </>
       )}
 
       {/* Card Detail Inspector Modal (Private Authorized View) */}

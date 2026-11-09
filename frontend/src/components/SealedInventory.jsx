@@ -1,7 +1,9 @@
 // contextual-sales-v1
-import { useEffect, useState } from 'react';
-import { Archive, ArchiveRestore, Download, Package, Plus, Search, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Archive, ArchiveRestore, Download, Package, Plus, Search, Upload, X } from 'lucide-react';
 import { useT } from '../utils/i18n';
+import { useBackGuard } from '../utils/useBackGuard';
 import SealedOpenings from './SealedOpenings';
 import { sealedSaleTarget } from '../utils/saleTargets';
 
@@ -53,6 +55,9 @@ function SealedInventory({ showToast }) {
   const [form, setForm] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [csv, setCsv] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const importPending = useRef(false);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogSet, setCatalogSet] = useState('');
   const [catalogResults, setCatalogResults] = useState([]);
@@ -328,20 +333,31 @@ function SealedInventory({ showToast }) {
   };
 
   const importCsv = async () => {
-    const response = await fetch('/api/sealed/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ csv }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      const detail = data.errors && data.errors[0] ? ` (${data.errors[0].line}: ${data.errors[0].error})` : '';
-      showToast((data.error || t('sealed.errSave')) + detail, 'error');
-      return;
+    if (importPending.current || !csv.trim()) return;
+    importPending.current = true;
+    setImportBusy(true);
+    try {
+      const response = await fetch('/api/sealed/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        const detail = data.errors && data.errors[0] ? ` (${data.errors[0].line}: ${data.errors[0].error})` : '';
+        showToast((data.error || t('sealed.errSave')) + detail, 'error');
+        return;
+      }
+      setCsv('');
+      setImportOpen(false);
+      showToast(t('sealed.imported', { products: data.products, lots: data.lots }), 'success');
+      refresh();
+    } catch (err) {
+      showToast(err.message || t('sealed.errSave'), 'error');
+    } finally {
+      importPending.current = false;
+      setImportBusy(false);
     }
-    setCsv('');
-    showToast(t('sealed.imported', { products: data.products, lots: data.lots }), 'success');
-    refresh();
   };
 
   if (loading) return <div className="spinner"></div>;
@@ -568,7 +584,10 @@ function SealedInventory({ showToast }) {
       </>)}
 
       {pane === 'collection' && (<>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <button className="btn btn-secondary" type="button" onClick={() => setImportOpen(true)}>
+          <Upload size={16} /> {t('sealed.import')}
+        </button>
         <button className="btn btn-secondary" type="button" onClick={exportCsv}>
           <Download size={16} /> {t('sealed.export')}
         </button>
@@ -649,22 +668,83 @@ function SealedInventory({ showToast }) {
         ))}
       </div>
 
-      <div className="glass-panel" style={{ padding: '0.9rem', display: 'grid', gap: '0.5rem' }}>
-        <strong>{t('sealed.import')}</strong>
-        <textarea className="input-control"
+      </>)}
+      {importOpen && (
+        <SealedImportModal csv={csv} setCsv={setCsv} busy={importBusy} onImport={importCsv}
+          onClose={() => setImportOpen(false)} t={t} />
+      )}
+    </div>
+  );
+}
+
+function SealedImportModal({ csv, setCsv, busy, onImport, onClose, t }) {
+  const dialog = useRef(null);
+  const textarea = useRef(null);
+  useBackGuard(true, onClose);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    if (textarea.current?.disabled) dialog.current?.querySelector('button')?.focus();
+    else textarea.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (busy) dialog.current?.querySelector('button')?.focus();
+  }, [busy]);
+
+  const onKeyDown = event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    } else if (event.key === 'Tab') {
+      const focusable = dialog.current.querySelectorAll('button:not([disabled]), textarea:not([disabled])');
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+  };
+
+  return createPortal(
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="glass-panel" ref={dialog} role="dialog" aria-modal="true" aria-labelledby="sealed-import-title"
+        aria-busy={busy} onKeyDown={onKeyDown}
+        style={{ width: '100%', maxWidth: '40rem', maxHeight: '100%', overflowY: 'auto', display: 'grid', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+          <h3 id="sealed-import-title" style={{ margin: 0 }}>{t('sealed.import')}</h3>
+          <button className="btn btn-secondary btn-icon-only" type="button" onClick={onClose} aria-label={t('common.close')}>
+            <X size={18} />
+          </button>
+        </div>
+        <textarea ref={textarea} className="input-control"
           value={csv}
           onChange={e => setCsv(e.target.value)}
-          rows={4}
+          rows={6}
           placeholder={t('sealed.importHint')}
           aria-label={t('sealed.import')}
+          disabled={busy}
           style={{ width: '100%', fontFamily: 'inherit' }}
         />
-        <div>
-          <button className="btn btn-secondary" type="button" onClick={importCsv} disabled={!csv.trim()}>{t('sealed.import')}</button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+          <button className="btn btn-secondary" type="button" onClick={onClose}>{t('common.cancel')}</button>
+          <button className="btn btn-primary" type="button" onClick={onImport} disabled={busy || !csv.trim()}>{busy ? t('common.loading') : t('sealed.import')}</button>
         </div>
       </div>
-      </>)}
-    </div>
+    </div>,
+    document.body
   );
 }
 

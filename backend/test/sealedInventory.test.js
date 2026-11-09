@@ -73,7 +73,8 @@ async function main() {
     `INSERT INTO users (username, password_hash, role, share_token, api_key) VALUES ('member', 'x', 'member', 'member-sealed', 'member-sealed-key')`
   );
   await db.run(
-    `INSERT INTO card_cache (id, name, game, price_trend, price_currency, price_source) VALUES ('tcgdex-en-sealed-test', 'Pikachu', 'pokemon', 10, 'USD', 'tcgdex')`
+    `INSERT INTO card_cache (id, name, game, set_id, set_name, price_trend, price_currency, price_source)
+     VALUES ('tcgdex-en-sealed-test', 'Pikachu', 'pokemon', 'card-set-id', 'PRISMATIC EVOLUTIONS', 10, 'USD', 'tcgdex')`
   );
   await db.run(
     `INSERT INTO collection (user_id, card_id, quantity, purchase_price, game, list_type) VALUES (?, 'tcgdex-en-sealed-test', 1, 4, 'pokemon', 'collection')`,
@@ -178,7 +179,10 @@ async function main() {
   assert.strictEqual(portfolio.status, 200);
   const prismatic = portfolio.body.sets.find(row => row.name === 'Prismatic Evolutions');
   assert.ok(prismatic, JSON.stringify(portfolio.body.sets));
-  assert.strictEqual(prismatic.value, 76.02);
+  assert.strictEqual(prismatic.value, 86.02);
+  assert.strictEqual(prismatic.count, 1);
+  assert.strictEqual(portfolio.body.cardSets[0].value, 10);
+  assert.strictEqual(portfolio.body.sealedBreakdown.sets[0].value, 76.02);
   assert.strictEqual(portfolio.body.topSealed.length, 1);
   assert.strictEqual(portfolio.body.topSealed[0].name, 'Prismatic Evolutions ETB');
   assert.strictEqual(portfolio.body.topSealed[0].remaining, 2);

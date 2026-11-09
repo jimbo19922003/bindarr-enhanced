@@ -66,7 +66,7 @@ function infoOf(result) {
 // One currency for every printing column. TCGplayer USD wins when it has a
 // market price; Cardmarket EUR is used only when TCGplayer has none. Low and
 // mid prices are not treated as the market quote.
-function extractQuote(result) {
+function extractQuote(result, preferredCurrency = null) {
   const info = infoOf(result);
   if (info.product_type !== 'card') return { ok: false, reason: 'not_a_card' };
   const tcg = result && result.tcgplayer;
@@ -85,7 +85,7 @@ function extractQuote(result) {
   const reverse = bySubtype['Reverse Holofoil'] ?? null;
   const firstEdition = bySubtype['1st Edition'] ?? null;
   const trend = holofoil ?? normal ?? reverse ?? firstEdition ?? null;
-  if (trend) {
+  if (trend && preferredCurrency !== 'EUR') {
     const url = safeProductUrl(tcg.url, TCGPLAYER_HOSTS);
     return {
       ok: true,
@@ -106,7 +106,8 @@ function extractQuote(result) {
       product_type: 'card',
     };
   }
-  if (bySubtype.Shadowless && !trend) return { ok: false, reason: 'variant_unconfirmed' };
+  if (preferredCurrency === 'USD') return { ok: false, reason: 'unpriced' };
+  if (bySubtype.Shadowless && !trend && preferredCurrency !== 'EUR') return { ok: false, reason: 'variant_unconfirmed' };
 
   const market = result && result.cardmarket;
   const cmRows = market && Array.isArray(market.prices) ? market.prices : [];

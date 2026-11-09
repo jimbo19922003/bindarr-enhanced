@@ -88,6 +88,7 @@ function App() {
   const [selectedLocationId, setSelectedLocationId] = useState(null);
   const [focusEntryId, setFocusEntryId] = useState(null);
   const [selectedCardFilter, setSelectedCardFilter] = useState('');
+  const [pendingCollectionSet, setPendingCollectionSet] = useState(null);
   const [toast, setToast] = useState(null);
   const [statsTrigger, setStatsTrigger] = useState(0);
 
@@ -120,6 +121,11 @@ function App() {
     tabGuardRef.current = pushBackGuard(() => { tabGuardRef.current = null; showTab(prev); });
     showTab(tab);
   }, [activeTab, showTab]);
+  const navigateToCollectionSet = useCallback((set) => {
+    setPendingCollectionSet(set);
+    goTab('collection');
+  }, [goTab]);
+  const clearPendingCollectionSet = useCallback(() => setPendingCollectionSet(null), []);
   useEffect(() => {
     const open = () => goTab('sales-history');
     window.addEventListener('bindarr_open_sales_history', open);
@@ -265,9 +271,9 @@ function App() {
 
   const renderTab = (tab) => {
     switch (tab) {
-      case 'dashboard': return <Dashboard statsTrigger={statsTrigger} onNavigate={goTab} setSelectedLocationId={setSelectedLocationId} setFocusEntryId={setFocusEntryId} onUpdate={triggerRefresh} showToast={showToast} />;
+      case 'dashboard': return <Dashboard statsTrigger={statsTrigger} onNavigate={goTab} onNavigateToSet={navigateToCollectionSet} setSelectedLocationId={setSelectedLocationId} setFocusEntryId={setFocusEntryId} onUpdate={triggerRefresh} showToast={showToast} />;
       case 'add-cards': return <AddCards active={activeTab === 'add-cards'} onAddSuccess={triggerRefresh} showToast={showToast} setActiveTab={goTab} />;
-      case 'collection': return <CollectionList statsTrigger={statsTrigger} onUpdate={triggerRefresh} showToast={showToast} token={token} selectedCardFilter={selectedCardFilter} setSelectedCardFilter={setSelectedCardFilter} onNavigate={goTab} setSelectedLocationId={setSelectedLocationId} setFocusEntryId={setFocusEntryId} />;
+      case 'collection': return <CollectionList statsTrigger={statsTrigger} onUpdate={triggerRefresh} showToast={showToast} token={token} selectedCardFilter={selectedCardFilter} setSelectedCardFilter={setSelectedCardFilter} onNavigate={goTab} setSelectedLocationId={setSelectedLocationId} setFocusEntryId={setFocusEntryId} collectionSetNavigation={pendingCollectionSet} onSetNavigationHandled={clearPendingCollectionSet} />;
       case 'storage': return <LocationManager statsTrigger={statsTrigger} onUpdate={triggerRefresh} showToast={showToast} selectedLocationId={selectedLocationId} setSelectedLocationId={setSelectedLocationId} focusEntryId={focusEntryId} setFocusEntryId={setFocusEntryId} />;
       case 'deckbuilder': return <DeckBuilder showToast={showToast} />;
       case 'sealed': return <SealedInventory showToast={showToast} />;

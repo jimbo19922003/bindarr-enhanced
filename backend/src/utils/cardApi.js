@@ -26,12 +26,12 @@ const tcgApi = require('../tcgApi');
 const tcgdexApi = require('../tcgdexApi');
 const lorcastApi = require('../lorcastApi');
 const languages = require('./languages');
+const {isPokemonLocalModeEnabled} = require('./pokemonLocalMode');
 
 const isMtgId = (id) => String(id || '').startsWith('mtg-');
 const isTcgdexId = (id) => String(id || '').startsWith('tcgdex-');
 const isPokemontcgapiId = id => String(id || '').startsWith('pokemontcgapi-');
 const isLorcanaId = (id) => String(id || '').startsWith('lorcana-');
-const localPokemonMode = () => process.env.POKEMON_LOCAL_CATALOG === '1';
 
 // The game an ID implies. `game` from the request wins when explicit; otherwise inferred from prefix.
 function gameOf(id, requestedGame) {
@@ -46,7 +46,7 @@ function gameOf(id, requestedGame) {
 // improvement, and failing it must not block adding a card.
 async function hydrate(id) {
   // Preview mode reads imported metadata; pricing/artwork repair is a separate job.
-  if (localPokemonMode() && gameOf(id) === 'pokemon') return;
+  if (await isPokemonLocalModeEnabled() && gameOf(id) === 'pokemon') return;
   // pokemontcgapi.com rows are thin in a different way: listing pages are asked
   // without prices because prices are what its credits pay for, so the price is
   // fetched here, once, for the card actually entering the collection.
@@ -65,7 +65,7 @@ async function getCardById(id, { game, tcgApiKey = '' } = {}) {
   const g = gameOf(id, game);
   if (g === 'mtg') return await scryfallApi.getCardById(id);
   if (g === 'lorcana') return await lorcastApi.getCardById(id);
-  if (localPokemonMode()) return await require('./localPokemonCards').getLocalPokemonCards().getCardById(id);
+  if (await isPokemonLocalModeEnabled()) return await require('./localPokemonCards').getLocalPokemonCards().getCardById(id);
   if (isPokemontcgapiId(id)) return await require('../pokemontcgapi').getCardById(id);
   if (isTcgdexId(id)) return await tcgdexApi.getCardById(id);
   return await tcgApi.getCardById(id, tcgApiKey);
@@ -93,7 +93,7 @@ async function printingInLanguage(card, language) {
     return await scryfallApi.getPrintingInLang(set, card.number, language).catch(() => null);
   }
   if (g === 'pokemon') {
-    if (localPokemonMode()) return await require('./localPokemonCards').getLocalPokemonCards().printingInLanguage(card, language);
+    if (await isPokemonLocalModeEnabled()) return await require('./localPokemonCards').getLocalPokemonCards().printingInLanguage(card, language);
     // Regional set numbering cannot be translated by swapping a language code.
     if (isPokemontcgapiId(card.id)) return null;
     if (isTcgdexId(card.id)) {

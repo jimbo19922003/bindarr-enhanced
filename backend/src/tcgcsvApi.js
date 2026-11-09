@@ -602,9 +602,9 @@ function pricesByProduct(rows) {
 //             sweep needs. One TCGCSV request per set, so this is the difference
 //             between ~30 requests and ~670.
 //   'all'   — every cached set. For the one-off backfill.
-async function setsToPrice(scope = 'owned') {
+async function setsToPrice(scope = 'owned', excludeCarddex = false) {
   const owned = `
-    WHERE cc.game = 'pokemon' AND cc.id IN (
+    WHERE cc.game = 'pokemon' ${excludeCarddex ? "AND NOT (cc.language = 'English' AND cc.id LIKE 'tcgdex-en-%')" : ''} AND cc.id IN (
       SELECT card_id FROM collection UNION SELECT card_id FROM deck_cards
     )`;
   const rows = await db.all(`
@@ -624,7 +624,7 @@ async function setsToPrice(scope = 'owned') {
 //
 // Returns counts rather than throwing on a partial result — one set failing to
 // resolve must not abandon the other 200.
-async function priceSet({ set_id, set_name, language }, match, groupDataCache = new Map()) {
+async function priceSet({ set_id, set_name, language }, match, groupDataCache = new Map(), excludeCarddex = false) {
   if (String(set_id).startsWith('pokemontcgapi-')) return { set_id, language, matched: false, priced: 0 };
   const hit = match(set_id, set_name, language);
   if (!hit) return { set_id, language, matched: false, priced: 0 };
@@ -649,7 +649,8 @@ async function priceSet({ set_id, set_name, language }, match, groupDataCache = 
   const { byNumber, priceFor } = await groupDataCache.get(groupKey);
 
   const cached = await db.all(
-    `SELECT id, number FROM card_cache WHERE game = 'pokemon' AND set_id = ? AND language = ?`,
+    `SELECT id, number FROM card_cache WHERE game = 'pokemon' AND set_id = ? AND language = ?
+     ${excludeCarddex ? "AND NOT (language = 'English' AND id LIKE 'tcgdex-en-%')" : ''}`,
     [set_id, language]
   );
 
@@ -693,7 +694,7 @@ async function priceSet({ set_id, set_name, language }, match, groupDataCache = 
 // Refresh Pokémon prices from TCGCSV. `force` bypasses the once-a-day gate, the
 // same way the other providers' sweeps do — without it the boot sweep re-runs on
 // every restart, which under nodemon means every code edit.
-async function updateCollectionPrices(force = false, scope = 'owned') {
+async function updateCollectionPrices(force = false, scope = 'owned', excludeCarddex = false) {
   // The sync is separate from the sweep: a failed or paused sync (network, 5xx,
   // the 403 cooldown) leaves the last complete version in the cache, and pricing
   // from yesterday's data beats not pricing. Only a true cache miss — no version
@@ -704,7 +705,7 @@ async function updateCollectionPrices(force = false, scope = 'owned') {
       console.log('Skipping TCGCSV price update: already swept within the last 24h.');
       return;
     }
-    const sets = await setsToPrice(scope);
+    const sets = await setsToPrice(scope, excludeCarddex);
     if (!sets.length) return;
 
     const groups = {};
@@ -720,7 +721,7 @@ async function updateCollectionPrices(force = false, scope = 'owned') {
     // and the sweep has all day to finish.
     for (const s of sets) {
       try {
-        const r = await priceSet(s, match, groupDataCache);
+        const r = await priceSet(s, match, groupDataCache, excludeCarddex);
         if (!r.matched) unmatched.push(`${s.set_id} (${s.language})`);
         priced += r.priced;
       } catch (e) {

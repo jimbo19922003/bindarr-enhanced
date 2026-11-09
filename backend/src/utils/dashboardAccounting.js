@@ -32,7 +32,7 @@ async function readSummary({connect,user,game='',currency='USD',now=Date.now,por
   await db.run('BEGIN');began=true;
   const valuation=makeValuation('USD'),display=makeValuation(currency);
   const portfolio=await getPortfolio(user,game,valuation,db);
-  let zone=process.env.PORTFOLIO_TIMEZONE||'UTC';try{new Intl.DateTimeFormat('en-US',{timeZone:zone});}catch{zone='UTC';}
+  const zone=await require('./portfolioTimeZone').readTimeZone(db);
   const accounting=await readAccounting(db,user,game,valuation,portfolio,require('./performanceHistory').dayAt(now(),zone));
   const spending=await readRecordedSpending(db,user,game,valuation);
   const money=async n=>n==null?null:Math.sign(n)*(await display.cents(Math.abs(n),'USD'))/100;

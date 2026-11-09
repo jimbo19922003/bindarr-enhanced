@@ -7,9 +7,9 @@ on:
         required: false
         default: ''
       languages:
-        description: 'Explicit comma-separated catalogue languages; English only by default'
+        description: 'Explicit comma-separated catalogue languages; English and Japanese by default'
         required: true
-        default: 'en'
+        default: 'en,ja'
   schedule:
     - cron: '17 */6 * * *'
   push:
@@ -44,7 +44,7 @@ jobs:
         id: input
         env:
           REVISION: ${{ inputs.upstream_commit || '' }}
-          LANGUAGES: ${{ inputs.languages || 'en' }}
+          LANGUAGES: ${{ inputs.languages || 'en,ja' }}
         run: |
           node <<'NODE'
           const fs=require('node:fs');

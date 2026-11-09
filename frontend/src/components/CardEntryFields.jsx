@@ -1,5 +1,6 @@
 import { CONDITIONS, getPrintings, getLanguageNamesForGame, GRADERS, GRADES } from '../utils/cardOptions';
 import { useT } from '../utils/i18n';
+import { availablePrintings } from '../utils/availablePrintings';
 
 // Shared quantity / purchase-price / condition / printing / language inputs for
 // the add-card and edit-card flows. Presentational only: the parent owns the
@@ -11,13 +12,14 @@ import { useT } from '../utils/i18n';
 export default function CardEntryFields({
   quantity, purchasePrice, condition, printing, language,
   onQuantity, onPurchasePrice, onCondition, onPrinting, onLanguage,
-  variant = 'grid', game,
+  variant = 'grid', game, card,
   grader = 'Raw', grade = '', certNumber = '',
   onGrader, onGrade, onCertNumber,
 }) {
   const { t } = useT();
   const stacked = variant === 'stacked';
-  const printings = getPrintings(game);
+  const availability = card ? availablePrintings({ ...card, game }) : null;
+  const printings = availability?.options || getPrintings(game);
   const gameLanguages = getLanguageNamesForGame(game);
   const groupStyle = stacked ? { marginBottom: 0 } : undefined;
   // Grading is opt-in per caller: the scanner's quick-add has no room for it and a
@@ -68,8 +70,10 @@ export default function CardEntryFields({
     <div className="form-group" style={groupStyle}>
       <label>{t('card.printing')}</label>
       <select className="select-control" value={printing} onChange={(e) => onPrinting(e.target.value)}>
+        {!printings.some(p => p.value === printing) && <option value={printing}>{printing}</option>}
         {printings.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
       </select>
+      {availability && !availability.verified && <small>{t('card.printingUnverified')}</small>}
     </div>
   );
   const Language = (

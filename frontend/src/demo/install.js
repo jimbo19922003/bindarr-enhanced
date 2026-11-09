@@ -60,6 +60,7 @@ window.fetch = (input, opts = {}) => {
   // views render instead of crashing. List-ish paths get [], everything else {}.
   if (method === 'GET') {
     if (path === '/api/notes') return Promise.resolve(json({ notes: [] }));
+    if (path === '/api/card-art/index') return Promise.resolve(json({ ids: [] }));
     const listish = /\/(collection|locations|decks|sets|search|users|compartments|notes)/.test(path);
     return Promise.resolve(json(listish ? [] : {}));
   }

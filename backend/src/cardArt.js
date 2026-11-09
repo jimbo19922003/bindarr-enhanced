@@ -52,7 +52,10 @@ function listIds() {
   const ids = new Set();
   for (const dir of [BUNDLED_DIR, USER_DIR]) {
     let names = [];
-    try { names = fs.readdirSync(dir); } catch { continue; } // absent dir = no art
+    try { names = fs.readdirSync(dir); } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
+    }
     for (const n of names) {
       if (n.toLowerCase().endsWith('.png')) ids.add(n.slice(0, -4));
     }

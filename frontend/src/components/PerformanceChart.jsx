@@ -60,14 +60,14 @@ export default function PerformanceChart({ statsTrigger, game = '' }) {
         <Tooltip labelFormatter={value=>date(value,true)} formatter={(value,name)=>[view==='gainPct' ? percent(value) : money(value),name]} contentStyle={{background:'var(--bg-secondary)',borderColor:'var(--border-glass)',borderRadius:8}} />
         <Legend iconType="plainline" iconSize={14} wrapperStyle={{fontSize:12,paddingTop:12}} />
         {view!=='value' && <ReferenceLine y={0} stroke="#94a3b8" />}
-        {series.map((key,index)=><Line key={key} type="linear" dataKey={key} name={labels[key]} stroke={['#3b82f6','#10b981','#f59e0b'][index % 3]} strokeWidth={2} dot={rows.length===1 ? {r:5} : false} activeDot={{r:5}} connectNulls={false} isAnimationActive={false} />)}
+        {series.map((key,index)=><Line key={key} type="linear" dataKey={key} name={labels[key]} stroke={['#3b82f6','#10b981','#f59e0b'][index % 3]} strokeWidth={2} dot={rows.length<=180 ? {r:2.5,strokeWidth:0} : false} activeDot={{r:5}} connectNulls={false} isAnimationActive={false} />)}
       </LineChart></ResponsiveContainer>
     </div>}
     <footer className="portfolio-timeline-footer">
-      <span>{game ? game.toUpperCase() : 'All games'} · USD{report?.timeZone ? ` · ${report.timeZone}` : ''}{!loading && rows.length===1 ? ' · 1 day recorded' : ''}</span>
+      <span>{game ? game.toUpperCase() : 'All games'} · USD{report?.timeZone ? ` · ${report.timeZone}` : ''}{!loading ? ` · ${rows.length} daily point${rows.length===1 ? '' : 's'}` : ''}</span>
       {incomplete && <span className="portfolio-warning" role="status" title="Some observations have stale rates, unpriced holdings, or unknown acquisition or sale basis. Unknown amounts are not treated as zero.">Incomplete pricing or basis</span>}
       {rows.some(r=>r.accountingVersion!==2)&&<span className="portfolio-warning">Legacy observations: market value only; no reconstructed gain.</span>}
-      <details className="portfolio-about"><summary>About</summary><p>Today uses current holdings, remaining acquisition basis, and cumulative sales through today. New snapshots save realized, unrealized, and total gain separately. Sale fees reduce realized gain. Completed rip cost transfers to contents, not a second purchase. Older snapshots retain their recorded market values but do not invent historical total gains. Unknown basis or missing prices create gaps. Unlinked opening contents are flagged as unpriced. Non-USD realized results require a historical FX policy. Percentages and benchmark returns await cash-flow-aware calculations. Hover or tap a point for exact amounts.</p></details>
+      <details className="portfolio-about"><summary>About</summary><p>The timeline shows recorded daily snapshots in the instance portfolio timezone; it does not reconstruct missing days from purchase dates. Changing the timezone starts a separate history without deleting older snapshots. Today uses current holdings, remaining acquisition basis, and cumulative sales through today. New snapshots save realized, unrealized, and total gain separately. Sale fees reduce realized gain. Completed rip cost transfers to contents, not a second purchase. Older snapshots retain their recorded market values but do not invent historical total gains. Unknown basis or missing prices create gaps. Unlinked opening contents are flagged as unpriced. Non-USD realized results require a historical FX policy. Percentages and benchmark returns await cash-flow-aware calculations. Hover or tap a point for exact amounts.</p></details>
     </footer>
   </section>;
 }

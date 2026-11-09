@@ -24,7 +24,7 @@ async function runTests() {
   const server = spawn('node', [path.join(projectRoot, 'backend/src/server.js')], {
     // HTTPS_PORT blanked for the same reason as in scryfall-mock.js, which this
     // one server is not preloaded with: a fixed TLS port cannot be shared.
-    env: { ...process.env, PORT: port, DB_PATH: tmpDb, HTTPS_PORT: '', ALLOW_REGISTRATION: 'true' }
+    env: { ...process.env, PORT: port, DB_PATH: tmpDb, HTTPS_PORT: '', ALLOW_REGISTRATION: 'true', PORTFOLIO_TIMEZONE: '' }
   });
 
   try {
@@ -89,6 +89,27 @@ async function runTests() {
     assert.strictEqual(cappedBox.status, 413, `5001-row container import should be 413, got ${cappedBox.status}`);
     assert.ok(capped.headers.get('ratelimit-limit') || capped.headers.get('ratelimit-policy'), 'import is rate limited');
     console.log('PASS: F1-TC5');
+
+    const settings = await fetch(`${base}/api/settings`, { headers: auth });
+    assert.strictEqual((await settings.json()).portfolio_time_zone, 'America/Chicago');
+    const saveSettings = body => fetch(`${base}/api/settings`, {
+      method: 'PUT', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const invalid = await saveSettings({ portfolio_time_zone: 'Invalid/Zone', price_refresh_days: 7 });
+    assert.strictEqual(invalid.status, 400);
+    const unchanged = await (await fetch(`${base}/api/settings`, { headers: auth })).json();
+    assert.strictEqual(unchanged.portfolio_time_zone, 'America/Chicago');
+    assert.notStrictEqual(unchanged.price_refresh_days, 7);
+    const saved = await saveSettings({ portfolio_time_zone: 'UTC' });
+    assert.strictEqual(saved.status, 200);
+    assert.strictEqual((await saved.json()).portfolio_time_zone, 'UTC');
+    const performance = await fetch(`${base}/api/stats/performance?range=7d`, { headers: auth });
+    assert.strictEqual(performance.status, 200);
+    assert.strictEqual((await performance.json()).timeZone, 'UTC');
+    assert.strictEqual((await (await saveSettings({ portfolio_time_zone: 'America/Chicago' })).json()).portfolio_time_zone, 'America/Chicago');
+    const chicago = await (await fetch(`${base}/api/stats/performance?range=7d`, { headers: auth })).json();
+    assert.strictEqual(chicago.timeZone, 'America/Chicago');
+    console.log('PASS: F1-TC6');
   } finally {
     // SIGKILL immediately to avoid sqlite3 teardown crashes on Windows
     server.kill('SIGKILL');

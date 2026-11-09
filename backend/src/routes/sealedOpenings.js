@@ -7,6 +7,7 @@ const openings = require('../utils/sealedOpening');
 const pokemonProvider = require('../utils/pokemonProvider');
 const collection = require('./collection');
 const { cardForPull, applyPullPrice, repairUnpricedPulls } = require('../utils/ripValuation');
+const { validatePrinting } = require('../utils/cardPrintings');
 const router = express.Router();
 const MAX_PULLS = 100;
 const fail = (res, status, error) => res.status(status).json({ error });
@@ -34,14 +35,16 @@ async function forgetFiled(userId, ids) {
   if (!ids?.length) return;
   await db.run(`DELETE FROM collection WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [userId, ...ids]);
 }
-async function filePull(user, pull, currency) {
+async function filePull(user, pull, currency, verifyPrinting) {
   if (!pull.cardId || pull.collectionId) return;
   const known = await cardFor(pull.cardId);
-  const added = await collection.addCardToCollection(user, { card_id: pull.cardId, quantity: pull.quantity, language: known?.language || 'English', purchase_price: 0, game: known?.game || 'pokemon', location_id: null }, { openingPull: true });
+  const added = await collection.addCardToCollection(user, { card_id: pull.cardId, quantity: pull.quantity, printing: pull.printing, language: known?.language || 'English', purchase_price: 0, game: known?.game || 'pokemon', location_id: null }, { openingPull: true });
   pull.filedIds = added.ids?.length ? added.ids : [added.id]; pull.collectionId = added.id;
   const owned = await db.get('SELECT card_id FROM collection WHERE id = ? AND user_id = ?', [added.id, user.id]);
   if (owned?.card_id) pull.cardId = owned.card_id;
-  const priced = await cardForPull(user.id, pull); openings.fillFromCard(pull, priced); await applyPullPrice(pull, priced, currency);
+  const priced = await cardForPull(user.id, pull);
+  if (verifyPrinting) validatePrinting(priced, pull.printing);
+  openings.fillFromCard(pull, priced); await applyPullPrice(pull, priced, currency, { exactPrinting: true });
 }
 async function resolvePull(user, raw, currency, fillPrice) {
   const pull = openings.normalizePull(raw, currency); pull.filedIds = [];
@@ -53,7 +56,8 @@ async function resolvePull(user, raw, currency, fillPrice) {
       openings.fillFromCard(pull, copy); if (fillPrice) await applyPullPrice(pull, copy, currency);
     } else if (pull.cardId) {
       const card = await cardFor(pull.cardId); if (!card) throw new TypeError('Card not found');
-      openings.fillFromCard(pull, card); if (fillPrice) await filePull(user, pull, currency);
+      if (fillPrice && raw.printing != null) validatePrinting(card, pull.printing);
+      openings.fillFromCard(pull, card); if (fillPrice) await filePull(user, pull, currency, raw.printing != null);
     }
     if (fillPrice) openings.snapshotOpeningValue(pull);
     if (!pull.name) throw new TypeError('Pull name is required');

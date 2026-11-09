@@ -103,6 +103,9 @@ const SOURCE_NAMES = {
   'pokemontcgapi-tcgplayer': 'TCGplayer (via pokemontcgapi.com)',
   'pokewallet-tcgplayer': 'PokéWallet · TCGplayer',
   'pokewallet-cardmarket': 'PokéWallet · Cardmarket',
+  'carddex-tcgplayer': 'CardDex · TCGplayer',
+  'carddex-cardmarket': 'CardDex · Cardmarket',
+  'cached-history': 'Cached price history',
 };
 export function priceSource(card) {
   // No price means no source to name. Labelling a $0.00 "via Cardmarket" asserts a
@@ -123,7 +126,7 @@ export function priceSource(card) {
   // and for a price that is a stand-in from another printing, where the currency is
   // right but the card is not.
   const proxy = card.price_source === 'tcgcsv-en';
-  const named = card.price_source?.startsWith('pokemontcgapi-') || card.price_source?.startsWith('pokewallet-');
+  const named = card.price_source?.startsWith('pokemontcgapi-') || card.price_source?.startsWith('pokewallet-') || card.price_source?.startsWith('carddex-') || card.price_source === 'cached-history';
   if (currency === 'USD' && card.price_source !== 'tcgdex' && !named && !proxy) return null;
   return { name, currency };
 }

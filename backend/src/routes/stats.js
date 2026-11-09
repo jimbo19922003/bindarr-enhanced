@@ -6,6 +6,7 @@ const { summarizeHoldings } = require('../utils/sealedInventory');
 const { summarizePerformance } = require('../utils/openingPerformance');
 const { createReportingValuation } = require('../utils/reportingValuation');
 const { currentPortfolio } = require('../utils/currentPortfolio');
+const { createDashboardSetTotals, setKey } = require('../utils/dashboardSetTotals');
 const router = express.Router();
 const round = n => Number(n.toFixed(2));
 
@@ -21,7 +22,7 @@ async function openingPerformanceFor(userId, game) {
 }
 
 function failure(res, error, fallback) {
-  console.error(error.code || fallback);
+  console.error(error.code || fallback, error.message);
   res.status(error.status || 500).json({ error: error.status ? error.message : fallback, code: error.code || 'STATISTICS_ERROR' });
 }
 
@@ -31,7 +32,10 @@ router.get('/stats', async (req, res) => {
     const valuation = createReportingValuation(req.query.currency || 'USD');
     const portfolio = await currentPortfolio(req.user.id, game, valuation);
     const rows = portfolio.cards;
-    const types = {}, rarities = {}, sets = {}, locations = {};
+    const types = {}, rarities = {}, locations = {};
+    const sets = createDashboardSetTotals({
+      onConflict: ({ game, id }) => console.warn(`Dashboard set ID has conflicting names: ${game || 'unknown'} / ${id}`),
+    });
     let unsortedCount = 0, nearMintCount = 0, vintageCount = 0, unpricedCards = 0;
     let value7dAgo = 0, valueNowFor7d = 0, value30dAgo = 0, valueNowFor30d = 0;
     const now = Date.now();
@@ -49,8 +53,7 @@ router.get('/stats', async (req, res) => {
       for (const type of land ? ['Land'] : cardTypes.length ? cardTypes : [mtg ? 'Colorless' : 'Colorless']) types[type] = (types[type] || 0) + quantity;
       const rarity = row.rarity || 'Unknown'; rarities[rarity] = (rarities[rarity] || 0) + quantity;
       const location = row.location_name || 'Unassigned'; locations[location] = (locations[location] || 0) + quantity;
-      if (!sets[row.set_id]) sets[row.set_id] = { name: row.set_name || 'Other', count: 0, value: 0 };
-      sets[row.set_id].count += quantity; sets[row.set_id].value += quantity * row.price_trend;
+      sets.add({ game: row.game, id: row.set_id, name: row.set_name, count: quantity, value: quantity * row.price_trend });
       // Historical averages retain their source currency and are converted
       // before comparing amounts; current-FX basis, not historical-date FX.
       const added = row.added_at ? parseSqliteUtc(row.added_at).getTime() : now;
@@ -61,8 +64,7 @@ router.get('/stats', async (req, res) => {
         if (added <= now - 30 * 86400000 && row.price_avg30 > 0) { value30dAgo += quantity * await valuation.money(row.price_avg30, currency); valueNowFor30d += quantity * avg1; }
       }
     }
-    const listSets = () => Object.entries(sets).map(([id, value]) => ({ id, ...value, value: round(value.value) })).sort((a, b) => b.value - a.value).slice(0, 8);
-    const cardSets = listSets();
+    const cardSets = sets.list();
     const sealedBySet = new Map(), sealedByType = new Map();
     const addBucket = (map, key, name, line) => {
       const bucket = map.get(key) || { name, units: 0, value: 0, unpriced: 0 };
@@ -70,23 +72,23 @@ router.get('/stats', async (req, res) => {
       if (line.line_value == null) bucket.unpriced += line.remaining; map.set(key, bucket);
     };
     for (const line of portfolio.sealed.lines) {
-      const name = line.set_name.toLowerCase().trim();
-      addBucket(sealedBySet, name, line.set_name, line); addBucket(sealedByType, line.product_type || 'other', line.product_type || 'other', line);
+      const key = setKey('pokemon', line.set_id, line.set_name);
+      addBucket(sealedBySet, key, line.set_name, line); addBucket(sealedByType, line.product_type || 'other', line.product_type || 'other', line);
       if (line.line_value == null) continue;
-      const matching = Object.keys(sets).find(id => sets[id].name.toLowerCase().trim() === name);
-      const key = sets[line.set_id] ? line.set_id : matching || `sealed:${line.set_id || line.set_name || line.id}`;
-      if (!sets[key]) sets[key] = { name: line.set_name || 'Sealed', count: 0, value: 0 };
-      sets[key].value += line.line_value;
+      sets.add({ game: 'pokemon', id: line.set_id, name: line.set_name, value: line.line_value });
     }
     const setProgress = [];
-    const ownedSetIds = [...new Set(rows.map(row => row.set_id).filter(Boolean))];
-    if (ownedSetIds.length) {
-      const progress = await db.all(`SELECT cc.set_id, COUNT(DISTINCT c.card_id) AS owned,
-        (SELECT COALESCE(NULLIF(s.printed_total, 0), NULLIF(s.total, 0)) FROM sets s WHERE s.id = cc.set_id) AS size
+    const progress = await db.all(`SELECT cc.game, cc.set_id, MAX(cc.set_name) AS set_name,
+        COUNT(DISTINCT CASE WHEN trim(cc.number) != '' THEN lower(ltrim(trim(cc.number), '0')) END) AS owned,
+        (SELECT COALESCE(NULLIF(s.printed_total, 0), NULLIF(s.total, 0)) FROM sets s WHERE s.id = cc.set_id AND s.game = cc.game) AS size
         FROM collection c JOIN card_cache cc ON cc.id = c.card_id
-        WHERE c.user_id = ? AND c.list_type = 'collection' AND cc.set_id IN (${ownedSetIds.map(() => '?').join(',')}) GROUP BY cc.set_id`, [req.user.id, ...ownedSetIds]);
-      for (const row of progress) if (row.size) setProgress.push({ setId: row.set_id, setName: sets[row.set_id].name, ownedUnique: row.owned, totalCards: row.size, percent: Math.min(Math.round(row.owned / row.size * 100), 100) });
-    }
+        WHERE c.user_id = ? AND c.list_type = 'collection'${game ? ' AND cc.game = ?' : ''}
+        GROUP BY cc.game, cc.set_id`, game ? [req.user.id, game] : [req.user.id]);
+    for (const row of progress) if (row.size) setProgress.push({
+      setId: row.set_id, setGame: row.game, setName: row.set_name || 'Unknown set',
+      ownedUnique: row.owned, totalCards: row.size,
+      percent: Math.min(Math.round(row.owned / row.size * 100), 100),
+    });
     const change = (before, after) => before > 0 ? { available: true, abs: round(after - before), pct: round((after - before) / before * 100) } : { available: false, abs: null, pct: null };
     const unavailable = () => ({ available: false, abs: null, pct: null });
     const gain = round(portfolio.totalValue - portfolio.totalSpent);
@@ -102,7 +104,7 @@ router.get('/stats', async (req, res) => {
       change1y: unavailable(), change5y: unavailable(), sealed: portfolio.sealed.holdings },
       types: Object.entries(types).map(([name, value]) => ({ name, value })),
       rarities: Object.entries(rarities).map(([name, value]) => ({ name, value })),
-      locations: Object.entries(locations).map(([name, value]) => ({ name, value })), sets: listSets(), cardSets,
+      locations: Object.entries(locations).map(([name, value]) => ({ name, value })), sets: sets.list(), cardSets,
       topValuable: rows.slice().sort((a, b) => b.price_trend - a.price_trend).slice(0, 6),
       recentAdditions: rows.slice().sort((a, b) => parseSqliteUtc(b.added_at) - parseSqliteUtc(a.added_at)).slice(0, 6),
       topSealed: portfolio.sealed.lines.filter(line => line.line_value != null).sort((a, b) => b.line_value - a.line_value).slice(0, 6),
@@ -155,13 +157,39 @@ router.get('/cards/:id/price-history', async (req, res) => {
     const now = Date.now();
     const points = recorded.map(row => ({ price: row.price, time: parseSqliteUtc(row.recorded_at).getTime(), source: 'recorded' })).filter(row => Number.isFinite(row.time));
     const recordedCount = points.length;
-    const anchors = days ? marketAnchors(await db.get('SELECT price_trend, price_avg1, price_avg7, price_avg30 FROM card_cache WHERE id = ?', [id]), now) : [];
+    const card = await db.get('SELECT * FROM card_cache WHERE id = ?', [id]);
+    let carddexHistoryStatus = null;
+    let quoteAt = null;
+    let carddexCount = 0;
+    if (card?.price_source?.startsWith('carddex-') || card?.price_source?.startsWith('pokewallet-') || card?.price_source === 'cached-history') {
+      const owned = await db.get(`SELECT 1 AS owned FROM collection WHERE user_id = ? AND card_id = ?
+        UNION SELECT 1 FROM deck_cards dc JOIN decks d ON d.id = dc.deck_id WHERE d.user_id = ? AND dc.card_id = ? LIMIT 1`,
+      [req.user.id, id, req.user.id, id]);
+      if (owned) {
+        if (card.price_source.startsWith('carddex-') || card.price_source === 'cached-history') {
+          const service = require('../pokemonPrices').getPokemonPrices();
+          await service.initialize();
+          if (card.price_source.startsWith('carddex-')) {
+            const history = await service.history(card);
+            carddexHistoryStatus = history.status;
+            const providerPoints = history.points.map(row => ({ price: row.price, time: Date.parse(row.recorded_at), source: 'carddex' }))
+              .filter(row => Number.isFinite(row.time) && (!days || row.time >= now - days * 86400000));
+            carddexCount = providerPoints.length;
+            points.push(...providerPoints);
+          }
+          quoteAt = (await db.get('SELECT quote_at FROM carddex_price_attempt WHERE card_id = ?', [id]))?.quote_at || null;
+        } else {
+          quoteAt = (await db.get('SELECT quote_updated_at FROM pokewallet_map WHERE card_id = ?', [id]))?.quote_updated_at || null;
+        }
+      }
+    }
+    const anchors = days ? marketAnchors(card, now) : [];
     const marketCount = anchors.filter(row => row.source === 'market').length;
     points.push(...anchors); points.sort((a, b) => a.time - b.time);
     const data = points.filter((point, index) => !(points[index - 1] && points[index + 1] && points[index - 1].price === point.price && points[index + 1].price === point.price));
     const spanDays = points.length >= 2 ? Math.round((points[points.length - 1].time - points[0].time) / 86400000) : 0;
     res.json({ data: data.map(point => ({ price: point.price, recorded_at: new Date(point.time).toISOString(), source: point.source })),
-      spanDays, windowDays: days, marketCount, recordedCount, insufficientHistory: data.length < 2 });
+      spanDays, windowDays: days, marketCount, recordedCount, carddexCount, carddexHistoryStatus, quoteAt, insufficientHistory: data.length < 2 });
   } catch (error) { failure(res, error, 'Failed to retrieve price history'); }
 });
 module.exports = router;

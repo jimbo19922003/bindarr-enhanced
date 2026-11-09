@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Database, Play, Square, RefreshCw, Check, AlertTriangle, Cpu, Download, ListFilter, Languages, Zap } from 'lucide-react';
+import { Database, Play, Square, RefreshCw, Check, AlertTriangle, Cpu, Download, ListFilter, Zap } from 'lucide-react';
 import SetTree from './SetTree';
 import LocalCatalogStatusPanel from './LocalCatalogStatusPanel';
 import { useT } from '../utils/i18n';
@@ -346,122 +346,7 @@ function BuildPicker({ game, lang, disabled, onBuild, showToast, label }) {
   );
 }
 
-// Other languages — only the ones that exist to download, with the numbers.
-//
-// Pokémon only, and the copy says why: Magic IS printed in every language on this
-// list and Scryfall serves all of them, but a non-English MTG catalog would be a
-// copy of the English one. The scanner matches ARTWORK, and a localized Magic
-// printing is the same set with the same illustration — so the English catalog
-// already identifies a Japanese card and the scan result is re-expressed by set and number
-// (cvScan.loadAll). Japanese Pokémon is the opposite case: whole sets that never
-// released in English, which nothing in the English catalog can match.
-//
-// The list is fetched once, on open. /api/admin/catalogs is polled every second
-// during a build and this costs a provider set list per language, so the two are
-// deliberately separate endpoints.
-function OtherLanguages({ disabled, onBuild, showToast }) {
-  const { t } = useT();
-  const [open, setOpen] = useState(false);
-  const [langs, setLangs] = useState(null);
-  const [error, setError] = useState(null);
-  const [pick, setPick] = useState(null);
-
-  useEffect(() => {
-    if (!open || langs) return;
-    fetch('/api/admin/catalogs/languages?game=pokemon')
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(j => setLangs(j.languages || []))
-      .catch(e => { setError(e.message); showToast?.(t('catalog.errListLangs')); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  return (
-    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary style={{ cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-secondary)', padding: '0.4rem 0', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-        <Languages size={15} /> {t('catalog.otherLanguages')}
-      </summary>
-      <div style={{ ...INNER, marginTop: '0.5rem' }}>
-        <p style={HINT}>
-          {t('catalog.otherLangsDesc')}
-        </p>
-        {error && <p style={{ ...NOTE, color: 'var(--accent-red)' }}>{t('catalog.errLanguageList', { error })}</p>}
-        {!langs && !error && <p style={HINT}>{t('catalog.askingProvider')}</p>}
-        {!!langs?.length && (
-          <>
-            <div className="collection-table-wrapper" style={{ overflowX: 'auto' }}>
-              <table className="collection-table">
-                <thead>
-                  <tr>
-                    <th>{t('prefs.language')}</th>
-                    <th>{t('catalog.thCardsIndexable')}</th>
-                    <th className="hide-mobile">{t('catalog.thSets')}</th>
-                    <th>{t('catalog.thCatalog')}</th>
-                    <th style={{ textAlign: 'right' }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {langs.map(l => (
-                    <tr key={l.lang} style={pick === l.lang ? { background: 'rgba(255,71,71,0.06)' } : undefined}>
-                      <td style={{ fontWeight: 600, color: 'var(--text-strong)' }}>{l.lang}</td>
-                      {/* withArt, not cached: a card with no artwork can never be
-                          embedded, so it is not a card we can index. */}
-                      <td>
-                        {num(l.withArt)} of {num(l.claimed)}
-                        {l.claimed ? <span style={{ color: 'var(--text-muted)' }}> · {pct(l.withArt, l.claimed)}%</span> : null}
-                      </td>
-                      <td className="hide-mobile">{num(l.sets)}</td>
-                      <td style={{ color: l.built ? 'var(--type-grass)' : 'var(--text-secondary)' }}>
-                        {l.built ? t('catalog.nIndexed', { count: num(l.built.rows) }) : t('catalog.productMapNotBuilt')}
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button type="button" className="btn btn-secondary btn-sm" disabled={disabled}
-                          onClick={() => setPick(p => p === l.lang ? null : l.lang)}
-                          style={{ ...BTN, marginLeft: 'auto' }}>
-                          {pick === l.lang ? t('catalog.selected') : t('catalog.select')}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p style={NOTE}>
-              {t('catalog.cardsIndexableDesc')}
-            </p>
-            {pick && (
-              <div style={{ ...ROW, borderTop: '1px solid var(--border-glass)', paddingTop: '0.75rem' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-strong)' }}>
-                  Pokémon · {pick}
-                </span>
-                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                  {/* Keyed so switching language resets the set list rather than
-                      showing the previous language's sets. */}
-                  <BuildPicker
-                    key={pick}
-                    game="pokemon"
-                    lang={pick}
-                    disabled={disabled}
-                    onBuild={(sets) => onBuild('pokemon', pick, sets)}
-                    showToast={showToast}
-                  />
-                  <button type="button" className="btn btn-secondary btn-sm" disabled={disabled}
-                    onClick={() => onBuild('pokemon', pick)} style={BTN}>
-                    <Play size={14} /> {t('catalog.buildEverySet')}
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-        {langs && !langs.length && !error && (
-          <p style={HINT}>{t('catalog.noOtherLanguages')}</p>
-        )}
-      </div>
-    </details>
-  );
-}
-
-function LegacyCatalogPanel({ showToast }) {
+function ScannerCatalogPanel({ showToast }) {
   const { t } = useT();
   const [catalogs, setCatalogs] = useState([]);
   const [progress, setProgress] = useState(null);
@@ -592,13 +477,9 @@ function LegacyCatalogPanel({ showToast }) {
   const running = progress;
 
   // English rows only, plus any language that has a catalog of its OWN.
-  //
   // Deliberately NOT keyed on `published`: cvScan.isBuilt falls back to the English
-  // catalog for any language, so that flag is true for every row and means
-  // 'something can answer', not 'this language is built'. The languages this
-  // install merely holds a card or two of are not rows at all any more — they were
-  // fifteen near-empty entries invented by one imported card each, and the ones
-  // worth building now live in OtherLanguages with their real numbers.
+  // catalog for any language, so that flag means 'something can answer', not
+  // 'this language is built'.
   const rows = catalogs.filter(c => !!c.built || c.lang === 'English');
 
   // One collapsed line per catalog. The summary carries everything needed to decide
@@ -704,7 +585,7 @@ function LegacyCatalogPanel({ showToast }) {
         {t('catalog.title')}
       </h3>
       <p style={HINT}>
-        {t('catalog.intro')}
+        {t('catalog.scanIndexExplainer')}
       </p>
 
       <EngineCard
@@ -740,7 +621,7 @@ function LegacyCatalogPanel({ showToast }) {
       <Step
         n="3"
         icon={<Database size={16} style={{ color: 'var(--accent-red)' }} />}
-        title={t('catalog.buildYourOwn')}
+        title={t('catalog.buildScanCatalog')}
         status={t('catalog.buildYourOwnStatus')}
       >
         <p style={HINT}>
@@ -758,6 +639,8 @@ function LegacyCatalogPanel({ showToast }) {
             {t('catalog.speedDesc')}
           </p>
         </div>
+
+        <LocalCatalogStatusPanel onBuildScan={build} scanProgress={running} />
 
         {running && (
           <div style={INNER}>
@@ -788,20 +671,11 @@ function LegacyCatalogPanel({ showToast }) {
 
         {rows.map(renderRow)}
 
-        <OtherLanguages disabled={!!running} onBuild={build} showToast={showToast} />
       </Step>
     </div>
   );
 }
 
 export default function CatalogPanel(props) {
-  const [legacyOpen, setLegacyOpen] = useState(false);
-  return <>
-    <LocalCatalogStatusPanel />
-    <details onToggle={event => setLegacyOpen(event.currentTarget.open)}>
-      <summary style={{cursor: 'pointer', marginBottom: '1rem'}}>Scanner setup and legacy build tools</summary>
-      <p>Scanning still requires model files and a compatible index. These tools remain available while the replacement workflow is unfinished; metadata readiness does not establish scanner readiness.</p>
-      {legacyOpen && <LegacyCatalogPanel {...props} />}
-    </details>
-  </>;
+  return <ScannerCatalogPanel {...props} />;
 }

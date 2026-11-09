@@ -25,7 +25,7 @@ async function main() {
   const admin = await db.get("SELECT id FROM users WHERE username = 'admin'");
   await db.run(`INSERT INTO card_cache (id, name, game, set_id, set_name, price_trend, price_normal, price_currency)
     VALUES ('fx-eur', 'Euro card', 'pokemon', 'test', 'Test', 54.85, 54.85, 'EUR'),
-    ('fx-usd', 'Dollar card', 'pokemon', 'test', 'Test', 10, 10, 'USD')`);
+    ('fx-usd', 'Dollar card', 'pokemon', 'test-alt', ' TEST ', 10, 10, 'USD')`);
   for (const id of ['fx-eur', 'fx-usd']) await db.run(`INSERT INTO collection (user_id, card_id, quantity, purchase_price, printing, game, list_type)
     VALUES (?, ?, 1, 0, 'Normal', 'pokemon', 'collection')`, [admin.id, id]);
   const app = require('express')();
@@ -40,6 +40,10 @@ async function main() {
     assert.strictEqual(dashboard.summary.totalValue, 78.56);
     assert.strictEqual(worth.totalValue, 78.56);
     assert.strictEqual(dashboard.cardSets[0].value, 78.56);
+    assert.strictEqual(dashboard.cardSets.length, 1);
+    assert.strictEqual(dashboard.cardSets[0].name, 'Test');
+    assert.strictEqual(dashboard.cardSets[0].count, 2);
+    assert.strictEqual(dashboard.sets[0].value, 78.56);
     assert.strictEqual(dashboard.topValuable[0].price_trend, 68.56);
     assert.strictEqual(dashboard.topValuable[0].price_currency, 'USD');
     const original = await db.get("SELECT price_trend, price_currency FROM card_cache WHERE id = 'fx-eur'");

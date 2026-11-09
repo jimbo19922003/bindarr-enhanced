@@ -3,12 +3,12 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Plus, X, ShieldAlert, Check, MousePointerClick, Zap, Undo2, Maximize2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { priceText } from '../utils/formatPrice';
-import { resolveCardPrice } from '../utils/resolveCardPrice';
 import CardEntryFields from './CardEntryFields';
 import CardImageZoom from './CardImageZoom';
 import { translateJapaneseName, POKEMON_EN_TO_JP, getCardDisplayName } from '../utils/langHelper';
 import { useMultiSelect } from '../utils/useMultiSelect';
 import { CONDITIONS, PRINTINGS } from '../utils/cardOptions';
+import { preferredPrinting, exactPrintingPrice } from '../utils/availablePrintings';
 import { langName, isEnglish, displayName, translatedName, setReference, setCode, getLanguagesForGame, isLanguageSupported } from '../utils/languages';
 import { defaultGame, gameOptions, showGamePicker, gameLabel } from '../utils/games';
 import CardImage from './CardImage';
@@ -76,6 +76,8 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
   // Drawer states
   const [selectedCard, setSelectedCard] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [languageLoading, setLanguageLoading] = useState(false);
+  const languageRequest = useRef(0);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [, setLocations] = useState([]);
   
@@ -428,22 +430,26 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
   };
 
   const handleLanguageChange = async (newLang) => {
-    setLanguage(newLang);
     if (!selectedCard) return;
+    const ticket = ++languageRequest.current;
+    setLanguageLoading(true);
     try {
       const targetGame = selectedCard.game || game;
       const resp = await fetch(`/api/cards/${encodeURIComponent(selectedCard.id)}/printing?lang=${encodeURIComponent(newLang)}&game=${encodeURIComponent(targetGame)}`);
-      if (resp.ok) {
-        const localized = await resp.json();
-        if (localized && localized.id) {
-          setSelectedCard(prev => (prev ? { ...prev, ...localized, language: newLang } : { ...localized, language: newLang }));
-          return;
-        }
-      }
+      if (!resp.ok) throw new Error('Could not load the selected language');
+      const localized = await resp.json();
+      if (!localized?.id) throw new Error('Could not load the selected language');
+      if (ticket !== languageRequest.current) return;
+      const next = { ...selectedCard, ...localized, available_printings: localized.available_printings ?? null, language: newLang };
+      setSelectedCard(next);
+      setLanguage(newLang);
+      setPrinting(previous => preferredPrinting(next, previous));
     } catch (e) {
       console.warn('Could not switch to localized printing:', e);
+      if (ticket === languageRequest.current) showToast(e.message);
+    } finally {
+      if (ticket === languageRequest.current) setLanguageLoading(false);
     }
-    setSelectedCard(prev => (prev ? { ...prev, language: newLang } : prev));
   };
 
   const handleGameChange = (newGame) => {
@@ -455,23 +461,21 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
   };
 
   const openQuickAdd = (card) => {
+    languageRequest.current++;
+    setLanguageLoading(false);
     setSelectedCard(card);
     setPurchasePrice(0); // Default to 0 purchase spend
     // The card itself knows which printing it is, so the copy is recorded in that
     // language rather than defaulting to English and needing a manual correction.
     setLanguage(card.language || langName(searchLang));
-    // Guess printing based on rarity
-    const rarity = (card.rarity || '').toLowerCase();
-    if (rarity.includes('holo') || rarity.includes('secret') || rarity.includes('ultra') || rarity.includes('shining')) {
-      setPrinting('Holofoil');
-    } else {
-      setPrinting('Normal');
-    }
+    setPrinting(preferredPrinting(card));
 
     setIsDrawerOpen(true);
   };
 
   const closeDrawer = () => {
+    languageRequest.current++;
+    setLanguageLoading(false);
     setIsDrawerOpen(false);
     setIsFullScreen(false);
     setSelectedCard(null);
@@ -489,7 +493,7 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedCard) return;
+    if (!selectedCard || languageLoading) return;
 
     try {
       const response = await fetch('/api/collection', {
@@ -984,7 +988,7 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
               </div>
               <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('search.tcgMarketPrice', { printing })}</div>
-                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-yellow)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{priceText(resolveCardPrice(selectedCard, printing), selectedCard.price_currency)}</div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-yellow)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{exactPrintingPrice(selectedCard, printing) == null ? t('card.printingUnpriced') : priceText(exactPrintingPrice(selectedCard, printing), selectedCard.price_currency)}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{t('search.rarityLabel')} <span style={{ color: 'var(--text-strong)', fontWeight: 600 }}>{selectedCard.rarity}</span></div>
               </div>
             </div>
@@ -993,7 +997,7 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
               <CardEntryFields
                 quantity={quantity} purchasePrice={purchasePrice} condition={condition} printing={printing} language={language}
                 onQuantity={setQuantity} onPurchasePrice={setPurchasePrice} onCondition={setCondition} onPrinting={setPrinting} onLanguage={handleLanguageChange}
-                game={selectedCard?.game || game}
+                game={selectedCard?.game || game} card={selectedCard}
                 grader={grader} grade={grade} certNumber={certNumber}
                 onGrader={setGrader} onGrade={setGrade} onCertNumber={setCertNumber}
               />
@@ -1001,7 +1005,7 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
               <div className="quick-add-footer" style={{ marginTop: '1.25rem', paddingTop: '1rem' }}>
                 <div className="quick-add-footer-actions">
                   <button type="button" className="btn btn-secondary" onClick={closeDrawer}>{t('common.cancel')}</button>
-                  <button type="submit" className="btn btn-primary">{t('search.addToCollection')}</button>
+                  <button type="submit" className="btn btn-primary" disabled={languageLoading}>{t('search.addToCollection')}</button>
                 </div>
               </div>
             </form>

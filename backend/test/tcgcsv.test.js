@@ -452,6 +452,16 @@ const dbMod = require('../src/db');
   assert.strictEqual(responseCacheReads, 2,
     'sets mapping to the same group should read its cached products and prices only once');
 
+  await dbMod.run(`INSERT INTO card_cache (id, name, set_id, set_name, number, game, language, price_trend, price_source, price_currency)
+    VALUES ('tcgdex-en-fixture-004', 'Charizard', 'fixture-en', 'Fixture', '004', 'pokemon', 'English', 50, 'carddex-tcgplayer', 'USD')`);
+  await dbMod.run(`INSERT INTO card_cache (id, name, set_id, set_name, number, game, language, price_trend, price_source, price_currency)
+    VALUES ('fixture-004', 'Charizard', 'fixture-en', 'Fixture', '004', 'pokemon', 'English', 1, 'pokemontcg', 'USD')`);
+  await tcgcsv.priceSet({ set_id: 'fixture-en', set_name: 'Fixture', language: 'English' }, sameGroup, groupDataCache, true);
+  const protectedCard = await dbMod.get(`SELECT price_trend, price_source FROM card_cache WHERE id = 'tcgdex-en-fixture-004'`);
+  const legacyCard = await dbMod.get(`SELECT price_trend, price_source FROM card_cache WHERE id = 'fixture-004'`);
+  assert.deepStrictEqual(protectedCard, { price_trend: 50, price_source: 'carddex-tcgplayer' });
+  assert.deepStrictEqual(legacyCard, { price_trend: 420.5, price_source: 'tcgcsv' });
+
   const failureLogs = [];
   const originalWarn = console.warn;
   try {

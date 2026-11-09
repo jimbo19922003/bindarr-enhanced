@@ -3,9 +3,8 @@ const assert = require('assert');
 const { PRICE_SWEEP_ORDER, runSequential, safeErrorMessage } = require('../src/utils/priceSweep');
 
 async function main() {
-  assert.strictEqual(PRICE_SWEEP_ORDER[PRICE_SWEEP_ORDER.length - 1], 'pokewallet');
-  assert.ok(PRICE_SWEEP_ORDER.indexOf('tcgcsv') < PRICE_SWEEP_ORDER.indexOf('pokewallet'),
-    'TCGCSV writes before PokéWallet so a quote it stored is not raced');
+  assert.strictEqual(PRICE_SWEEP_ORDER[PRICE_SWEEP_ORDER.length - 1], 'carddex');
+  assert.ok(!PRICE_SWEEP_ORDER.includes('pokewallet'), 'PokéWallet is invoked per card after CardDex');
 
   const order = [];
   const result = await runSequential([

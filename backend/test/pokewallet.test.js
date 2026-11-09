@@ -138,6 +138,9 @@ async function main() {
     assert.strictEqual(mixed.price_holofoil, 4.5);
     assert.strictEqual(mixed.price_avg1, null);
     assert.strictEqual(mixed.tcgplayer_product_id, 245000);
+    const preferredEur = extractQuote(manualCard, 'EUR');
+    assert.strictEqual(preferredEur.currency, 'EUR');
+    assert.strictEqual(preferredEur.price_trend, 2.1);
     const eur = extractQuote(ambiguousSearch.results[0]);
     assert.strictEqual(eur.currency, 'EUR');
     assert.strictEqual(eur.price_trend, 0.4);
@@ -257,11 +260,52 @@ async function main() {
 
     await reset();
     await addCard({ id: 'tcgdex-en-base4-4', name: 'Charizard', setId: 'base4', setName: 'Base', number: '4', price: 400, source: 'tcgcsv', currency: 'USD' });
+    await cacheNormalizedCards([{
+      id: 'tcgdex-en-base4-4', name: 'Charizard', set_id: 'base4',
+      set_name: 'Base', number: '4', language: 'English',
+      price_trend: 0, price_source: 'tcgdex', price_currency: 'EUR',
+    }], 'pokemon');
+    const cachedQuote = await db.get(`SELECT price_trend, price_source, price_currency FROM card_cache WHERE id = ?`, ['tcgdex-en-base4-4']);
+    assert.deepStrictEqual(cachedQuote, { price_trend: 400, price_source: 'tcgcsv', price_currency: 'USD' });
     const leftAlone = await api.updateCollectionPrices({ force: true });
     assert.strictEqual(leftAlone.skipped_priced, 1);
     assert.strictEqual(leftAlone.updated, 0);
     assert.strictEqual(hits.n, 0, 'a priced card must not spend a request');
     assert.strictEqual((await db.get(`SELECT price_trend, price_source, id FROM card_cache WHERE id = ?`, ['tcgdex-en-base4-4'])).price_source, 'tcgcsv');
+
+    await reset();
+    await addCard({ id: 'tcgdex-en-30th-003', name: 'Mewtwo', setId: '30th', setName: 'Celebrations: Classic Collection', number: '003', price: 4, source: 'carddex-tcgplayer', currency: 'USD' });
+    const previous = await db.get(`SELECT * FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-003']);
+    const fallback = await api.priceFallback(previous);
+    assert.strictEqual(fallback.updated, 1);
+    const fallbackPrice = await db.get(`SELECT price_trend, price_source FROM card_cache WHERE id = ?`, [previous.id]);
+    assert.deepStrictEqual(fallbackPrice, { price_trend: 12.5, price_source: 'pokewallet-tcgplayer' });
+
+    await reset();
+    await addCard({ id: 'tcgdex-en-30th-003', name: 'Mewtwo', setId: '30th', setName: 'Celebrations: Classic Collection', number: '003', price: 4, source: 'carddex-cardmarket', currency: 'EUR' });
+    await db.run(`UPDATE card_cache SET price_normal = 3, price_reverse_holofoil = 5, price_1st_edition = 6 WHERE id = ?`, ['tcgdex-en-30th-003']);
+    const euro = await db.get(`SELECT * FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-003']);
+    const conflict = await api.priceFallback(euro);
+    assert.strictEqual(conflict.updated, 1);
+    assert.deepStrictEqual(await db.get(`SELECT price_trend, price_normal, price_holofoil,
+      price_reverse_holofoil, price_1st_edition, price_currency, price_source FROM card_cache WHERE id = ?`, [euro.id]),
+    { price_trend: 12.5, price_normal: null, price_holofoil: 12.5, price_reverse_holofoil: null,
+      price_1st_edition: null, price_currency: 'USD', price_source: 'pokewallet-tcgplayer' });
+    assert.strictEqual((await db.get(`SELECT status FROM pokewallet_map WHERE card_id = ?`, [euro.id])).status, 'matched');
+
+    await reset();
+    await addCard({ id: 'tcgdex-en-30th-003', name: 'Mewtwo', setId: '30th', setName: 'Celebrations: Classic Collection', number: '003', price: 4, source: 'carddex-tcgplayer', currency: 'USD' });
+    await db.run(`UPDATE card_cache SET price_normal = 3 WHERE id = ?`, ['tcgdex-en-30th-003']);
+    const sameCurrency = await db.get(`SELECT * FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-003']);
+    assert.strictEqual((await api.priceFallback(sameCurrency)).updated, 1);
+    assert.strictEqual((await db.get(`SELECT price_normal FROM card_cache WHERE id = ?`, [sameCurrency.id])).price_normal, 3);
+
+    await reset();
+    await addCard({ id: 'tcgdex-en-30th-003', name: 'Mewtwo', setId: '30th', setName: 'Celebrations: Classic Collection', number: '003', price: 4, source: 'pokewallet-cardmarket', currency: 'EUR' });
+    const changedCurrency = await api.updateCollectionPrices({ force: true });
+    assert.strictEqual(changedCurrency.updated, 1);
+    assert.deepStrictEqual(await db.get(`SELECT price_trend, price_currency, price_source FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-003']),
+      { price_trend: 12.5, price_currency: 'USD', price_source: 'pokewallet-tcgplayer' });
 
     await reset();
     await addCard({ id: 'tcgdex-en-cbb3c-4', name: 'Cubone', setId: 'CBB3C', setName: 'Gem Pack', number: '4' });
@@ -321,6 +365,18 @@ async function main() {
     const whilePaused = await api.updateCollectionPrices({ force: true });
     assert.strictEqual(whilePaused.status, 'rate_limited');
     assert.strictEqual(hits.n, held, 'Retry-After holds the next refresh');
+
+    await reset();
+    for (let i = 0; i < 89; i++) {
+      await db.run(`INSERT INTO pokewallet_request (created_at) VALUES (?)`, [Date.now()]);
+    }
+    const simultaneous = await Promise.allSettled([
+      api.searchCatalog('Alpha'),
+      api.searchCatalog('Beta'),
+    ]);
+    assert.strictEqual(simultaneous.filter(result => result.status === 'fulfilled').length, 1);
+    assert.strictEqual(simultaneous.filter(result => result.status === 'rejected' && result.reason.code === 'rate_limited').length, 1);
+    assert.strictEqual(hits.n, 1, 'concurrent reservations must share the same request budget');
 
     await reset();
     await addCard({ id: 'tcgdex-en-30th-003', name: 'Mewtwo', setId: '30th', setName: 'Celebrations: Classic Collection', number: '003' });

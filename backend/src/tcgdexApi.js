@@ -10,6 +10,7 @@
 // { cards, total } of card_cache-shaped rows, so routes/collection.js can pick a
 // provider and treat the answer identically.
 const axios = require('axios');
+const {createHash} = require('node:crypto');
 const db = require('./db');
 const { parseCardRow, recordPrice, shouldSweepPrices, markPricesSwept } = require('./utils/priceHelpers');
 const { parseSetList } = require('./utils/setQuery');
@@ -17,6 +18,7 @@ const cardSearchSql = require('./utils/cardSearchSql');
 const { cacheNormalizedCards } = require('./utils/cardCache');
 const languages = require('./utils/languages');
 const { pruneStaleSets } = require('./utils/setCatalogue');
+const { tcgdexPrintings } = require('./utils/cardPrintings');
 
 const API_BASE_URL = 'https://api.tcgdex.net/v2';
 
@@ -109,6 +111,7 @@ function normalizeCard(card, lang) {
     cmc: null,
     color_identity: [],
     game: 'pokemon',
+    available_printings: tcgdexPrintings(card.variants),
     language: languages.toName(code),
     // Cardmarket link built from the idProduct the price itself came from, so it
     // opens the exact product rather than a search — which matters here more than
@@ -417,6 +420,35 @@ async function listSets(lang) {
   return sets;
 }
 
+async function listPhysicalSets(lang) {
+  const [sets, series] = await Promise.all([listSets(lang), listSeries(lang)]);
+  return sets.filter(set => series.get(set.id)?.id !== DIGITAL_SERIES);
+}
+
+async function fetchSetSnapshot(lang, setId, onProgress = () => {}) {
+  const code = languages.toCode(lang);
+  if (typeof setId !== 'string' || !setId.trim() || setId.length > 200) throw new TypeError('Invalid TCGdex set ID');
+  const {data: set} = await client.get(`/${code}/sets/${encodeURIComponent(setId)}`);
+  if (set.id !== setId) throw new Error('TCGdex returned a different set than requested');
+  const briefs = Array.isArray(set.cards) ? set.cards : [];
+  if (!briefs.length) {
+    const error = new Error('The selected TCGdex set contains no cards');
+    error.code = 'TCGDEX_EMPTY_SET';
+    throw error;
+  }
+  const cards = [];
+  onProgress({phase: 'fetching', done: 0, total: briefs.length});
+  for (let i = 0; i < briefs.length; i += HYDRATE_CONCURRENCY) {
+    const batch = await Promise.all(briefs.slice(i, i + HYDRATE_CONCURRENCY).map(brief =>
+      fetchFullCard(code, brief.id)
+    ));
+    cards.push(...batch);
+    onProgress({phase: 'fetching', done: cards.length, total: briefs.length});
+  }
+  const commit = createHash('sha1').update(JSON.stringify({language: code, set, cards})).digest('hex');
+  return {language: code, commit, sets: [set], cards};
+}
+
 // Pokémon TCG Pocket — the phone game. Its cards have artwork and set codes but
 // no physical printing, so they can never be the answer to a camera scan. TCGdex
 // publishes them alongside the paper sets with nothing on the set brief to tell
@@ -592,7 +624,7 @@ async function learnEnglishName(card) {
 
 // `client` is exported for tests (stub the axios adapter), like tcgApi.tcgClient.
 module.exports = {
-  searchCards, getCardById, getPrintingInLang, hydrateCard, listSets, fetchAndCacheSets, cacheCards, normalizeCard,
+  searchCards, getCardById, getPrintingInLang, hydrateCard, listSets, listPhysicalSets, fetchSetSnapshot, fetchAndCacheSets, cacheCards, normalizeCard,
   updateCollectionPrices, learnEnglishName, providerId, idLanguage, client,
   // setIndex.listAllSets filters digital sets out of a build with these, and
   // globalIndex groups the coverage breakdown by series.

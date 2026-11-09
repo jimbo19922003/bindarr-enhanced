@@ -85,15 +85,35 @@ export function convertDisplayAmount(amount, from, to, quotes) {
   return Number.isFinite(converted) ? converted : null;
 }
 
+export function reportingAmount(amount, currency) {
+  const to = getCurrency();
+  const from = currency ? String(currency).toUpperCase() : to;
+  if (amount == null || amount === '') return null;
+  if (from !== to) void ensureExchangeRates();
+  const quotes = cached && Date.now() - cached.at < 86400000 ? cached.quotes : null;
+  return convertDisplayAmount(amount, from, to, quotes);
+}
+
+export function reportingTotal(cards) {
+  let total = 0;
+  for (const card of cards) {
+    if (card.price_trend == null || card.price_trend === '') continue;
+    const amount = reportingAmount(card.price_trend, card.price_currency);
+    if (amount == null) return null;
+    total += amount * (card.quantity || 1);
+  }
+  return total;
+}
+
 // Explicit currency is the quote currency; omitted currency means an amount
 // already entered in the reporting currency. Never overwrite stored quotes.
 export const priceText = (p, currency) => {
   const to = getCurrency();
-  const from = currency ? String(currency).toUpperCase() : to;
   if (p == null || p === '' || !Number.isFinite(Number(p))) return '—';
-  if (from !== to) void ensureExchangeRates();
-  const quotes = cached && Date.now() - cached.at < 86400000 ? cached.quotes : null;
-  const amount = convertDisplayAmount(p, from, to, quotes);
+  const amount = reportingAmount(p, currency);
   if (amount == null) return inflight ? '…' : '— (FX unavailable)';
   return `${currencySymbol(to)}${amount.toFixed(to === 'JPY' ? 0 : 2)}`;
 };
+
+export const reportingTotalText = total =>
+  total == null ? (inflight ? '…' : '— (FX unavailable)') : priceText(total);

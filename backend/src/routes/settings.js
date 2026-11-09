@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
+const { effectiveTimeZone, isValidTimeZone } = require('../utils/portfolioTimeZone');
 
 const router = express.Router();
 
@@ -65,7 +66,7 @@ router.get('/version', async (req, res) => {
 
 async function getEffectiveSettings() {
   const row = await db.get(`
-    SELECT public_base_url, pokemon_provider, mtg_price_source, price_refresh_days,
+    SELECT public_base_url, pokemon_provider, mtg_price_source, price_refresh_days, portfolio_time_zone,
            scan_exclude_tokens, scan_exclude_art_cards, scan_exclude_jumpstart, scan_exclude_promos,
            scan_exclude_digital, setup_complete
     FROM app_settings WHERE id = 1
@@ -90,6 +91,7 @@ async function getEffectiveSettings() {
     pokemon_provider,
     mtg_price_source,
     price_refresh_days,
+    portfolio_time_zone: effectiveTimeZone(row?.portfolio_time_zone),
     scan_exclude_tokens,
     scan_exclude_art_cards,
     scan_exclude_jumpstart,
@@ -116,6 +118,7 @@ router.put('/', requireAdmin, async (req, res) => {
     pokemon_provider,
     mtg_price_source,
     price_refresh_days,
+    portfolio_time_zone,
     scan_exclude_tokens,
     scan_exclude_art_cards,
     scan_exclude_jumpstart,
@@ -124,6 +127,10 @@ router.put('/', requireAdmin, async (req, res) => {
     setup_complete,
     pokewallet_api_key,
   } = req.body;
+
+  if (portfolio_time_zone !== undefined && !isValidTimeZone(portfolio_time_zone)) {
+    return res.status(400).json({ error: 'Portfolio timezone must be a valid IANA timezone, such as America/Chicago.' });
+  }
 
   if (pokewallet_api_key !== undefined) {
     const candidate = String(pokewallet_api_key == null ? '' : pokewallet_api_key).trim();
@@ -209,6 +216,9 @@ router.put('/', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Price refresh interval must be a whole number of days from 0 (off) to 30.' });
     }
     await db.run(`UPDATE app_settings SET price_refresh_days = ? WHERE id = 1`, [n]);
+  }
+  if (portfolio_time_zone !== undefined) {
+    await db.run(`UPDATE app_settings SET portfolio_time_zone = ? WHERE id = 1`, [portfolio_time_zone]);
   }
   if (scan_exclude_tokens !== undefined) {
     await db.run(`UPDATE app_settings SET scan_exclude_tokens = ? WHERE id = 1`, [scan_exclude_tokens ? 1 : 0]);

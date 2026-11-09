@@ -1,10 +1,7 @@
 'use strict';
 
-// Pokémon price writers share card_cache columns. Running them without waiting
-// made "TCGCSV goes last" a comment rather than an order: a later writer could
-// finish first. PokéWallet is last on purpose. It only fills a card that still
-// has no positive quote, so a TCGCSV price written earlier in the same pass
-// keeps the final say. Overlapping ticks do not start a second pass.
+// The compatibility sweepers handle other Pokémon identities and languages.
+// CardDex and its per-card PokéWallet fallback run after those writers.
 
 const PRICE_SWEEP_ORDER = [
   'pokemon',
@@ -13,10 +10,10 @@ const PRICE_SWEEP_ORDER = [
   'tcgdex',
   'pokemontcgapi',
   'tcgcsv',
-  'pokewallet',
+  'carddex',
 ];
 
-const SECRET_ENV = ['POKEWALLET_API_KEY', 'POKEMONTCGAPI_KEY', 'POKEMON_TCG_API_KEY'];
+const SECRET_ENV = ['CARDDEX_API_KEY', 'POKEWALLET_API_KEY', 'POKEMONTCGAPI_KEY', 'POKEMON_TCG_API_KEY'];
 
 function safeErrorMessage(err) {
   let message = err && err.message ? String(err.message) : 'price sweep failed';

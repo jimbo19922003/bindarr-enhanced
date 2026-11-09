@@ -8,7 +8,7 @@ test('partial lookup refreshes preserve artwork while explicit new artwork repla
  const module={exports:{}};
  vm.runInNewContext(await fs.readFile(path.join(__dirname,'../src/utils/cardCache.js'),'utf8'),{module,exports:module.exports,require:name=>{if(name!=='../db')throw new Error('Unexpected dependency');return db;}});
  const {cacheNormalizedCards,CARD_CACHE_COLUMNS}=module.exports;
- await db.exec('CREATE TABLE card_cache ('+CARD_CACHE_COLUMNS.map(name=>name==='id'?'id TEXT PRIMARY KEY':name+' TEXT').join(',')+',last_updated TEXT)');
+ await db.exec('CREATE TABLE card_cache ('+CARD_CACHE_COLUMNS.map(name=>name==='id'?'id TEXT PRIMARY KEY':name+' TEXT').join(',')+',price_1st_edition REAL,last_updated TEXT)');
  const base={id:'tcgdex-en-base1-4',name:'Charmander',set_id:'base1',number:'4',language:'English',image_url:'https://assets.tcgdex.net/en/base/base1/4/low.png'};
  await cacheNormalizedCards([base],'pokemon');
  for(const image_url of ['',null,undefined,'   ']){

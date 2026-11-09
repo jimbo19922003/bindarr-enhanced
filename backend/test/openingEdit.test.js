@@ -46,6 +46,19 @@ async function main() {
     await db.run('DROP TRIGGER edit_test_abort');
     assert.strictEqual((await send('PUT', url, rollback)).status, 200); assert.strictEqual(await count(), 22);
     assert.strictEqual((await send('PUT', url, rollback)).status, 200); assert.strictEqual(await count(), 22);
+    await db.run(`UPDATE card_cache SET available_printings = '["Holofoil"]', price_holofoil = 12 WHERE id = 'tcgdex-en-edit-eur'`);
+    const latest = (await send('GET', `/api/sealed/openings/${opening.id}`)).body.opening;
+    const invalidFinish = bodyFor(latest, 'edit-invalid-finish-0007');
+    invalidFinish.pulls.push({ card_id: 'tcgdex-en-edit-eur', quantity: 2, printing: 'Normal' });
+    assert.strictEqual((await send('PUT', url, invalidFinish)).status, 400);
+    const finish = bodyFor(latest, 'edit-new-finish-0008');
+    finish.pulls.push({ card_id: 'tcgdex-en-edit-eur', quantity: 2, printing: 'Holofoil' });
+    const added = await send('PUT', url, finish);
+    assert.strictEqual(added.status, 200, JSON.stringify(added.body));
+    const newPull = added.body.opening.pulls.find(pull => pull.card_id === 'tcgdex-en-edit-eur' && pull.quantity === 2);
+    assert.strictEqual(newPull.current_value, '15.00');
+    const newCopies = await db.all(`SELECT printing FROM collection WHERE id IN (${(await db.get('SELECT filed_ids FROM sealed_pull WHERE id = ?', [newPull.id])).filed_ids})`);
+    assert.deepStrictEqual(newCopies.map(row => row.printing), ['Holofoil', 'Holofoil']);
   } finally { await new Promise(resolve => server.close(resolve)); }
   console.log('openingEdit.test.js: all assertions passed');
 }

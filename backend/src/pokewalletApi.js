@@ -134,31 +134,55 @@ function cacheKeyFor(key, path, params) {
   return `${scope} GET ${path}?${query.toString()}`;
 }
 
-async function allowance() {
+async function allowance(connection = db) {
   const now = Date.now();
-  const budget = await db.get(
+  const budget = await connection.get(
     `SELECT remaining_hour, remaining_day, observed_at, paused_until FROM pokewallet_budget WHERE id = 1`
   );
   if (budget && budget.paused_until && now < budget.paused_until) {
     return { ok: false, reason: 'rate_limited', retryAt: new Date(budget.paused_until).toISOString() };
   }
-  const hourCount = (await db.get(
+  const hourCount = (await connection.get(
     `SELECT COUNT(*) AS n FROM pokewallet_request WHERE created_at > ?`, [now - HOUR_MS]
   )).n;
-  const dayCount = (await db.get(
+  const dayCount = (await connection.get(
     `SELECT COUNT(*) AS n FROM pokewallet_request WHERE created_at > ?`, [now - DAY_MS]
   )).n;
   let hourLeft = LOCAL_HOUR_CAP - hourCount;
   let dayLeft = LOCAL_DAY_CAP - dayCount;
   if (budget && budget.observed_at != null && (budget.remaining_hour != null || budget.remaining_day != null)) {
-    const since = (await db.get(
-      `SELECT COUNT(*) AS n FROM pokewallet_request WHERE created_at > ?`, [budget.observed_at]
+    const since = (await connection.get(
+      `SELECT COUNT(*) AS n FROM pokewallet_request WHERE created_at >= ?`, [budget.observed_at]
     )).n;
-    if (budget.remaining_hour != null) hourLeft = budget.remaining_hour - since;
-    if (budget.remaining_day != null) dayLeft = budget.remaining_day - since;
+    if (budget.remaining_hour != null && now - budget.observed_at < HOUR_MS) hourLeft = Math.min(hourLeft, budget.remaining_hour - since);
+    if (budget.remaining_day != null && now - budget.observed_at < DAY_MS) dayLeft = Math.min(dayLeft, budget.remaining_day - since);
   }
   if (hourLeft <= 0 || dayLeft <= 0) return { ok: false, reason: 'rate_limited', retryAt: null };
   return { ok: true };
+}
+
+async function reserveRequest() {
+  const connection = await require('./utils/salesRepository').openConnection(db.dbPath);
+  let started = false;
+  try {
+    await connection.run('BEGIN IMMEDIATE');
+    started = true;
+    const allowed = await allowance(connection);
+    if (!allowed.ok) {
+      const err = fail('rate_limited');
+      err.retryAt = allowed.retryAt || null;
+      throw err;
+    }
+    const createdAt = Date.now();
+    await connection.run(`INSERT INTO pokewallet_request (created_at) VALUES (?)`, [createdAt]);
+    await connection.run(`DELETE FROM pokewallet_request WHERE created_at < ?`, [createdAt - 2 * DAY_MS]);
+    await connection.run('COMMIT');
+    started = false;
+    return createdAt;
+  } finally {
+    if (started) await connection.run('ROLLBACK');
+    await connection.close();
+  }
 }
 
 async function rememberResponse(createdAt, headers) {
@@ -196,15 +220,7 @@ async function request(path, params) {
     if (cached && Date.now() - cached.fetched_at < CACHE_TTL_MS) {
       return { body: JSON.parse(cached.body), cached: true };
     }
-    const allowed = await allowance();
-    if (!allowed.ok) {
-      const err = fail('rate_limited');
-      err.retryAt = allowed.retryAt || null;
-      throw err;
-    }
-    const createdAt = Date.now();
-    await db.run(`INSERT INTO pokewallet_request (created_at) VALUES (?)`, [createdAt]);
-    await db.run(`DELETE FROM pokewallet_request WHERE created_at < ?`, [createdAt - 2 * DAY_MS]);
+    const createdAt = await reserveRequest();
     let response;
     try {
       response = await client.get(path, { params, headers: { 'X-API-Key': key } });
@@ -275,14 +291,15 @@ async function saveMap(row) {
 
 // The WHERE clause is the precedence rule: another source's positive quote
 // cannot be replaced, including by a request that raced ahead of TCGCSV.
-async function applyQuote(card, quote) {
-  if (ownedByPokewallet(card) && hasPositivePrice(card) && card.price_currency && card.price_currency !== quote.currency) {
-    return false;
-  }
+async function applyQuote(card, quote, fallback = false) {
   const result = await db.run(
     `UPDATE card_cache
-        SET price_trend = ?, price_normal = ?, price_holofoil = ?, price_reverse_holofoil = ?,
-            price_1st_edition = ?, price_avg1 = ?, price_avg7 = ?, price_avg30 = ?,
+        SET price_trend = ?,
+            price_normal = CASE WHEN ? AND price_currency IS ? THEN COALESCE(?, price_normal) ELSE ? END,
+            price_holofoil = CASE WHEN ? AND price_currency IS ? THEN COALESCE(?, price_holofoil) ELSE ? END,
+            price_reverse_holofoil = CASE WHEN ? AND price_currency IS ? THEN COALESCE(?, price_reverse_holofoil) ELSE ? END,
+            price_1st_edition = CASE WHEN ? AND price_currency IS ? THEN COALESCE(?, price_1st_edition) ELSE ? END,
+            price_avg1 = ?, price_avg7 = ?, price_avg30 = ?,
             price_currency = ?, price_source = ?,
             tcgplayer_url = COALESCE(tcgplayer_url, ?),
             cardmarket_url = COALESCE(cardmarket_url, ?),
@@ -290,7 +307,13 @@ async function applyQuote(card, quote) {
             last_updated = CURRENT_TIMESTAMP
       WHERE id = ?
         AND (
-          price_source LIKE 'pokewallet%'
+          (? = 1 AND price_source IS ? AND price_currency IS ? AND last_updated IS ?
+            AND price_trend IS ? AND price_normal IS ? AND price_holofoil IS ?
+            AND price_reverse_holofoil IS ? AND price_1st_edition IS ?)
+          OR (? = 0 AND price_source LIKE 'pokewallet%'
+            AND price_source IS ? AND price_currency IS ? AND last_updated IS ?
+            AND price_trend IS ? AND price_normal IS ? AND price_holofoil IS ?
+            AND price_reverse_holofoil IS ? AND price_1st_edition IS ?)
           OR (
             COALESCE(price_trend, 0) <= 0
             AND COALESCE(price_normal, 0) <= 0
@@ -300,10 +323,17 @@ async function applyQuote(card, quote) {
           )
         )`,
     [
-      quote.price_trend, quote.price_normal, quote.price_holofoil, quote.price_reverse_holofoil,
-      quote.price_1st_edition, quote.price_avg1, quote.price_avg7, quote.price_avg30,
+      quote.price_trend,
+      fallback ? 1 : 0, quote.currency, quote.price_normal, quote.price_normal,
+      fallback ? 1 : 0, quote.currency, quote.price_holofoil, quote.price_holofoil,
+      fallback ? 1 : 0, quote.currency, quote.price_reverse_holofoil, quote.price_reverse_holofoil,
+      fallback ? 1 : 0, quote.currency, quote.price_1st_edition, quote.price_1st_edition,
+      quote.price_avg1, quote.price_avg7, quote.price_avg30,
       quote.currency, quote.source, quote.tcgplayer_url, quote.cardmarket_url, quote.tcgplayer_product_id,
-      card.id,
+      card.id, fallback ? 1 : 0, card.price_source, card.price_currency, card.last_updated,
+      card.price_trend, card.price_normal, card.price_holofoil, card.price_reverse_holofoil, card.price_1st_edition,
+      fallback ? 1 : 0, card.price_source, card.price_currency, card.last_updated,
+      card.price_trend, card.price_normal, card.price_holofoil, card.price_reverse_holofoil, card.price_1st_edition,
     ]
   );
   if (!result || result.changes !== 1) return false;
@@ -368,7 +398,7 @@ function emptySearch(body) {
   return !!(body && !body.card_info && Array.isArray(body.results) && body.results.length === 0);
 }
 
-async function priceOne(card, report, force) {
+async function priceOne(card, report, force, fallback = false) {
   report.examined += 1;
   const mapping = await db.get(`SELECT provider_card_id, manual FROM pokewallet_map WHERE card_id = ?`, [card.id]);
   const manual = !!(mapping && mapping.manual && mapping.provider_card_id);
@@ -380,7 +410,7 @@ async function priceOne(card, report, force) {
     });
     return 'ok';
   }
-  if (!manual && hasPositivePrice(card) && !ownedByPokewallet(card)) {
+  if (!manual && !fallback && hasPositivePrice(card) && !ownedByPokewallet(card)) {
     report.skipped_priced += 1;
     await note(card, 'skipped_priced', 'existing_quote', {
       provider_card_id: mapping && mapping.provider_card_id,
@@ -424,7 +454,10 @@ async function priceOne(card, report, force) {
   } catch (err) {
     if (err.code === 'not_found') {
       report.unmatched += 1;
-      await note(card, 'unmatched', 'not_found');
+      await note(card, 'unmatched', 'not_found', {
+        provider_card_id: mapping && mapping.provider_card_id,
+        manual: mapping && mapping.manual,
+      });
       pushIssue(report, card, 'unmatched', 'not_found', []);
       return 'ok';
     }
@@ -432,22 +465,25 @@ async function priceOne(card, report, force) {
       throw err;
     }
     report.failed += 1;
-    await note(card, 'failed', 'upstream');
+    await note(card, 'failed', 'upstream', {
+      provider_card_id: mapping && mapping.provider_card_id,
+      manual: mapping && mapping.manual,
+    });
     pushIssue(report, card, 'failed', 'upstream', []);
     console.warn(`PokéWallet ${card.id}: upstream`);
     return 'failed';
   }
   if (fetched.cached) report.cached += 1;
   const manualFetch = !!(mapping && mapping.manual && mapping.provider_card_id);
-  return settle(card, report, fetched.body, manualFetch, mapping && mapping.provider_card_id);
+  return settle(card, report, fetched.body, manualFetch, mapping && mapping.provider_card_id, fallback);
 }
 
-async function settle(card, report, body, manual, providerCardId) {
+async function settle(card, report, body, manual, providerCardId, fallback = false) {
   const direct = body && body.card_info ? [body] : null;
   const results = direct || (Array.isArray(body && body.results) ? body.results : null);
   if (!results) {
     report.failed += 1;
-    await note(card, 'failed', 'upstream');
+    await note(card, 'failed', 'upstream', { provider_card_id: providerCardId, manual });
     pushIssue(report, card, 'failed', 'upstream', []);
     return 'failed';
   }
@@ -460,7 +496,11 @@ async function settle(card, report, body, manual, providerCardId) {
     pushIssue(report, card, decision.status, decision.reason, decision.candidates);
     return 'ok';
   }
-  const quote = match.extractQuote(decision.matches[0]);
+  let quote = match.extractQuote(decision.matches[0],
+    fallback && hasPositivePrice(card) ? card.price_currency : null);
+  if (!quote.ok && fallback && hasPositivePrice(card) && quote.reason === 'unpriced') {
+    quote = match.extractQuote(decision.matches[0]);
+  }
   if (!quote.ok) {
     const status = quote.reason === 'variant_unconfirmed' ? 'variant_unconfirmed'
       : quote.reason === 'not_a_card' ? 'failed' : 'unpriced';
@@ -473,19 +513,7 @@ async function settle(card, report, body, manual, providerCardId) {
     pushIssue(report, card, status, quote.reason, decision.candidates);
     return 'ok';
   }
-  if (ownedByPokewallet(card) && hasPositivePrice(card) && card.price_currency && card.price_currency !== quote.currency) {
-    report.currency_conflict += 1;
-    await note(card, 'currency_conflict', 'currency_differs', {
-      provider_card_id: decision.matches[0].id,
-      quote_currency: quote.currency,
-      quote_amount: quote.price_trend,
-      quote_updated_at: quote.updated_at,
-      manual,
-    });
-    pushIssue(report, card, 'currency_conflict', 'currency_differs', decision.candidates);
-    return 'ok';
-  }
-  const applied = await applyQuote(card, quote);
+  const applied = await applyQuote(card, quote, fallback);
   if (!applied) {
     report.skipped_priced += 1;
     await note(card, 'skipped_priced', 'existing_quote', {
@@ -733,6 +761,14 @@ async function priceUnpricedCard(card) {
   return report;
 }
 
+async function priceFallback(card) {
+  if (!card || card.game !== 'pokemon' || !String(card.id).startsWith('tcgdex-en-')) return { status: 'unsupported' };
+  if (!(await activeKey()).key) return { status: 'key_missing' };
+  const report = emptyReport();
+  await priceOne(card, report, true, true);
+  return report;
+}
+
 function resetForTests() {
   inflight = false;
   pending.clear();
@@ -765,5 +801,6 @@ module.exports = {
   searchCatalog,
   fetchProduct,
   priceUnpricedCard,
+  priceFallback,
   resetForTests,
 };

@@ -16,6 +16,13 @@ Apply can try the emergency provider if downloading CardDex artwork fails. The e
 
 CardDex metadata responses are cached for one hour; request reservations are persisted with conservative ceilings of 25 per minute and 4,500 per day, including image downloads. A 429/503 establishes a shared CardDex cooldown. These limits apply to this adapter, not unrelated future CardDex clients. HTTPS image destinations are restricted to images.carddex.dev and English assets.tcgdex.net paths, with no redirects, URL credentials, query strings or arbitrary browser-supplied URL. Printing identity, English language context and complete result coverage are required.
 
+For English artwork and prices, a shared, name-gated set mapping covers the
+30th anniversary sets, Shining Fates Shiny Vault, the Sword & Shield Trainer
+and Galarian Galleries, and verified CardDex set-name discrepancies. Card
+identity and collector number still have to match. Sets absent from CardDex
+and printings with incompatible collector numbers, such as Celebrations
+Classic Collection, are not guessed and continue to use fallback providers.
+
 Data by CardDex: https://carddex.dev. Attribution is visible on Add Cards. PokéWallet keeps its existing database/environment key configuration and shared cache/budget tables. No key is sent to CardDex.
 
 After a CLI repair, restart the backend and refresh the browser: the existing card-art index cache is process-local. Repaired images are instance files, not repository assets or automatically updated scanner indexes. Do not commit artwork or the metadata ZIP. Provider-reference counts do not include locally cached contributed/fallback art.

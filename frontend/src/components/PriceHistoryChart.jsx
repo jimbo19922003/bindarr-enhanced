@@ -28,7 +28,7 @@ export default function PriceHistoryChart({
   const [range, setRange] = useState(defaultRange);
   const [data, setData] = useState([]);
   const [insufficientHistory, setInsufficientHistory] = useState(false);
-  const [coverage, setCoverage] = useState({ spanDays: 0, windowDays: null, marketCount: 0, recordedCount: 0 });
+  const [coverage, setCoverage] = useState({ spanDays: 0, windowDays: null, marketCount: 0, recordedCount: 0, carddexCount: 0, quoteAt: null });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -51,6 +51,8 @@ export default function PriceHistoryChart({
               windowDays: json.windowDays ?? null,
               marketCount: json.marketCount ?? 0,
               recordedCount: json.recordedCount ?? 0,
+              carddexCount: json.carddexCount ?? 0,
+              quoteAt: json.quoteAt ?? null,
             });
           }
         }
@@ -130,12 +132,19 @@ export default function PriceHistoryChart({
       {/* Say where the line came from. Cardmarket's rolling averages are real
           market data pulled per request; everything else is what Bindarr has
           watched happen since it was installed. */}
-      {!loading && !insufficientHistory && (coverage.marketCount > 0 || coverage.recordedCount > 0) && (
+      {!loading && coverage.quoteAt && Number.isFinite(Date.parse(coverage.quoteAt)) && (
+        <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
+          {t('priceHistory.quoteAsOf', { date: new Date(coverage.quoteAt).toLocaleDateString(locale) })}
+        </div>
+      )}
+      {!loading && !insufficientHistory && (coverage.carddexCount > 0 || coverage.marketCount > 0 || coverage.recordedCount > 0) && (
         <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.35 }}>
-          {coverage.marketCount > 0
+          {coverage.carddexCount > 0
+            ? t('priceHistory.sourceCarddex')
+            : coverage.marketCount > 0
             ? t('priceHistory.sourceCardmarket')
             : t('priceHistory.sourceRecorded', { count: coverage.spanDays || 0 })}
-          {coverage.marketCount > 0 && coverage.recordedCount > 0
+          {(coverage.carddexCount > 0 || coverage.marketCount > 0) && coverage.recordedCount > 0
             ? ` + ${t('priceHistory.plusRecorded', { count: coverage.recordedCount })}`
             : ''}
         </div>

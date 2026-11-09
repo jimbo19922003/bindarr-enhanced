@@ -17,7 +17,15 @@ async function cardForPull(userId, pull) {
   return card ? { ...card, printing: 'Normal' } : null;
 }
 
-async function applyPullPrice(pull, card, currency) {
+async function applyPullPrice(pull, card, currency, { exactPrinting = false } = {}) {
+  if (exactPrinting) {
+    const field = { Normal: 'price_normal', Holofoil: 'price_holofoil', 'Reverse Holofoil': 'price_reverse_holofoil', '1st Edition': 'price_1st_edition' }[card?.printing];
+    const price = field && Number(card?.[field]);
+    if (!pull.currentBlank || !(price > 0) || !Number.isFinite(price)) return false;
+    pull.currentUnit = Math.round((await createReportingValuation(currency).money(price, card.price_currency)) * 100);
+    pull.currentBlank = false;
+    return true;
+  }
   if (!pull.currentBlank || !card || !(Number(resolveCardPrice(card)) > 0)) return false;
   const normalized = await createReportingValuation(currency).card(card);
   pull.currentUnit = Math.round(normalized.price_trend * 100);
@@ -39,7 +47,7 @@ async function repairUnpricedPulls(userId, openingIds) {
   for (const row of rows) {
     const card = await cardForPull(userId, row);
     const pull = { currentBlank: true };
-    if (!(await applyPullPrice(pull, card, row.currency))) continue;
+    if (!(await applyPullPrice(pull, card, row.currency, { exactPrinting: true }))) continue;
     const result = await db.run(`UPDATE sealed_pull SET current_unit_cents = ?, updated_at = datetime('now')
       WHERE id = ? AND user_id = ? AND current_unit_cents IS NULL AND current_line_cents IS NULL`,
     [pull.currentUnit, row.id, userId]);

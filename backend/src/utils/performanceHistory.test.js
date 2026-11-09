@@ -29,3 +29,19 @@ test('handler scopes reads to authenticated owner and canonical snapshot dimensi
   await handler({ query: {} }, res);
   assert.equal(res.code, 401);
 });
+test('history and live point read the current saved timezone on each request', async () => {
+  let zone = 'America/Chicago', parameters, body, liveZone;
+  const db = { get: async () => ({ portfolio_time_zone: zone }), run: async () => {}, all: async (sql, params) => { parameters = params; return []; } };
+  const handler = createPerformanceHandler({ db, now: () => Date.parse('2026-11-09T03:22:24Z'), loadCurrent: async params => { liveZone = params.timeZone; return null; } });
+  const res = { set() {}, status(code) { this.code = code; return this; }, json(value) { body = value; return this; } };
+  await handler({ user: { id: 42 }, query: { range: '7d' } }, res);
+  assert.equal(body.timeZone, 'America/Chicago');
+  assert.equal(body.to, '2026-11-08');
+  assert.equal(parameters[3], liveZone);
+  zone = 'UTC';
+  await handler({ user: { id: 42 }, query: { range: '7d' } }, res);
+  assert.equal(body.timeZone, 'UTC');
+  assert.equal(body.to, '2026-11-09');
+  assert.equal(parameters[3], 'UTC');
+  assert.equal(liveZone, 'UTC');
+});

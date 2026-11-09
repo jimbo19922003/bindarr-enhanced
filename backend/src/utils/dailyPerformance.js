@@ -1,12 +1,13 @@
 // sale-aware-timeline-v1
 'use strict';
 const { dailySchema, dailyUpsert } = require('../../../shared/investmentLedgerSchema.json');
-function createCollector({ db, getPortfolio, createValuation, connectRead, now = Date.now, timeZone = 'UTC', scopes = ['', 'pokemon', 'mtg', 'lorcana'] }) {
-  const formatter = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+function createCollector({ db, getPortfolio, createValuation, connectRead, now = Date.now, timeZone = 'America/Chicago', getTimeZone = async () => timeZone, scopes = ['', 'pokemon', 'mtg', 'lorcana'] }) {
   let ready, inflight;
   async function run() {
     if (!ready) ready = db.run(dailySchema).then(() => db.run(require('./timelineAccounting').schema)).catch(error => { ready = null; throw error; });
     await ready;
+    const timeZone = await getTimeZone();
+    const formatter = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
     const users = await db.all('SELECT id FROM users ORDER BY id');
     const result = { captured: 0, errors: [] };
     for (const user of users) for (const game of scopes) {
@@ -57,11 +58,9 @@ let active;
 function start() {
   if (active) return active.collector;
   const db = require('../db');
-  let timeZone = process.env.PORTFOLIO_TIMEZONE || 'UTC';
-  try { new Intl.DateTimeFormat('en-US', { timeZone }); } catch { console.warn('Invalid PORTFOLIO_TIMEZONE; using UTC.'); timeZone = 'UTC'; }
   const requested = Number(process.env.PORTFOLIO_SAMPLE_MINUTES || 15);
   const minutes = Number.isFinite(requested) && requested >= 1 && requested <= 1440 ? requested : 15;
-  const collector = createCollector({ db, getPortfolio: require('./currentPortfolio').currentPortfolio, createValuation: require('./reportingValuation').createReportingValuation, connectRead: () => openConnection(db), timeZone });
+  const collector = createCollector({ db, getPortfolio: require('./currentPortfolio').currentPortfolio, createValuation: require('./reportingValuation').createReportingValuation, connectRead: () => openConnection(db), getTimeZone: () => require('./portfolioTimeZone').readTimeZone(db) });
   const sample = async () => {
     try {
       await require('./currencyConversion').refreshIfDue();

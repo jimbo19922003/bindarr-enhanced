@@ -414,32 +414,30 @@ async function cacheSetCards(game, set, lang, { excludeChildCodes = [] } = {}) {
 // Cache full card data so the post-match /api/search is an instant local
 // card_cache hit instead of a live (throttled) provider fetch per scan.
 async function cacheFetchedCards(game, cards, code, useTcgdex) {
-  try {
-    if (game === 'mtg') {
-      const scryfallApi = require('./scryfallApi');
-      const seen = new Set();
-      const rows = cards.filter(c => c.raw?.id && (seen.has(c.raw.id) ? false : seen.add(c.raw.id)));
-      await scryfallApi.cacheCards(rows.map(c => scryfallApi.normalizeCard(c.raw, code)));
-    } else if (!useTcgdex) {
-      const tcgApi = require('./tcgApi');
-      await tcgApi.cacheCards(cards.map(c => c.raw));
-    } else {
-        // Same `useTcgdex` the fetch used, so the rows are always normalized by
-        // the provider that produced them. When this branched on the language
-        // instead, TCGdex set briefs went through pokemontcg.io's normalizer,
-        // which reads `c.images.large` and `c.number` — fields a TCGdex brief
-        // does not have. Every row cached that way named the card correctly and
-        // then had no image_url and no number, so a scan matched, added the card,
-        // and displayed nothing. 21,828 rows before anyone saw a blank card.
-        // TCGdex set briefs carry no rarity/types/prices, so these rows are thin
-        // on purpose — enough for the scanner to name a card the instant it
-        // matches, without 237 extra requests during a build. They are flagged
-        // `incomplete` so they read as stale and get filled in when the card is
-        // actually added (see the add route) or by the price sweep.
-        const tcgdexApi = require('./tcgdexApi');
-        await tcgdexApi.cacheCards(cards.map(c => tcgdexApi.normalizeCard(c.raw, code)), { incomplete: true });
-      }
-    } catch (e) { console.warn(`cardSets: caching cards failed: ${e.message}`); }
+  if (game === 'mtg') {
+    const scryfallApi = require('./scryfallApi');
+    const seen = new Set();
+    const rows = cards.filter(c => c.raw?.id && (seen.has(c.raw.id) ? false : seen.add(c.raw.id)));
+    await scryfallApi.cacheCards(rows.map(c => scryfallApi.normalizeCard(c.raw, code)));
+  } else if (!useTcgdex) {
+    const tcgApi = require('./tcgApi');
+    await tcgApi.cacheCards(cards.map(c => c.raw));
+  } else {
+    // Same `useTcgdex` the fetch used, so the rows are always normalized by
+    // the provider that produced them. When this branched on the language
+    // instead, TCGdex set briefs went through pokemontcg.io's normalizer,
+    // which reads `c.images.large` and `c.number` — fields a TCGdex brief
+    // does not have. Every row cached that way named the card correctly and
+    // then had no image_url and no number, so a scan matched, added the card,
+    // and displayed nothing. 21,828 rows before anyone saw a blank card.
+    // TCGdex set briefs carry no rarity/types/prices, so these rows are thin
+    // on purpose — enough for the scanner to name a card the instant it
+    // matches, without 237 extra requests during a build. They are flagged
+    // `incomplete` so they read as stale and get filled in when the card is
+    // actually added (see the add route) or by the price sweep.
+    const tcgdexApi = require('./tcgdexApi');
+    await tcgdexApi.cacheCards(cards.map(c => tcgdexApi.normalizeCard(c.raw, code)), { incomplete: true });
+  }
 }
 
 module.exports = {

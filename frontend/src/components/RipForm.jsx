@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { langCode } from '../utils/languages';
 import { draftOwnership, candidateOwnership } from '../utils/ripOwnership';
 import { sameDraftCard, stackRipCard } from '../utils/ripStacking';
+import { availablePrintings, preferredPrinting, exactPrintingPrice } from '../utils/availablePrintings';
 import CardImage from './CardImage';
 let nextLine = 0;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -63,11 +64,11 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
   const statuses = draftOwnership(pulls, owned, editing);
   const changeSet = value => { chosen.current = true; request.current++; setLooking(false); setSetId(value); setMatches([]); inputRef.current?.focus(); };
   const addCard = card => {
-    const amount = Number(card.price_trend), sourceCurrency = String(card.price_currency || 'USD').toUpperCase(), sequence = ++nextLine;
+    const printing = preferredPrinting(card), amount = exactPrintingPrice(card, printing), sourceCurrency = String(card.price_currency || 'USD').toUpperCase(), sequence = ++nextLine;
     const price = amount > 0 && Number.isFinite(amount) && sourceCurrency === currency ? amount.toFixed(2) : '';
     const incoming = { key: `new-${sequence}`, added_order: sequence, card_id: card.id, name: card.name, number: card.number || '', set_name: card.set_name || selected?.name || '',
       image_url: /^https?:\/\//.test(card.image_url || '') ? card.image_url : '', quantity: '1', current_value: price, value_at_opening: '', bulk: false, lineMode: false, original_price: amount > 0 ? `${sourceCurrency} ${amount.toFixed(2)}` : '',
-      printing: card.printing || 'Normal', language: card.language || product.language || 'English', condition: 'Near Mint' };
+      printing, card, language: card.language || product.language || 'English', condition: 'Near Mint' };
     if (pulls.some(pull => sameDraftCard(pull, incoming) && Number(pull.quantity) >= 5000)) { showToast('A pull can contain at most 5,000 copies.'); return; }
     setPulls(current => stackRipCard(current, incoming));
     setQuery(''); setMatches([]); inputRef.current?.focus();
@@ -95,6 +96,7 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
       const row = { name: pull.name.trim() || t('sealed.otherCards'), quantity: Number(pull.quantity), card_id: pull.card_id || '', set_name: pull.set_name || '', number: pull.number || '', ...(pull.image_url ? { image_url: pull.image_url } : {}) };
       if (pull.id) { row.id = pull.id; if (pull.lineMode) { if (pull.line_value !== '') row.line_value = pull.line_value; } else if (pull.current_value !== '') row.current_value = pull.current_value; }
       else if (pull.bulk) { if (pull.line_value.trim()) row.line_value = pull.line_value.trim(); if (pull.value_at_opening.trim()) row.opened_line_value = pull.value_at_opening.trim(); }
+      else row.printing = pull.printing;
       return row;
     }) };
     if (editing) {
@@ -137,7 +139,10 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
         {pulls.map(pull => <div key={pull.key} style={{ border: '1px solid var(--border-glass)', padding: '0.5rem', borderRadius: 'var(--radius-sm)' }}>
           <div>{pull.bulk ? pull.name : `#${pull.number} ${pull.name} — ${pull.set_name}`} {editing && <small>{pull.id ? '(recorded)' : '(new entry)'}</small>}</div>
           <OwnershipBadge info={statuses[pull.key]} loading={ownershipPending > 0} />
-          {!pull.bulk && <small style={{ display: 'block' }}>{pull.id ? `${currency} ${pull.current_value || '—'}` : pull.original_price ? `${pull.original_price} source quote; valued in ${currency} on save` : 'Unpriced'}</small>}
+          {!pull.bulk && !pull.id && <label>{t('card.printing')}<select className="input-control" value={pull.printing} onChange={e => editPull(pull.key, 'printing', e.target.value)}>
+            {availablePrintings(pull.card).options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>{!availablePrintings(pull.card).verified && <small>{t('card.printingUnverified')}</small>}</label>}
+          {!pull.bulk && <small style={{ display: 'block' }}>{pull.id ? `${currency} ${pull.current_value || '—'}` : exactPrintingPrice(pull.card, pull.printing) ? `${String(pull.card.price_currency || 'USD').toUpperCase()} ${exactPrintingPrice(pull.card, pull.printing).toFixed(2)} source quote; valued in ${currency} on save` : t('card.printingUnpriced')}</small>}
           <label>{t('card.quantity')}<input className="input-control" type="number" min="1" max="5000" required value={pull.quantity} onChange={e => editPull(pull.key, 'quantity', e.target.value)} /></label>
           {pull.bulk && <label>{pull.id && !pull.lineMode ? t('sealed.pullValue') : t('sealed.lineValue')}<input className="input-control" value={pull.id && !pull.lineMode ? pull.current_value : pull.line_value} onChange={e => editPull(pull.key, pull.id && !pull.lineMode ? 'current_value' : 'line_value', e.target.value)} /></label>}
           <button className="btn btn-secondary" type="button" onClick={() => remove(pull)}>{pull.id ? 'Remove from rip' : Number(pull.quantity) > 1 ? 'Remove line' : t('search.undo')}</button>

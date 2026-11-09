@@ -24,6 +24,7 @@ const { validateDeckAddition } = require('../utils/deckRules');
 const { splitPrice } = require('../utils/splitPrice');
 
 const router = express.Router();
+const setCardCacheJobs = new Map();
 
 // Stamp each result with how many copies the user already owns, so browsing a
 // set shows what is already in the binder instead of inviting duplicate adds.
@@ -87,7 +88,7 @@ async function attachOwnedQty(cards, userId) {
 // English follows whichever provider actually built the data being searched.
 // That rule lives in utils/pokemonProvider — this only maps its answer to a module.
 async function pokemonApiFor(lang) {
-  if (process.env.POKEMON_LOCAL_CATALOG === '1') return require('../utils/localPokemonSearch').getLocalPokemonSearch();
+  if (await require('../utils/pokemonLocalMode').isPokemonLocalModeEnabled()) return require('../utils/localPokemonSearch').getLocalPokemonSearch();
   return pokemonProvider.apiFor(lang);
 }
 
@@ -572,6 +573,68 @@ router.post('/scan-match', searchLimiter, async (req, res) => {
 });
 
 // 2. Get User's Collection
+router.get('/collection/sets/:setId/cards', async (req, res) => {
+  const game = req.query.game || 'pokemon';
+  if (!['pokemon', 'mtg', 'lorcana'].includes(game)) {
+    return res.status(400).json({ error: 'Invalid game' });
+  }
+  const requestedLanguage = req.query.lang;
+  const resolvedLanguage = requestedLanguage && languages.LANGUAGES.find(row =>
+    [row.code, row.name, row.tcgdex, row.scryfall].some(alias =>
+      typeof alias === 'string' && alias.toLowerCase() === String(requestedLanguage).trim().toLowerCase()
+    )
+  )?.name;
+  if (requestedLanguage && (!resolvedLanguage || !languages.isLanguageSupported(game, resolvedLanguage))) {
+    return res.status(400).json({ error: 'Invalid language' });
+  }
+  const language = resolvedLanguage || null;
+  try {
+    const selectCards = async (lang) => db.all(`
+      SELECT cc.id, cc.name, cc.printed_name, cc.set_id, cc.set_name, cc.number,
+        cc.image_url, cc.rarity, cc.game, cc.language,
+        EXISTS (
+          SELECT 1 FROM collection c JOIN card_cache owned_card ON owned_card.id = c.card_id
+          WHERE c.user_id = ? AND c.list_type = 'collection'
+            AND owned_card.game = cc.game AND owned_card.set_id = cc.set_id
+            AND trim(owned_card.number) != '' AND trim(cc.number) != ''
+            AND lower(ltrim(trim(owned_card.number), '0')) = lower(ltrim(trim(cc.number), '0'))
+        ) AS owned
+      FROM card_cache cc
+      WHERE cc.game = ? AND cc.set_id = ?${lang ? ' AND cc.language = ?' : ''}
+    `, lang
+      ? [req.user.id, game, req.params.setId, lang]
+      : [req.user.id, game, req.params.setId]);
+
+    const readCachedCards = async () => {
+      if (language) return selectCards(language);
+      const englishCards = await selectCards('English');
+      return englishCards.length ? englishCards : selectCards(null);
+    };
+
+    let cards = await readCachedCards();
+    if (!cards.length) {
+      const cacheLanguage = language || 'English';
+      const cacheKey = `${game}:${cacheLanguage}:${req.params.setId}`;
+      let job = setCardCacheJobs.get(cacheKey);
+      if (!job) {
+        job = require('../cardSets').cacheSetCards(game, req.params.setId, cacheLanguage);
+        setCardCacheJobs.set(cacheKey, job);
+      }
+      try {
+        await job;
+      } finally {
+        if (setCardCacheJobs.get(cacheKey) === job) setCardCacheJobs.delete(cacheKey);
+      }
+      cards = await readCachedCards();
+    }
+    res.json(cards);
+  } catch (error) {
+    if (error.absent) return res.json([]);
+    console.error('Error fetching cached set cards:', error);
+    res.status(502).json({ error: 'Failed to retrieve set cards from the provider' });
+  }
+});
+
 router.get('/collection', async (req, res) => {
   try {
     const listType = req.query.list_type || 'collection';
@@ -775,16 +838,14 @@ async function addCardToCollection(user, body, { openingPull = false } = {}) {
     // while displaying the name the card is actually printed with.
     card = await tcgdexApi.learnEnglishName(card);
 
-    // TCGdex often has no market price, so a card added from search was stored
-    // at zero until a later refresh. Ask PokéWallet once here, while the card
-    // is still the row we are about to file. A miss leaves the price unknown.
-    if (card.game === 'pokemon' || String(card.id || '').startsWith('tcgdex-')) {
+    // Price supported English TCGdex identities before filing the copy.
+    if (card.game === 'pokemon' && String(card.id || '').startsWith('tcgdex-en-')) {
       try {
-        await pokewallet.priceUnpricedCard(card);
+        await require('../pokemonPrices').getPokemonPrices().refreshCard(card);
         const refreshed = await db.get(`SELECT * FROM card_cache WHERE id = ?`, [card.id]);
         if (refreshed) card = refreshed;
       } catch (err) {
-        console.warn(`PokéWallet price on add skipped for ${card.id}: ${err.code || err.message}`);
+        console.warn(`Pokémon price on add skipped for ${card.id}: ${err.code || 'upstream'}`);
       }
     }
 
@@ -903,7 +964,7 @@ router.get('/cards/:id/printing', async (req, res) => {
     }
 
     // Fallback: if no distinct localized printing exists, return the card with the target language tag
-    res.status(200).json({ ...card, language: languages.toName(targetLang) });
+    res.status(200).json({ ...card, language: languages.toName(targetLang), available_printings: null });
   } catch (error) {
     console.error('Error fetching card localized printing:', error);
     res.status(500).json({ error: 'Failed to fetch card printing' });
