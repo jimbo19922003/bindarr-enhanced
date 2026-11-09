@@ -1,3 +1,4 @@
+// rip-unit-allocation-v1
 'use strict';
 const express = require('express');
 const db = require('../db');
@@ -166,5 +167,6 @@ router.delete('/sealed/openings/:id/pulls/:pullId', async (req, res) => {
     const opening = await presentOwned(req.user.id, req.params.id); if (!opening) return fail(res, 404, 'Opening not found'); res.json({ opening });
   } catch (error) { respondError(res, error, 'Could not remove that pull.'); }
 });
+router.use(require('./openingBasisStatus'));
 router.use(require('./openingEdit'));
 module.exports = router;

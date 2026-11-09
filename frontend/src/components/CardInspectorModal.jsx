@@ -1,3 +1,5 @@
+// rip-unit-allocation-v1
+import OpeningBasisPanel from './OpeningBasisPanel';
 // contextual-sales-v1
 import { useState, useEffect, useRef } from 'react';
 import { X, MapPin, Trash2, Star, Maximize2, ExternalLink, Search, Layers, RefreshCw, FlipHorizontal2 } from 'lucide-react';
@@ -539,6 +541,7 @@ function CardInspectorModal({ card, onClose, onUpdate, onDeleted, showToast, onV
             )}
           </div>
 
+          {mode === 'view' && <OpeningBasisPanel entryId={targetEntryId} />}
           {mode === 'view' && saleTarget && <div><button type="button" className="btn btn-primary" onClick={() => window.dispatchEvent(new CustomEvent('bindarr_sell_item', { detail: { ...saleTarget, onSold: () => { onUpdate?.(); onClose?.(); } } }))}>Sell this copy</button></div>}
 
           {mode === 'edit' ? (

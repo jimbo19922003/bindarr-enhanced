@@ -1,3 +1,5 @@
+// rip-unit-allocation-v1
+const {openingLineValue}=require('./openingWeights');
 // completed-rip-basis-v1
 'use strict';
 const { allocateOpeningCost } = require('./costBasis');
@@ -38,7 +40,7 @@ function createOpeningBasisRepository({ connect }) {
       if (opening.currency !== 'USD') return await pending('Historical non-USD basis requires an explicit conversion policy');
       if (opening.entry_complete !== 1) return await pending('All opening contents must be marked complete');
       if (!valid(opening.cost_cents)) throw fail(409, 'Invalid opening cost');
-      const pulls = await db.all('SELECT * FROM sealed_pull WHERE opening_id=? AND user_id=? ORDER BY id', [openingId, userId]);
+      const pulls=(await db.all('SELECT * FROM sealed_pull WHERE opening_id=? AND user_id=? ORDER BY id', [openingId, userId])).map(row=>({...row,opened_line_cents:openingLineValue(row)}));
       if (!pulls.length || pulls.some(row => !valid(row.opened_line_cents))) return await pending('Opening-time values are missing');
       const seen = new Set(), prepared = [];
       for (const row of pulls) {

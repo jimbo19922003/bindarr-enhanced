@@ -1,3 +1,5 @@
+// rip-unit-allocation-v1
+const {openingLineValue}=require('./openingWeights');
 'use strict';
 const {allocateOpeningCost}=require('./costBasis');
 const fail=message=>Object.assign(new Error(message),{status:409});
@@ -11,7 +13,7 @@ async function forCopy(db,user,copy,openingId) {
  if(opening.entry_complete!==1)return {reason:'The opening is not marked Pull Complete'};
  if(opening.currency!=='USD')return {reason:'Historical non-USD opening basis requires an explicit conversion policy'};
  if(!valid(opening.cost_cents))throw fail('Invalid opening cost');
- const pulls=await db.all('SELECT * FROM sealed_pull WHERE opening_id=? AND user_id=? ORDER BY id',[openingId,user]);
+ const pulls=(await db.all('SELECT * FROM sealed_pull WHERE opening_id=? AND user_id=? ORDER BY id',[openingId,user])).map(row=>({...row,opened_line_cents:openingLineValue(row)}));
  if(!pulls.length)return {reason:'The opening has no recorded contents'};
  const sole=pulls.length===1;
  if(!sole&&pulls.some(row=>!valid(row.opened_line_cents)))return {reason:'Some opening-time values are missing; multi-pull allocation is pending'};

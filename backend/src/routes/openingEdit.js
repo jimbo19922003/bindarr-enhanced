@@ -1,3 +1,5 @@
+// rip-unit-allocation-v1
+const {resizeOpeningLine}=require('../utils/openingWeights');
 'use strict';
 const express = require('express');
 const sqlite3 = require('sqlite3');
@@ -131,8 +133,8 @@ router.put('/sealed/openings/:id/edit', async (req, res) => {
         }
       }
       if (delta || row.current_unit_cents !== pull.currentUnit || row.current_line_cents !== pull.currentLine || (!row.card_id && row.name !== pull.name)) {
-        await tx.run(`UPDATE sealed_pull SET name = ?, quantity = ?, current_unit_cents = ?, current_line_cents = ?, collection_id = ?, filed_ids = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
-          [row.card_id ? row.name : pull.name, pull.quantity, pull.currentUnit, pull.currentLine, collectionId, filed.join(','), row.id, userId]);
+        await tx.run(`UPDATE sealed_pull SET name = ?, quantity = ?, current_unit_cents = ?, current_line_cents = ?, opened_line_cents = ?, collection_id = ?, filed_ids = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+          [row.card_id ? row.name : pull.name, pull.quantity, pull.currentUnit, pull.currentLine, resizeOpeningLine(row,pull.quantity), collectionId, filed.join(','), row.id, userId]);
       }
     }
     for (const row of stored) if (!seen.has(row.id)) {

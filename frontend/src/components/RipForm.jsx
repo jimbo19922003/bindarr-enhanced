@@ -1,3 +1,5 @@
+// rip-unit-allocation-v1
+import OpeningBasisPanel from './OpeningBasisPanel';
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { langCode } from '../utils/languages';
@@ -108,6 +110,8 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
         <p>{editing ? `Original opening cost: ${currency} ${existingOpening.cost} — unchanged by editing` : t('sealed.ripLot', { cost: `${currency} ${lot.total_cost}`, date: lot.purchased_at ? ` on ${lot.purchased_at}` : '' })}</p></div>
       <button className="btn btn-secondary" type="button" onClick={onClose} disabled={busy} aria-label={t('common.cancel')}><X size={18} /></button>
     </div>
+    {editing && <OpeningBasisPanel openingId={existingOpening.id} />}
+    <p>Saving recalculates allocated opening costs from the saved opening-time values and revised quantities. The original opening cost is unchanged. Missing values remain pending; allocations frozen by a sale require a correction workflow.</p>
     <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: '0.9rem', minWidth: 0 }}>
       <label>{t('sealed.openedOn')}<input className="input-control" type="date" value={openedAt} onChange={e => setOpenedAt(e.target.value)} /></label>
       <label htmlFor="rip-card-set">Card search set</label>
