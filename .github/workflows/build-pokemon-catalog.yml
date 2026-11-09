@@ -7,9 +7,9 @@ on:
         required: false
         default: ''
       languages:
-        description: 'Explicit comma-separated catalogue languages'
+        description: 'Explicit comma-separated catalogue languages; English only by default'
         required: true
-        default: 'en,ja'
+        default: 'en'
   schedule:
     - cron: '17 */6 * * *'
   push:
@@ -21,6 +21,7 @@ on:
       - 'ci/compile-tcgdex.sh'
       - 'ci/apply-catalog-corrections.js'
       - 'backend/scripts/validate-pokemon-bundle.js'
+      - 'backend/test/catalogBW8Correction.test.js'
 permissions:
   contents: write
 concurrency:
@@ -43,7 +44,7 @@ jobs:
         id: input
         env:
           REVISION: ${{ inputs.upstream_commit || '' }}
-          LANGUAGES: ${{ inputs.languages || 'en,ja' }}
+          LANGUAGES: ${{ inputs.languages || 'en' }}
         run: |
           node <<'NODE'
           const fs=require('node:fs');
@@ -51,6 +52,7 @@ jobs:
           const revision=process.env.REVISION.trim(),languages=process.env.LANGUAGES.split(',').map(l=>l.trim());
           if(revision&&!/^[a-f0-9]{40}$/.test(revision))throw new Error('Invalid upstream SHA');
           if(!languages.length||new Set(languages).size!==languages.length||languages.some(l=>!supported.has(l)))throw new Error('Invalid languages');
+          console.log('Requested compiler languages:',languages.join(','));
           fs.appendFileSync(process.env.GITHUB_OUTPUT,`ref=${revision||'master'}\ncsv=${languages.join(',')}\nspace=${languages.join(' ')}\n`);
           NODE
       - name: Verify importer and compiler regressions
@@ -58,7 +60,7 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/catalog-deps/node_modules
         run: |
           npm install --prefix "$RUNNER_TEMP/catalog-deps" --no-audit --no-fund sqlite3@6.0.1
-          node --test app/backend/src/utils/pokemonLocalCatalog.test.js app/backend/src/utils/pokemonCatalogSync.test.js app/backend/src/utils/pokemonCatalogBundle.test.js app/backend/test/catalogSourceCorrections.test.js app/backend/test/catalogLanguageScope.test.js
+          node --test app/backend/src/utils/pokemonLocalCatalog.test.js app/backend/src/utils/pokemonCatalogSync.test.js app/backend/src/utils/pokemonCatalogBundle.test.js app/backend/test/catalogSourceCorrections.test.js app/backend/test/catalogLanguageScope.test.js app/backend/test/catalogBW8Correction.test.js
       - uses: actions/checkout@v4
         with:
           repository: tcgdex/cards-database
@@ -73,7 +75,7 @@ jobs:
           test "${#SHA}" -eq 40
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
       - run: docker build -f app/ci/tcgdex-compiler.Dockerfile -t bindarr-catalog-compiler app/ci
-      - name: Compile without production credentials or database mounts
+      - name: Compile only selected languages without production credentials or database mounts
         env:
           BUNDLE_LANGUAGES: ${{ steps.input.outputs.space }}
         run: |
@@ -96,6 +98,7 @@ jobs:
             catalog-bundle/manifest.json
             catalog-bundle/LICENSE
             catalog-bundle/validation-report.json
+            catalog-bundle/UPSTREAM-CORRECTIONS.json
             catalog-bundle/*/cards.json
             catalog-bundle/*/sets.json
       - name: Publish validated, versioned metadata download assets
