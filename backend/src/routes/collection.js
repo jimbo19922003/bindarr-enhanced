@@ -553,15 +553,17 @@ router.post('/scan-match', searchLimiter, async (req, res) => {
       const map = await tcgplayerCatalog.summary();
       console.log('scan-match: ready-made Pokemon catalog hit but no product id could be named'
         + ` — product map holds ${map.rows} rows${map.progress ? ' (building)' : ''}`);
+      const adminUrl = 'Admin → Catalogs → TCGplayer Product Map';
       return res.json({
         ...result,
         unresolvedPublished: true,
         productMapRows: map.rows,
         error: map.progress
-          ? 'The TCGplayer product map is still building — the ready-made Pokémon catalog cannot name'
-            + ' its matches until it finishes.'
-          : 'The ready-made Pokémon catalog recognises cards by TCGplayer product id, and this install'
-            + ' has no product map to look them up in. An admin can build it in Admin → Scan catalogs.',
+          ? `Card identified but TCGplayer product map still syncing (${map.rows} rows loaded). `
+            + 'Scanning will work once sync completes. '
+            + `Check progress at ${adminUrl}.`
+          : `Card identified but TCGplayer product map not yet synced. An admin must sync it at ${adminUrl}. `
+            + 'Try downloading card data from a set first.',
       });
     }
 

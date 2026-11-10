@@ -255,6 +255,18 @@ function CameraScanner({ onAddSuccess, showToast }) {
     const v = parseInt(localStorage.getItem('scan_min_steady'), 10);
     return Number.isInteger(v) && v >= 1 && v <= 10 ? v : STEADY_FRAMES_NEEDED;
   });
+  // Recapture speed: ms between auto-captures. Allows users to slow down the scanner
+  // for multi-language scanning or speed it up for single-language runs.
+  // Imported from autoCapture: MIN_RECAPTURE_MIN=300, MAX=2000
+  const [recaptureMs, setRecaptureMsState] = useState(() => {
+    const v = parseInt(localStorage.getItem('scan_recapture_ms'), 10);
+    return Number.isInteger(v) && v >= 300 && v <= 2000 ? v : 600;
+  });
+  const setRecaptureMs = (ms) => { setRecaptureMsState(ms); localStorage.setItem('scan_recapture_ms', String(ms)); };
+  // Require confirmation before auto-add: when enabled, a matched card shows up for
+  // review before being auto-added, allowing batch scanning with verification.
+  const [confirmBeforeAdd, setConfirmBeforeAddState] = useState(() => localStorage.getItem('scan_confirm_add') === '1');
+  const setConfirmBeforeAdd = (v) => { setConfirmBeforeAddState(v); localStorage.setItem('scan_confirm_add', v ? '1' : '0'); };
   // Latest raw detector numbers, for the readout. Kept separate from bestFrame
   // so rendering never depends on a ref the detection loop mutates in place.
   const [detectStats, setDetectStats] = useState(null);
@@ -714,6 +726,7 @@ function CameraScanner({ onAddSuccess, showToast }) {
     lastCaptureAt: lastCaptureAt.current,
     minSteady: minSteadyRef.current,
     minFill: minFillRef.current,
+    recaptureMs,
   });
 
   const frameWorthCapturing = () => shouldCapture(autoArgs());
@@ -1150,6 +1163,24 @@ function CameraScanner({ onAddSuccess, showToast }) {
   // above stops the tracks (which also kills the torch).
 
   const autoAddCard = async (card, qty = 1, overrides = null) => {
+    // If confirmation mode is enabled, open the drawer instead of directly saving
+    if (confirmBeforeAdd && !overrides) {
+      // Set up the drawer form with the auto-detected values
+      setQuantity(qty);
+      setCondition(overrides?.condition || 'Near Mint');
+      setPrinting(overrides?.printing || ((card.rarity || '').toLowerCase().includes('holo') ? 'Holofoil' : 'Normal'));
+      const autoLanguage = overrides?.language || addLanguage(card);
+      setLanguage(autoLanguage);
+      setPurchasePrice(resolveCardPrice(card, (overrides?.printing || ((card.rarity || '').toLowerCase().includes('holo') ? 'Holofoil' : 'Normal'))));
+      
+      // Mark as added already (to prevent re-scanning)
+      lastAddedIdRef.current = card.id;
+      
+      // Open the drawer for review
+      openQuickAdd(card, [card]);
+      return;
+    }
+
     // Mark the dup guard BEFORE the await: a fast cooldown can fire the next
     // capture before this POST resolves, and a match of the same card must hit
     // the duplicate path instead of auto-adding a second time.
@@ -1996,6 +2027,46 @@ function CameraScanner({ onAddSuccess, showToast }) {
               </button>
             )}
 
+            {/* Manual shutter button: captures without waiting for detector confirmation.
+                Useful when detector is down or moving too slowly. */}
+            {cameraActive && autoScan && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                title={t('scan.manualCapture')}
+                aria-label={t('scan.manualCapture')}
+                style={{
+                  position: 'absolute',
+                  top: videoInputs.length >= 2 ? 'calc(1rem + 92px)' : 'calc(1rem + 46px)',
+                  right: '1rem',
+                  zIndex: 20,
+                  borderRadius: '50%',
+                  padding: '0.6rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                  backgroundColor: 'var(--accent-red)'
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Trigger a capture ignoring detector state
+                  if (bestFrame.current) {
+                    autoArmed.current = false;
+                    lastCaptureAt.current = Date.now();
+                    capturedQuad.current = lastRawQuad.current;
+                    capturedSig.current = lastSig.current;
+                    changedFrames.current = 0;
+                    handleCaptureRef.current?.();
+                  } else {
+                    showToast(t('scan.errNoFrameData'));
+                  }
+                }}
+              >
+                <ScanLine size={18} />
+              </button>
+            )}
+
             {/* Auto-scan state, where the capture countdown used to be. There is no
                 clock to show any more — what the user needs to know is whether the
                 scanner is waiting on them (no card / hold still) or on itself
@@ -2124,6 +2195,49 @@ function CameraScanner({ onAddSuccess, showToast }) {
               />
             </label>
 
+            {/* Capture speed slider: controls recapture debounce (300-2000ms).
+                Slower = more debounce = card must be still longer before capture.
+                Useful for multi-language scanning where you're swapping cards slowly. */}
+            {autoScan && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', background: 'rgba(0,0,0,0.2)', padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label htmlFor="scan-capture-speed" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('scan.captureSpeed')}</label>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--accent-red)' }}>{recaptureMs}ms</span>
+                </div>
+                <input
+                  id="scan-capture-speed"
+                  type="range"
+                  min="300"
+                  max="2000"
+                  step="100"
+                  value={recaptureMs}
+                  onChange={(e) => { const v = parseInt(e.target.value, 10); setRecaptureMs(v); }}
+                  style={{ width: '100%', accentColor: 'var(--accent-red)' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6rem', color: 'var(--text-muted)' }}>
+                  <span>{t('scan.captureSpeedFast')}</span>
+                  <span>{t('scan.captureSpeedSlow')}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Confirmation mode: when autoAdd is ON, open drawer for review
+                instead of immediately filing. Useful for batch scanning where
+                you want to verify each card before committing. */}
+            {autoAdd && (
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', background: 'rgba(0,0,0,0.2)', padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('scan.confirmBeforeAdd')}</span>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{t('scan.confirmBeforeAddHint')}</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={confirmBeforeAdd}
+                  onChange={(e) => setConfirmBeforeAdd(e.target.checked)}
+                  style={{ accentColor: 'var(--type-grass)', flexShrink: 0 }}
+                />
+              </label>
+            )}
 
             {/* Card type and language: what is being fed in. Card art is
                 language-specific, so the language picks which catalog the scan is

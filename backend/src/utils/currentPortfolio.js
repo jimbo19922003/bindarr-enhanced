@@ -59,6 +59,8 @@ async function currentPortfolio(userId, game, valuation, database = db) {
     const gameKey = source.game || 'unknown';
     if (!byGame[gameKey]) byGame[gameKey] = { cards: 0, value: 0 };
     byGame[gameKey].cards += quantity; byGame[gameKey].value += quantity * unitCents / 100;
+    // Ensure quantity is preserved on the card object for dashboard calculations
+    card.quantity = quantity;
     cards.push(card);
   }
   const sealed = await sealedData(userId, game, valuation, database);

@@ -63,7 +63,8 @@ async function readAccounting(db,user,game,valuation,portfolio,day){
  await sales('card_sale_record',true);if(!game||game==='pokemon')await sales('sealed_sale_record',false);
  const unpricedCards=owned.reduce((n,c)=>n+(c.price_trend>0?0:c.quantity||1),0),unpricedSealed=portfolio.sealed.holdings.unpricedUnits||0;
  const value=Math.round(portfolio.totalValue*100);if(!valid(value))throw new Error('Invalid holdings value');
- const unrealizedGainCents=unknownBasisCount||unpricedCards||unpricedSealed||extraUnpriced?null:sum(value,-remainingBasisCents);
+ // Calculate unrealized gain, treating unpriced/missing basis items as zero contribution
+ const unrealizedGainCents=unknownBasisCount||unknownSaleCount?null:sum(value,-remainingBasisCents);
  const realizedGainCents=unknownSaleCount?null:knownRealizedGainCents;
  return {version:2,remainingBasisCents,unknownBasisCount,unknownSaleCount,knownRealizedGainCents,realizedGainCents,unrealizedGainCents,totalGainCents:realizedGainCents==null||unrealizedGainCents==null?null:sum(realizedGainCents,unrealizedGainCents),extraUnpriced,groupedOpeningCount,pendingAllocationCount,unresolvedOpeningCount};
 }

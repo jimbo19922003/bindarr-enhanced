@@ -33,7 +33,10 @@ export const REARM_EMPTY_MS = 200;
 export const REARM_DRIFT = 0.09;
 // Floor between two captures, against a double fire while the first request is
 // still being assembled. NOT a cadence: nothing fires just because it elapses.
+// Can be overridden for faster/slower scanning: range [300, 2000]ms
 export const MIN_RECAPTURE_MS = 600;
+export const MIN_RECAPTURE_MIN = 300;
+export const MIN_RECAPTURE_MAX = 2000;
 // Appearance change (cardSignature distance, 1 - correlation) that counts as a
 // different card. Measured on synthetic cards sharing one frame layout (see
 // cardSignature.test.js): the same card under corner jitter, an exposure shift
@@ -101,12 +104,14 @@ export function shouldRearm({ armed, emptyFrames, emptyMs = 0, quad, capturedQua
 // reading is NOT permission — the old code answered "yes" when it had no opinion,
 // which was survivable only because the old contour detector always returned
 // something. A detector that can say "there is no card" has to be believed.
+//
+// `recaptureMs` can be overridden for adjustable capture speed (defaults to MIN_RECAPTURE_MS).
 export function shouldCapture({
   armed, busy, blocked, reading, now, lastCaptureAt,
-  minSteady, minFill, staleMs = 1500,
+  minSteady, minFill, recaptureMs = MIN_RECAPTURE_MS, staleMs = 1500,
 }) {
   if (!armed || busy || blocked) return false;
-  if (now - lastCaptureAt < MIN_RECAPTURE_MS) return false;
+  if (now - lastCaptureAt < recaptureMs) return false;
   if (!reading || reading.none) return false;
   if (now - reading.at > staleMs) return false;      // detection loop has stalled
   return reading.steady >= minSteady && reading.fill >= minFill;
