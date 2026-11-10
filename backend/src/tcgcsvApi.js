@@ -29,7 +29,7 @@ const { recordPrice, shouldSweepPrices, markPricesSwept } = require('./utils/pri
 const { normId, normName, fold } = require('./utils/setCatalogueMatch');
 const { slimResults } = require('./utils/tcgcsvSlim');
 
-const API_BASE_URL = (process.env.TCGCSV_BASE_URL || 'https://tcgcsv.com').replace(/\/+$/, '');
+const API_BASE_URL = (process.env.TCGCSV_BASE_URL || 'https://raw.githubusercontent.com/thenotoriousJeremy/bindarr/tcgcsv-mirror').replace(/\/+$/, '');
 const TCGCSV_403_COOLDOWN_HOURS = 24;
 const TCGCSV_MIN_REQUEST_INTERVAL_MS = 110;
 const TCGCSV_MAX_SYNC_REQUESTS = 10000;
@@ -354,12 +354,16 @@ async function runSync() {
   return { updated: true, dataVersion, groups: groupCount, expectedRequests, requests };
 }
 
+let mirrorAvailable = false;
 async function syncIfUpdated() {
   if (process.env.BINDARR_DISABLE_TCGCSV_SYNC === '1') {
     return { updated: false, disabled: true };
   }
   if (syncPromise) return syncPromise;
-  const running = runSync();
+  const running = runSync().then(result => { mirrorAvailable = true; return result; }, error => {
+    mirrorAvailable = false;
+    throw error;
+  });
   syncPromise = running;
   try {
     return await running;
@@ -595,6 +599,26 @@ function pricesByProduct(rows) {
   return out;
 }
 
+async function quoteForCard(card) {
+  if (!mirrorAvailable) throw new Error('No successful mirror refresh is available');
+  if (!card || card.game !== 'pokemon' || !card.set_id || isPocketSet(card.set_id)
+      || String(card.set_id).startsWith('pokemontcgapi-')) return null;
+  const categories = {};
+  for (const id of Object.values(CATEGORY)) categories[id] = await getGroups(id);
+  const hit = buildGroupMatcher(categories)(card.set_id, card.set_name, card.language);
+  if (!hit) return null;
+  const products = await getProducts(hit.categoryId, hit.group.groupId);
+  const number = normNumber(card.number);
+  if (!number) return null;
+  const matches = products.filter(product => normNumber(numberOf(product)) === number);
+  if (matches.length !== 1) return null;
+  const product = matches[0];
+  const price = pricesByProduct(await getPrices(hit.categoryId, hit.group.groupId)).get(product.productId);
+  if (!price || !(price.price_trend > 0)) return null;
+  return { ...price, productId: product.productId,
+    source: card.language === 'English' || card.language === 'Japanese' ? 'tcgcsv' : 'tcgcsv-en' };
+}
+
 // The (set, language) pairs to price, newest-largest first.
 //
 // `scope` decides how much of the cache is worth a request:
@@ -695,11 +719,13 @@ async function priceSet({ set_id, set_name, language }, match, groupDataCache = 
 // same way the other providers' sweeps do — without it the boot sweep re-runs on
 // every restart, which under nodemon means every code edit.
 async function updateCollectionPrices(force = false, scope = 'owned', excludeCarddex = false) {
-  // The sync is separate from the sweep: a failed or paused sync (network, 5xx,
-  // the 403 cooldown) leaves the last complete version in the cache, and pricing
-  // from yesterday's data beats not pricing. Only a true cache miss — no version
-  // ever completed — stops the sweep, below.
-  await syncIfUpdatedSafely('price update');
+  // Keep the last complete cache for catalog readers, but do not apply its prices
+  // after a failed sync: other pricing providers can supply the fallback instead.
+  const sync = await syncIfUpdatedSafely('price update', false);
+  if (!sync || sync.disabled) {
+    console.warn('Skipping TCGCSV pricing because mirror refresh is unavailable.');
+    return;
+  }
   try {
     if (!force && !(await shouldSweepPrices('tcgcsv'))) {
       console.log('Skipping TCGCSV price update: already swept within the last 24h.');
@@ -748,14 +774,14 @@ async function updateCollectionPrices(force = false, scope = 'owned', excludeCar
 
 // Run the daily sync for a reader that can live with the existing cache. Never
 // throws; returns the sync result, or null when it failed.
-async function syncIfUpdatedSafely(context) {
+async function syncIfUpdatedSafely(context, useCache = true) {
   try {
     return await syncIfUpdated();
   } catch (err) {
     if (isCooldownError(err)) {
-      console.warn(`TCGCSV sync paused by HTTP 403 cooldown; ${context} uses the cached data.`);
+      console.warn(`TCGCSV sync paused by HTTP 403 cooldown; ${context} ${useCache ? 'uses the cached data' : 'uses fallback sources'}.`);
     } else {
-      console.warn(`TCGCSV sync failed (${err.message}); ${context} uses the cached data.`);
+      console.warn(`TCGCSV sync failed (${err.message}); ${context} ${useCache ? 'uses the cached data' : 'uses fallback sources'}.`);
     }
     return null;
   }
@@ -782,6 +808,7 @@ module.exports = {
   normNumber,
   numberOf,
   pricesByProduct,
+  quoteForCard,
   isCooldownError,
   isCacheMissError,
   TCGCSV_403_COOLDOWN_HOURS,

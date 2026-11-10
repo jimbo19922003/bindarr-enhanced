@@ -16,7 +16,7 @@ const quote = { data: { id: 'base1-4', set_id: 'base1', set_name: 'Base Set', na
   number: '4', base_finish: 'holo', prices: [{ card_id: 'base1-4', variant_id: null,
     source: 'cardmarket', currency: 'EUR', trend_price: 12, recorded_at: '2026-11-09T07:00:00Z' }] } };
 
-async function fixture(t, client, fallback) {
+async function fixture(t, client, fallback, tcgcsv = null) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pokemon-prices-'));
   const file = path.join(root, 'test.db');
   await fs.writeFile(file, '');
@@ -26,7 +26,7 @@ async function fixture(t, client, fallback) {
     id TEXT PRIMARY KEY, game TEXT, language TEXT, name TEXT, number TEXT, set_id TEXT, set_name TEXT,
     price_trend REAL, price_normal REAL, price_holofoil REAL, price_reverse_holofoil REAL,
     price_1st_edition REAL, price_avg1 REAL, price_avg7 REAL, price_avg30 REAL,
-    price_currency TEXT, price_source TEXT, last_updated TEXT);
+    price_currency TEXT, price_source TEXT, last_updated TEXT, tcgplayer_product_id INTEGER);
     CREATE TABLE collection (card_id TEXT, list_type TEXT DEFAULT 'collection'); CREATE TABLE deck_cards (card_id TEXT);
     CREATE TABLE pokewallet_map (card_id TEXT PRIMARY KEY, status TEXT, reason TEXT);
     CREATE TABLE price_history (card_id TEXT, price REAL, currency TEXT, recorded_at TEXT);`);
@@ -34,8 +34,47 @@ async function fixture(t, client, fallback) {
   await database.run(`INSERT INTO card_cache (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`, keys.map(key => card[key]));
   await database.run('INSERT INTO collection (card_id) VALUES (?)', [card.id]);
   return { database, service: createPokemonPrices({ database, carddex: client,
-    pokewallet: { priceFallback: fallback }, now: () => now, refreshDays: async () => 1 }) };
+    pokewallet: { priceFallback: fallback }, tcgcsv, now: () => now, refreshDays: async () => 1 }) };
 }
+
+test('TCGCSV is preferred over CardDex and PokéWallet', async t => {
+  const { database, service } = await fixture(t, { json: async () => { throw new Error('CardDex must not run'); } },
+    async () => { throw new Error('PokéWallet must not run'); },
+    { quoteForCard: async () => ({ price_trend: 42, price_normal: 20, price_holofoil: 42,
+      price_reverse_holofoil: null, price_1st_edition: null, productId: 123, source: 'tcgcsv' }) });
+  assert.equal((await service.refreshCard(card)).status, 'tcgcsv');
+  const updated = await database.get('SELECT price_trend, price_normal, price_holofoil, price_currency, price_source, tcgplayer_product_id FROM card_cache WHERE id = ?', [card.id]);
+  assert.deepEqual(updated, { price_trend: 42, price_normal: 20, price_holofoil: 42, price_currency: 'USD', price_source: 'tcgcsv', tcgplayer_product_id: 123 });
+});
+
+test('TCGCSV failure falls back to CardDex', async t => {
+  const { service } = await fixture(t, { json: async () => quote }, async () => ({ updated: 0 }),
+    { quoteForCard: async () => { throw new Error('cache unavailable'); } });
+  assert.equal((await service.refreshCard(card)).status, 'matched');
+});
+
+test('a missing TCGCSV quote falls through CardDex to PokéWallet', async t => {
+  const calls = [];
+  const { service } = await fixture(t, { json: async () => { calls.push('carddex'); return {data:null}; } },
+    async () => { calls.push('pokewallet'); return { updated: 1 }; },
+    { quoteForCard: async () => { calls.push('tcgcsv'); return null; } });
+  assert.equal((await service.refreshCard(card)).status, 'fallback');
+  assert.deepEqual(calls, ['tcgcsv', 'carddex', 'pokewallet']);
+});
+
+test('TCGCSV cannot overwrite a concurrently updated price', async t => {
+  let database;
+  const setup = await fixture(t, { json: async () => { throw new Error('must not fetch'); } },
+    async () => { throw new Error('must not fetch'); },
+    { quoteForCard: async () => {
+      await database.run("UPDATE card_cache SET price_trend=99, price_source='pokewallet-tcgplayer' WHERE id=?", [card.id]);
+      return { price_trend:42, price_normal:42, price_holofoil:null, price_reverse_holofoil:null,
+        price_1st_edition:null, productId:123, source:'tcgcsv' };
+    } });
+  database = setup.database;
+  assert.equal((await setup.service.refreshCard(card)).status, 'changed');
+  assert.equal((await database.get('SELECT price_trend FROM card_cache WHERE id = ?', [card.id])).price_trend, 99);
+});
 
 test('CardDex wins, respects cadence, and does not append price history', async t => {
   let requests = 0, fallbacks = 0;

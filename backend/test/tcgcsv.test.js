@@ -451,6 +451,12 @@ const dbMod = require('../src/db');
   }
   assert.strictEqual(responseCacheReads, 2,
     'sets mapping to the same group should read its cached products and prices only once');
+  const primaryQuote = await tcgcsv.quoteForCard({ game: 'pokemon', language: 'English',
+    set_id: 'FG', set_name: 'Fixture Group', number: '004' });
+  assert.strictEqual(primaryQuote.price_trend, 420.5);
+  assert.strictEqual(primaryQuote.productId, 1001);
+  assert.strictEqual(await tcgcsv.quoteForCard({ game: 'pokemon', language: 'English',
+    set_id: 'FG', set_name: 'Fixture Group', number: '999' }), null);
 
   await dbMod.run(`INSERT INTO card_cache (id, name, set_id, set_name, number, game, language, price_trend, price_source, price_currency)
     VALUES ('tcgdex-en-fixture-004', 'Charizard', 'fixture-en', 'Fixture', '004', 'pokemon', 'English', 50, 'carddex-tcgplayer', 'USD')`);
@@ -506,9 +512,7 @@ const dbMod = require('../src/db');
   }
   assert.strictEqual(blockedRequestCount, 0, 'the cooldown must suppress outgoing requests');
 
-  // --- A failed sync must not stop pricing --------------------------------
-  // The cooldown is still active, so syncIfUpdated throws. The sweep must log it
-  // and price from the last complete version anyway.
+  // A failed sync leaves the existing price untouched for fallback providers.
   await dbMod.run(
     `INSERT OR REPLACE INTO card_cache (id, name, set_id, set_name, number, game, language, price_trend)
      VALUES ('fg-4', 'Charizard', 'fg', 'Fixture Group', '4', 'pokemon', 'English', 0)`
@@ -533,10 +537,10 @@ const dbMod = require('../src/db');
   const pricedCard = await dbMod.get(`SELECT price_trend, price_holofoil, tcgplayer_product_id, price_source FROM card_cache WHERE id = 'fg-4'`);
   assert.deepStrictEqual(
     { ...pricedCard },
-    { price_trend: 420.5, price_holofoil: 420.5, tcgplayer_product_id: 1001, price_source: 'tcgcsv' },
-    `pricing must run from the cache when the sync throws (logs: ${sweepLogs.join(' | ')})`
+    { price_trend: 0, price_holofoil: null, tcgplayer_product_id: null, price_source: null },
+    `pricing must not use a stale mirror dataset when the sync throws (logs: ${sweepLogs.join(' | ')})`
   );
-  assert.ok(sweepLogs.some(m => /cooldown/.test(m) && /cached data/.test(m)), 'the sync failure is logged');
+  assert.ok(sweepLogs.some(m => /cooldown/.test(m) && /fallback sources/.test(m)), 'the sync failure is logged');
 
   // A true cache miss (no version ever completed) is the one case that stops.
   const savedVersion = remoteVersion;

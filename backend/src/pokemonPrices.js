@@ -8,7 +8,7 @@ const HOUR = 3600000;
 const DAY = 24 * HOUR;
 const MAX_CARDS_PER_RUN = 25;
 
-function createPokemonPrices({ database, carddex, pokewallet, now = Date.now, refreshDays = priceRefreshDays }) {
+function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, recordPrice = async () => {}, now = Date.now, refreshDays = priceRefreshDays }) {
   let ready;
   const pending = new Map();
   function initialize() {
@@ -81,6 +81,33 @@ function createPokemonPrices({ database, carddex, pokewallet, now = Date.now, re
   async function runCard(card, days) {
     const id = providerId(card);
     if (!id) return { status: 'unsupported' };
+    if (tcgcsv) {
+      try {
+        const quote = await tcgcsv.quoteForCard(card);
+        if (quote) {
+          const result = await database.run(`UPDATE card_cache SET price_trend = ?, price_normal = ?,
+            price_holofoil = ?, price_reverse_holofoil = ?, price_1st_edition = ?,
+            price_avg1 = NULL, price_avg7 = NULL, price_avg30 = NULL,
+            price_currency = 'USD', price_source = ?, tcgplayer_product_id = ?, last_updated = CURRENT_TIMESTAMP
+            WHERE id = ? AND price_source IS ? AND price_currency IS ? AND last_updated IS ?
+              AND price_trend IS ? AND price_normal IS ? AND price_holofoil IS ?
+              AND price_reverse_holofoil IS ? AND price_1st_edition IS ?`,
+          [quote.price_trend, quote.price_normal, quote.price_holofoil, quote.price_reverse_holofoil,
+            quote.price_1st_edition, quote.source, quote.productId, card.id, card.price_source,
+            card.price_currency, card.last_updated, card.price_trend, card.price_normal, card.price_holofoil,
+            card.price_reverse_holofoil, card.price_1st_edition]);
+          if (result.changes !== 1) return { status: 'changed' };
+          await recordPrice(card.id, quote.price_trend);
+          await database.run(`INSERT INTO carddex_price_attempt (card_id, attempted_at, next_attempt_at, status, provider_id, quote_at)
+            VALUES (?, ?, ?, 'tcgcsv', ?, NULL) ON CONFLICT(card_id) DO UPDATE SET attempted_at=excluded.attempted_at,
+            next_attempt_at=excluded.next_attempt_at, status=excluded.status, provider_id=excluded.provider_id, quote_at=NULL`,
+          [card.id, now(), now() + Math.max(days, 1) * DAY, id]);
+          return { status: 'tcgcsv' };
+        }
+      } catch (error) {
+        console.warn(`TCGCSV price lookup failed for ${card.id}: ${error.code || error.message}`);
+      }
+    }
     let quote = null, reason = 'unpriced';
     try {
       const body = await carddex.json(`/v1/cards/${encodeURIComponent(id)}`, { include: 'prices,variants' });
@@ -194,7 +221,7 @@ function getPokemonPrices() {
   if (!instance) {
     const db = require('./db');
     const connect = () => require('./utils/salesRepository').openConnection(db.dbPath);
-    instance = createPokemonPrices({ database: db, carddex: createCarddexArtworkClient({ connect }),
+    instance = createPokemonPrices({ database: db, carddex: createCarddexArtworkClient({ connect }), tcgcsv: require('./tcgcsvApi'), recordPrice: require('./utils/priceHelpers').recordPrice,
       pokewallet: require('./pokewalletApi') });
   }
   return instance;
