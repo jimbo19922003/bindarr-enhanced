@@ -27,15 +27,31 @@ async function main() {
   app.use((req, _res, next) => { req.user = { id: Number(req.headers['x-test-user'] || admin.id) }; next(); });
   app.use('/api', require('../src/routes/sealed'));
   app.use('/api', require('../src/routes/sealedOpenings'));
+  app.use('/api', require('../src/routes/collection'));
   app.use('/api', require('../src/routes/stats'));
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const send = async (method, url, body, userId = admin.id) => {
-    const response = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json', 'x-test-user': String(userId) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const send = async (method, url, body, userId = admin.id, headers = {}) => {
+    const response = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json', 'x-test-user': String(userId), ...headers }, ...(body ? { body: JSON.stringify(body) } : {}) });
     return { status: response.status, body: await response.json() };
   };
   try {
+    const identity = await send('GET', '/api/scan-queue/identity');
+    assert.strictEqual(identity.status, 200);
+    const spoofedFields = [{ openingPull: true }, { opening_pull: true }, { acquisition_source: 'opening' }, { context: { openingPull: true } }];
+    for (const [index, fields] of spoofedFields.entries()) {
+      for (const [url, cardFields, headers] of [
+        ['/api/collection', { card_id: 'tcgdex-en-rip-usd' }, {}],
+        ['/api/scan-queue/add', { card_id: 'tcgdex-en-rip-usd' }, { 'Idempotency-Key': `zero-cost-test-${index}`, 'X-Scan-Instance': identity.body.instance_id }],
+        ['/api/collection/bulk-add', { card_ids: ['tcgdex-en-rip-usd'] }, {}],
+      ]) {
+        const rejected = await send('POST', url, { ...cardFields, purchase_price: 0, ...fields }, admin.id, headers);
+        assert.strictEqual(rejected.status, 409, JSON.stringify(rejected.body));
+        assert.strictEqual(rejected.body.code, 'ZERO_COST_CONFIRMATION_REQUIRED');
+      }
+    }
+    assert.strictEqual((await db.get('SELECT COUNT(*) AS n FROM collection WHERE user_id = ?', [admin.id])).n, 0);
     const created = await send('POST', '/api/sealed/products', { name: 'Mixed-set box', product_type: 'etb', set_name: '30th Celebration', lot: { quantity: 2, total_cost: '100.00', currency: 'USD' } });
     assert.strictEqual(created.status, 201, JSON.stringify(created.body));
     const productId = created.body.product.id, lotId = created.body.product.lots[0].id;
@@ -44,6 +60,13 @@ async function main() {
     ] });
     assert.strictEqual(opened.status, 201, JSON.stringify(opened.body));
     const opening = opened.body.opening;
+    const openingCopies = await db.all('SELECT id, purchase_price, zero_cost_confirmed FROM collection WHERE user_id = ? ORDER BY id', [admin.id]);
+    assert.strictEqual(openingCopies.length, 2);
+    for (const copy of openingCopies) {
+      assert.strictEqual(copy.purchase_price, null);
+      assert.strictEqual(copy.zero_cost_confirmed, 0);
+      assert.strictEqual((await db.get('SELECT COUNT(*) AS n FROM card_acquisition_lot WHERE collection_id = ?', [copy.id])).n, 0);
+    }
     const euro = opening.pulls.find(pull => pull.card_id === 'tcgdex-en-rip-eur');
     assert.strictEqual(euro.current_value, '68.56'); assert.strictEqual(euro.value_at_opening, '68.56');
     assert.strictEqual(euro.set_name, '30th Classic');
@@ -94,6 +117,12 @@ async function main() {
     assert.deepStrictEqual(copies.map(row => row.printing), ['Holofoil', 'Holofoil', 'Reverse Holofoil']);
     await send('GET', `/api/sealed/products/${productId}/openings`);
     assert.strictEqual((await db.get('SELECT current_unit_cents FROM sealed_pull WHERE id = ?', [finishPulls[1].id])).current_unit_cents, null);
+    const gift = await send('POST', '/api/collection', { card_id: 'tcgdex-en-rip-usd', purchase_price: 0, zero_cost_confirmed: true });
+    assert.strictEqual(gift.status, 200, JSON.stringify(gift.body));
+    const giftCopy = await db.get('SELECT purchase_price, zero_cost_confirmed FROM collection WHERE id = ?', [gift.body.id]);
+    assert.strictEqual(giftCopy.purchase_price, 0);
+    assert.strictEqual(giftCopy.zero_cost_confirmed, 1);
+    assert.strictEqual((await db.get('SELECT COUNT(*) AS n FROM card_acquisition_lot WHERE collection_id = ?', [gift.body.id])).n, 1);
   } finally { await new Promise(resolve => server.close(resolve)); }
   console.log('sealedOpening.test.js: all assertions passed');
 }
