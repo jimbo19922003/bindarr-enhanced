@@ -31,7 +31,7 @@ async function readDashboardAccounting(db,user,game,valuation,portfolio,day){
  const unrealizedGainCents=recordedRemainingCents==null?null:value-recordedRemainingCents;
  const totalGainCents=unrealizedGainCents==null||accounting.realizedGainCents==null?null:unrealizedGainCents+accounting.realizedGainCents;
  if((unrealizedGainCents!=null&&!Number.isSafeInteger(unrealizedGainCents))||(totalGainCents!=null&&!Number.isSafeInteger(totalGainCents)))throw new RangeError('Invalid portfolio gain');
- return {spending,accounting:{...accounting,version:3,recordedRemainingCents,spendingUnknownCount:spending.unknownCount,unrealizedGainCents,totalGainCents}};
+ return {spending,accounting:{...accounting,version:3,recordedSpendingCents:spending.knownCents,recordedRemainingCents,spendingUnknownCount:spending.unknownCount,unrealizedGainCents,totalGainCents}};
 }
 async function readSummary({connect,user,game='',currency='USD',now=Date.now,portfolioFor,valuationFor}){
  if(!Number.isSafeInteger(user)||user<1)throw Object.assign(new Error('Authentication required'),{status:401});

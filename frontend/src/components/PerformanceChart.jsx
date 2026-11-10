@@ -7,7 +7,7 @@ import { useT } from '../utils/i18n';
 import BenchmarkComparison from './BenchmarkComparison';
 import './PerformanceChart.css';
 const ranges = ['7d','30d','90d','ytd','1y','5y','all'];
-const views = [['value','Value + cost'],['gain','Loss/Gain $'],['gainPct','Loss/Gain %'],['sp500','S&P 500']];
+const views = [['value','Value + cost'],['gain','Loss/Gain $'],['gainPct','Estimated Loss/Gain %'],['sp500','S&P 500']];
 export default function PerformanceChart({ statsTrigger, game = '' }) {
   const { locale } = useT();
   const [range,setRange] = useState('30d'), [view,setView] = useState('value');
@@ -36,7 +36,7 @@ export default function PerformanceChart({ statsTrigger, game = '' }) {
   const percent = value => `${Number(value).toLocaleString(locale,{maximumFractionDigits:2})}%`;
   const date = (value,full=false) => new Intl.DateTimeFormat(locale,{timeZone:'UTC',month:'short',day:'numeric',...(full ? {year:'numeric'} : {})}).format(new Date(`${value}T00:00:00Z`));
   const rows = (report?.portfolio || []).map(row=>({...row,realizedKnown:row.realizedGain ?? (row.unknownSaleCount>0 ? row.knownRealizedGain : null)}));
-  const labels = {value:'Market value',invested:'Estimated Investment Cost',gain:'Total Loss/Gain',gainPct:'Loss/Gain %',totalGain:'Total Loss/Gain',realizedKnown:'Known Realized Loss/Gain',unrealizedGain:'Estimated Unrealized Loss/Gain'};
+  const labels = {value:'Market value',invested:'Estimated Investment Cost',gain:'Total Loss/Gain',gainPct:'Estimated Loss/Gain %',totalGain:'Total Loss/Gain',realizedKnown:'Known Realized Loss/Gain',unrealizedGain:'Estimated Unrealized Loss/Gain'};
   const series = view === 'value' ? ['value','invested'] : view === 'gain' ? ['totalGain','realizedKnown','unrealizedGain'] : [view];
   const incomplete = rows.some(row => row.staleRates || row.unpricedCards > 0 || row.unpricedSealed > 0 || row.unknownBasisCount > 0 || row.unknownSaleCount > 0 || row.spendingUnknownCount > 0);
   return <section className="glass-panel portfolio-timeline" aria-label="Portfolio timeline" aria-busy={loading}>
@@ -52,7 +52,7 @@ export default function PerformanceChart({ statsTrigger, game = '' }) {
     <div className="portfolio-segment portfolio-views" role="group" aria-label="Timeline view">
       {views.map(([id,label]) => <button key={id} type="button" aria-pressed={view===id} onClick={() => setView(id)}>{label}</button>)}
     </div>
-    {loading ? <div className="portfolio-chart-state" role="status">Loading...</div> : error ? <div className="portfolio-chart-state" role="alert">{error}</div> : !rows.length ? <div className="portfolio-chart-state">No history in this range.</div> : withBenchmark ? (rows.some(r=>r.accountingVersion>=2) ? <div className="portfolio-chart-state">Benchmark comparison is paused until cash-flow-aware returns are available. Sales must not appear as investment losses.</div> : <BenchmarkComparison benchmark={report.sp500} />) : view==='gainPct' && rows.every(row=>row.gainPct==null) ? <div className="portfolio-chart-state">Percentage returns are paused until cash-flow-aware calculations are available.</div> : <div className="portfolio-chart-canvas">
+    {loading ? <div className="portfolio-chart-state" role="status">Loading...</div> : error ? <div className="portfolio-chart-state" role="alert">{error}</div> : !rows.length ? <div className="portfolio-chart-state">No history in this range.</div> : withBenchmark ? <BenchmarkComparison benchmark={report.sp500} /> : view==='gainPct' && rows.every(row=>row.gainPct==null) ? <div className="portfolio-chart-state">Estimated percentage unavailable: recorded spending must be positive and total gain must be known. Older observations may not contain the required data.</div> : <div className="portfolio-chart-canvas">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{top:12,right:12,left:0,bottom:0}}>
         <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-glass)" />
         <XAxis dataKey="date" tickFormatter={value=>date(value)} minTickGap={32} stroke="var(--text-secondary)" tickLine={false} axisLine={false} fontSize={11} />
@@ -68,7 +68,7 @@ export default function PerformanceChart({ statsTrigger, game = '' }) {
       {incomplete && <span className="portfolio-warning" role="status" title="Some observations have stale rates or incomplete prices, purchases, or sales. Missing purchase costs and prices contribute zero; unknown sold costs are not removed.">Incomplete pricing or basis</span>}
       {rows.some(r=>r.accountingVersion===1)&&<span className="portfolio-warning">Legacy observations: market value only; no reconstructed gain.</span>}
       {rows.some(r=>r.accountingVersion===2)&&<span className="portfolio-warning">Older gain points use a different cost-basis calculation.</span>}
-      <details className="portfolio-about"><summary>About</summary><p>The timeline shows recorded daily snapshots in the instance portfolio timezone; it does not reconstruct missing days from purchase dates. Changing the timezone starts a separate history without deleting older snapshots. New points estimate unrealized gain as current value minus recorded purchase spending plus known sold acquisition cost. Unknown sold cost is not removed and may already be included in spending, making the estimate inaccurate. Known realized gain excludes sales with unknown gain; total gain remains unavailable until those sales are resolved. Missing purchase costs and prices contribute zero. Archived or otherwise removed purchases remain in spending. Older points retain their original calculation and may not be comparable. Non-USD realized results require a historical FX policy. Percentages and benchmark returns await cash-flow-aware calculations. Hover or tap a point for exact amounts.</p></details>
+      <details className="portfolio-about"><summary>About</summary><p>The timeline shows recorded daily snapshots in the instance portfolio timezone; it does not reconstruct missing days from purchase dates. Changing the timezone starts a separate history without deleting older snapshots. New points estimate unrealized gain as current value minus recorded purchase spending plus known sold acquisition cost. Unknown sold cost is not removed and may already be included in spending, making the estimate inaccurate. Known realized gain excludes sales with unknown gain; total gain remains unavailable until those sales are resolved. Missing purchase costs and prices contribute zero. Archived or otherwise removed purchases remain in spending. Older points retain their original calculation and may not be comparable. Non-USD realized results require a historical FX policy. Estimated loss/gain percentage is total loss/gain divided by recorded purchase spending; it is not a cash-flow-aware return. The S&amp;P comparison shows value change, not investment return. Hover or tap a point for exact amounts.</p></details>
     </footer>
   </section>;
 }

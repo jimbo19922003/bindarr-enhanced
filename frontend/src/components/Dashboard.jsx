@@ -201,6 +201,10 @@ function Dashboard({ statsTrigger, onNavigate, onNavigateToSet, setSelectedLocat
           <div className="metric-header"><span>{t('dash.portfolioValue')}</span><span className="metric-icon"><TrendingUp size={18} /></span></div>
           <div className="metric-value">{currencySymbol()}{money(summary.totalValue)}</div>
           <div className="metric-footer">
+            {summary.dayChange && !summary.dayChange.unavailable ? <div title={t('dash.dayChangeHint', { date: summary.dayChange.since, zone: summary.dayChange.timeZone })}>
+              {t('dash.dayChange', { value: `${summary.dayChange.amount > 0 ? '+' : summary.dayChange.amount < 0 ? '-' : ''}${currencySymbol()}${money(Math.abs(summary.dayChange.amount))}`, date: summary.dayChange.since })}
+              {(summary.dayChange.incomplete || summary.unpricedCards > 0 || summary.sealed?.unpricedUnits > 0 || summary.staleRates) && ` · ${t('dash.dayChangeIncomplete')}`}
+            </div> : <div>{summary.dayChange?.unavailable ? t('dash.dayChangeFxUnavailable') : t('dash.dayChangeUnavailable')}</div>}
             {summary.sealed && summary.sealed.remainingUnits > 0 && (summary.sealed.marketValue > 0 || summary.sealed.valuationComplete) && <div>{t('dash.sealedIncluded', { value: `${currencySymbol()}${money(summary.sealed.marketValue)}` })}</div>}
             {summary.sealed && summary.sealed.unpricedUnits > 0 && <div className="summary-pricing-warning">{t('dash.sealedUnpriced', { count: summary.sealed.unpricedUnits })}</div>}
           </div>

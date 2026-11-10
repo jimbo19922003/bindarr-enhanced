@@ -74,8 +74,14 @@ async function main() {
     assert.strictEqual(opening.analytics.unpriced_quantity, 0);
     const stored = await db.get('SELECT current_unit_cents, opened_unit_cents FROM sealed_pull WHERE id = ?', [euro.id]);
     assert.strictEqual(stored.current_unit_cents, 6856); assert.strictEqual(stored.opened_unit_cents, 6856);
+    await db.run(require('../../shared/investmentLedgerSchema.json').dailySchema);
+    const timeZone = await require('../src/utils/portfolioTimeZone').readTimeZone(db);
+    await db.run(`INSERT INTO portfolio_daily_performance
+      (user_id,game,currency,time_zone,day,recorded_at,value_cents,cards_cents,sealed_cents,invested_cents,gain_cents,return_pct,ledger_id,stale_rates,unpriced_cards,unpriced_sealed)
+      VALUES (?, '', 'USD', ?, '2000-01-01', 946684800000, 6000, 6000, 0, 0, 6000, NULL, 0, 0, 0, 0)`, [admin.id, timeZone]);
     const stats = await send('GET', '/api/stats');
     assert.strictEqual(stats.body.summary.totalValue, 78.56);
+    assert.deepStrictEqual(stats.body.summary.dayChange, { amount: 18.56, since: '2000-01-01', timeZone, incomplete: false });
     assert.strictEqual(stats.body.openingPerformance.reports.find(row => row.currency === 'USD').overall.knownValue, 78.56);
     await db.run('UPDATE sealed_pull SET current_unit_cents = NULL, opened_unit_cents = NULL WHERE id = ?', [euro.id]);
     const repaired = await send('GET', `/api/sealed/products/${productId}/openings`);

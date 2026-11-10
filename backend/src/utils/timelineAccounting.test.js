@@ -12,3 +12,14 @@ test('unknown sale basis preserves known realized subtotal but not a fabricated 
 test('unpriced holdings are treated as zero value, not suppressed',async t=>{const db=await fixture(t);await db.run('UPDATE card_cache SET price_trend=0');assert.equal((await read(db)).unrealizedGainCents,-5000);});
 test('completed single-card rip transfers opening cost without persisting snapshots during reads',async t=>{const db=await fixture(t);await db.exec(`CREATE TABLE sealed_opening(id INTEGER PRIMARY KEY,user_id INTEGER,cost_cents INTEGER,currency TEXT,entry_complete INTEGER);INSERT INTO sealed_opening VALUES(1,1,5000,'USD',1);CREATE TABLE sealed_pull(id INTEGER PRIMARY KEY,user_id INTEGER,opening_id INTEGER,card_id TEXT,collection_id INTEGER,filed_ids TEXT,quantity INTEGER,opened_line_cents INTEGER);INSERT INTO sealed_pull VALUES(1,1,1,'a',10,'10',1,NULL);`);await db.run('UPDATE collection SET purchase_price=0');const a=await read(db);assert.equal(a.remainingBasisCents,5000);assert.equal(a.totalGainCents,3000);assert.equal(await db.get("SELECT name FROM sqlite_master WHERE name='opening_basis_snapshot'"),undefined);});
 test('legacy gain is retained as diagnostic metadata, not relabeled as total return',()=>{const p=decoratePoint({gain:30,gainPct:60,invested:50},{day:'2026-11-06'});assert.equal(p.legacyGain,30);assert.equal(p.totalGain,null);assert.equal(p.gainPct,null);assert.equal(p.accountingVersion,1);});
+test('estimated percentage uses recorded spending and total gain, including realized sales',()=>{
+ const legacy={gain:30,gainPct:60,invested:50};
+ const accounting={version:3,recordedSpendingCents:10000,recordedRemainingCents:5000,soldBasisCents:5000,totalGainCents:5500,unknownBasisCount:1,spendingUnknownCount:1,unknownSaleCount:0};
+ assert.equal(decoratePoint(legacy,{accounting}).gainPct,55);
+ assert.equal(decoratePoint(legacy,{accounting:{...accounting,recordedSpendingCents:undefined}}).gainPct,55);
+ assert.equal(decoratePoint(legacy,{accounting:{...accounting,totalGainCents:-2500}}).gainPct,-25);
+ assert.equal(decoratePoint(legacy,{accounting:{...accounting,totalGainCents:null,unknownSaleCount:1}}).gainPct,null);
+ assert.equal(decoratePoint(legacy,{accounting:{...accounting,recordedSpendingCents:0}}).gainPct,null);
+ assert.equal(decoratePoint(legacy,{accounting:{...accounting,version:2}}).gainPct,null);
+ assert.equal(decoratePoint(legacy,{accounting:{...accounting,recordedSpendingCents:undefined,recordedRemainingCents:null}}).gainPct,null);
+});

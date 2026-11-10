@@ -100,6 +100,14 @@ router.get('/stats', async (req, res) => {
     const change = (before, after) => before > 0 ? { available: true, abs: round(after - before), pct: round((after - before) / before * 100) } : { available: false, abs: null, pct: null };
     const unavailable = () => ({ available: false, abs: null, pct: null });
     const gain = round(portfolio.totalValue - portfolio.totalSpent);
+    let dayChange;
+    try {
+      dayChange = await require('../utils/portfolioDayChange').portfolioDayChange(db, req.user.id, game, valuation, portfolio.totalValue, now);
+    } catch (error) {
+      if (error.code !== 'VALUATION_FX_UNAVAILABLE') throw error;
+      console.warn('Portfolio day change unavailable:', error.message);
+      dayChange = { unavailable: true };
+    }
     const metadata = valuation.metadata();
     const bucketList = map => [...map.values()].map(row => ({ ...row, value: round(row.value) })).sort((a, b) => b.value - a.value || b.units - a.units);
     const uniqueCardCount = portfolio.uniqueCardIds.size;
@@ -116,7 +124,7 @@ router.get('/stats', async (req, res) => {
       extraCopiesValue: extraCopiesValueCents / 100,
       mintRate: portfolio.totalCards ? round(nearMintCount / portfolio.totalCards * 100) : 0,
       vintageRatio: portfolio.totalCards ? round(vintageCount / portfolio.totalCards * 100) : 0,
-      unpricedCards, ...metadata, change7d: change(value7dAgo, valueNowFor7d), change30d: change(value30dAgo, valueNowFor30d),
+      unpricedCards, ...metadata, dayChange, change7d: change(value7dAgo, valueNowFor7d), change30d: change(value30dAgo, valueNowFor30d),
       change1y: unavailable(), change5y: unavailable(), sealed: portfolio.sealed.holdings },
       types: Object.entries(types).map(([name, value]) => ({ name, value })),
       rarities: Object.entries(rarities).map(([name, value]) => ({ name, value })),

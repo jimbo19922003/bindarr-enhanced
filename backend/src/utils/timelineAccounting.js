@@ -75,7 +75,10 @@ function decoratePoint(legacy,row){
  const a=row.accounting||(row.accounting_json?JSON.parse(row.accounting_json):null);
  if(!a||![2,3].includes(a.version))return {...legacy,accountingVersion:1,legacyGain:legacy.gain,legacyGainPct:legacy.gainPct,legacyRecordedCost:legacy.invested,invested:null,gain:null,gainPct:null,realizedGain:null,unrealizedGain:null,totalGain:null};
  const money=n=>n==null?null:n/100;
- return {...legacy,accountingVersion:a.version,invested:a.version===3?money(a.recordedRemainingCents):a.unknownBasisCount?null:money(a.remainingBasisCents),gain:money(a.totalGainCents),gainPct:null,realizedGain:money(a.realizedGainCents),unrealizedGain:money(a.unrealizedGainCents),totalGain:money(a.totalGainCents),knownRealizedGain:money(a.knownRealizedGainCents),unknownBasisCount:a.unknownBasisCount,unknownSaleCount:a.unknownSaleCount,spendingUnknownCount:a.spendingUnknownCount||0,unpricedCards:(legacy.unpricedCards||0)+(a.extraUnpriced||0)};
+ const reconstructed=a.version===3&&valid(a.recordedRemainingCents)&&valid(a.soldBasisCents)?a.recordedRemainingCents+a.soldBasisCents:null;
+ const spending=valid(a.recordedSpendingCents)?a.recordedSpendingCents:reconstructed;
+ const gainPct=a.version===3&&valid(spending)&&spending>0&&Number.isSafeInteger(a.totalGainCents)?Number((a.totalGainCents/spending*100).toFixed(6)):null;
+ return {...legacy,accountingVersion:a.version,invested:a.version===3?money(a.recordedRemainingCents):a.unknownBasisCount?null:money(a.remainingBasisCents),gain:money(a.totalGainCents),gainPct,realizedGain:money(a.realizedGainCents),unrealizedGain:money(a.unrealizedGainCents),totalGain:money(a.totalGainCents),knownRealizedGain:money(a.knownRealizedGainCents),unknownBasisCount:a.unknownBasisCount,unknownSaleCount:a.unknownSaleCount,spendingUnknownCount:a.spendingUnknownCount||0,unpricedCards:(legacy.unpricedCards||0)+(a.extraUnpriced||0)};
 }
 async function save(db,dimensions,a){
  if(!a)return;const [user,game,currency,zone,day,timestamp]=dimensions;

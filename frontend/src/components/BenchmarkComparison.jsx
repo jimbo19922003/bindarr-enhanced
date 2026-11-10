@@ -6,7 +6,7 @@ export default function BenchmarkComparison({benchmark}) {
   if (!benchmark || benchmark.unavailable) return <div className="portfolio-chart-state" role="status">S&amp;P data unavailable. Other views are unaffected.</div>;
   const data=benchmark.data || [], latest=data[data.length-1];
   return <>
-    <div className="portfolio-benchmark-note">Value change, not investment return · S&amp;P excludes dividends</div>
+    <div className="portfolio-benchmark-note">Value change, not investment return · Purchases, sales and removals affect holdings · S&amp;P excludes dividends</div>
     {!data.length ? <div className="portfolio-chart-state">No overlapping history yet.</div> : <div className="portfolio-chart-canvas">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={data} margin={{top:12,right:12,left:0,bottom:0}}>
         <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border-glass)" />

@@ -415,6 +415,15 @@ gain remains unknown. Spending includes archived and otherwise
 removed purchases, so this estimate can differ from the actual gain on
 currently owned items. Historical spending may also be incomplete. New
 timeline points use this calculation; older points retain their original basis.
+The estimated loss/gain percentage divides total estimated gain by recorded
+purchase spending, not by a cash-flow-adjusted investment amount. It is
+unavailable when spending is zero or total gain is unknown. The S&P 500 view
+compares portfolio value change with the index price change, excluding dividends;
+purchases, sales and removals affect portfolio value and it is not an investment
+return comparison. Portfolio day change compares the current value to the most
+recent snapshot from an earlier calendar day in the portfolio timezone, which
+may not be yesterday. It includes holdings changes as well as price changes,
+and converts the earlier USD snapshot using current exchange rates.
 
 **Sealed** is what is still on the shelf: units, market value, cost still
 sealed, and that value against the remaining cost. Opened units leave this

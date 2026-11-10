@@ -15,6 +15,7 @@ test('background samples normalized cost ROI without browser requests and does n
   assert.deepEqual(records[0].slice(6, 13), [14000, 12000, 2000, 10000, 4000, 40, 42]);
   const accounting = JSON.parse(records[1][6]);
   assert.equal(accounting.version, 3);
+  assert.equal(accounting.recordedSpendingCents, 10000);
   assert.equal(accounting.recordedRemainingCents, 10000);
   assert.equal(accounting.unrealizedGainCents, 4000);
 });

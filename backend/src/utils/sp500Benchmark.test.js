@@ -36,3 +36,12 @@ test('benchmark outage does not fail the portfolio history handler', async () =>
   await handler({user:{id:1},query:{benchmark:'sp500'}},{set(){},status(){return this;},json(body){result=body;}});
   assert.equal(result.portfolio[0].value,200); assert.equal(result.sp500.unavailable,true);
 });
+test('sale-aware portfolio points still produce a value-change comparison', async () => {
+  const {createPerformanceHandler}=require('./performanceHistory'); let result;
+  const accounting={version:3,recordedRemainingCents:10000,soldBasisCents:0,totalGainCents:10000};
+  const db={run:async () => {},all:async () => [{day:'2026-11-08',value_cents:20000,invested_cents:10000,cards_cents:20000,sealed_cents:0,accounting_json:JSON.stringify(accounting)}]};
+  const handler=createPerformanceHandler({db,now:() => Date.parse('2026-11-08T12:00:00Z'),timeZone:'UTC',loadBenchmark:async portfolio => compare(portfolio,parseCsv(csv))});
+  await handler({user:{id:1},query:{benchmark:'sp500'}},{set(){},status(){return this;},json(body){result=body;}});
+  assert.equal(result.sp500.data.length,1);
+  assert.equal(result.sp500.data[0].holdingsValuePct,0);
+});
