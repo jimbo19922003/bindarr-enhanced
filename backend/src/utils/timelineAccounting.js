@@ -16,7 +16,7 @@ async function readAccounting(db,user,game,valuation,portfolio,day){
  if(await has('opening_basis_snapshot'))for(const row of await db.all('SELECT opening_id,snapshot_json FROM opening_basis_snapshot WHERE user_id=?',[user]))snapshots.set(row.opening_id,JSON.parse(row.snapshot_json));
  const groupedCopies=new Set();
  let groupedOpeningCount=0,pendingAllocationCount=0,unresolvedOpeningCount=0;
- let unknownBasisCount=0,unknownSaleCount=0,remainingBasisCents=0,knownRealizedGainCents=0,extraUnpriced=0;
+ let unknownBasisCount=0,unknownSaleCount=0,unknownSoldBasisCount=0,remainingBasisCents=0,soldBasisCents=0,knownRealizedGainCents=0,extraUnpriced=0;
  if((!game||game==='pokemon')&&await has('sealed_opening')){
   for(const opening of await db.all('SELECT * FROM sealed_opening WHERE user_id=? ORDER BY id',[user])){
    const openingPulls=pulls.filter(p=>p.opening_id===opening.id);
@@ -58,21 +58,24 @@ async function readAccounting(db,user,game,valuation,portfolio,day){
   if(!await has(table))return;
   const source=await require('./saleAdjustments').effectiveSource(db,table);
   const rows=await db.all(card?`SELECT r.* FROM ${source} r LEFT JOIN card_cache cc ON cc.id=r.card_id WHERE r.user_id=? AND r.sold_on<=?${game?' AND cc.game=?':''}`:`SELECT * FROM ${source} WHERE user_id=? AND sold_on<=?`,card&&game?[user,day,game]:[user,day]);
-  for(const row of rows){if(row.currency!=='USD'||!valid(row.sold_basis_cents)||!valid(row.proceeds_cents)||!valid(row.fees_cents)||!Number.isSafeInteger(row.realized_gain_cents)){unknownSaleCount++;continue;}const gain=row.proceeds_cents-row.fees_cents-row.sold_basis_cents;if(gain!==row.realized_gain_cents)throw new Error('Recorded sale basis and gain differ');knownRealizedGainCents=sum(knownRealizedGainCents,gain);}
+  for(const row of rows){
+   if(valid(row.sold_basis_cents)){const basis=await valuation.cents(row.sold_basis_cents,row.currency);if(valid(basis))soldBasisCents=sum(soldBasisCents,basis);else unknownSoldBasisCount++;}
+   else unknownSoldBasisCount++;
+   if(row.currency!=='USD'||!valid(row.sold_basis_cents)||!valid(row.proceeds_cents)||!valid(row.fees_cents)||!Number.isSafeInteger(row.realized_gain_cents)){unknownSaleCount++;continue;}const gain=row.proceeds_cents-row.fees_cents-row.sold_basis_cents;if(gain!==row.realized_gain_cents)throw new Error('Recorded sale basis and gain differ');knownRealizedGainCents=sum(knownRealizedGainCents,gain);
+  }
  }
  await sales('card_sale_record',true);if(!game||game==='pokemon')await sales('sealed_sale_record',false);
- const unpricedCards=owned.reduce((n,c)=>n+(c.price_trend>0?0:c.quantity||1),0),unpricedSealed=portfolio.sealed.holdings.unpricedUnits||0;
  const value=Math.round(portfolio.totalValue*100);if(!valid(value))throw new Error('Invalid holdings value');
  // Calculate unrealized gain: only null on unknown sales, treat missing basis as zero
  const unrealizedGainCents=unknownSaleCount?null:sum(value,-remainingBasisCents);
  const realizedGainCents=unknownSaleCount?null:knownRealizedGainCents;
- return {version:2,remainingBasisCents,unknownBasisCount,unknownSaleCount,knownRealizedGainCents,realizedGainCents,unrealizedGainCents,totalGainCents:realizedGainCents==null||unrealizedGainCents==null?null:sum(realizedGainCents,unrealizedGainCents),extraUnpriced,groupedOpeningCount,pendingAllocationCount,unresolvedOpeningCount};
+ return {version:2,remainingBasisCents,unknownBasisCount,unknownSaleCount,unknownSoldBasisCount,soldBasisCents,knownRealizedGainCents,realizedGainCents,unrealizedGainCents,totalGainCents:realizedGainCents==null||unrealizedGainCents==null?null:sum(realizedGainCents,unrealizedGainCents),extraUnpriced,groupedOpeningCount,pendingAllocationCount,unresolvedOpeningCount};
 }
 function decoratePoint(legacy,row){
  const a=row.accounting||(row.accounting_json?JSON.parse(row.accounting_json):null);
- if(!a||a.version!==2)return {...legacy,accountingVersion:1,legacyGain:legacy.gain,legacyGainPct:legacy.gainPct,legacyRecordedCost:legacy.invested,invested:null,gain:null,gainPct:null,realizedGain:null,unrealizedGain:null,totalGain:null};
+ if(!a||![2,3].includes(a.version))return {...legacy,accountingVersion:1,legacyGain:legacy.gain,legacyGainPct:legacy.gainPct,legacyRecordedCost:legacy.invested,invested:null,gain:null,gainPct:null,realizedGain:null,unrealizedGain:null,totalGain:null};
  const money=n=>n==null?null:n/100;
- return {...legacy,accountingVersion:2,invested:a.unknownBasisCount?null:money(a.remainingBasisCents),gain:money(a.totalGainCents),gainPct:null,realizedGain:money(a.realizedGainCents),unrealizedGain:money(a.unrealizedGainCents),totalGain:money(a.totalGainCents),knownRealizedGain:money(a.knownRealizedGainCents),unknownBasisCount:a.unknownBasisCount,unknownSaleCount:a.unknownSaleCount,unpricedCards:(legacy.unpricedCards||0)+(a.extraUnpriced||0)};
+ return {...legacy,accountingVersion:a.version,invested:a.version===3?money(a.recordedRemainingCents):a.unknownBasisCount?null:money(a.remainingBasisCents),gain:money(a.totalGainCents),gainPct:null,realizedGain:money(a.realizedGainCents),unrealizedGain:money(a.unrealizedGainCents),totalGain:money(a.totalGainCents),knownRealizedGain:money(a.knownRealizedGainCents),unknownBasisCount:a.unknownBasisCount,unknownSaleCount:a.unknownSaleCount,spendingUnknownCount:a.spendingUnknownCount||0,unpricedCards:(legacy.unpricedCards||0)+(a.extraUnpriced||0)};
 }
 async function save(db,dimensions,a){
  if(!a)return;const [user,game,currency,zone,day,timestamp]=dimensions;

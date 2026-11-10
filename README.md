@@ -369,10 +369,20 @@ The dashboard has four tabs. The game filter at the top applies to each of
 them, and amounts in different currencies stay in the currency they were
 quoted in.
 
-**Executive** is the portfolio: net worth, total invested, unrealized gain,
-and the value timeline. Total invested keeps card purchase prices and the
-full cost of sealed lots. Net worth includes cards plus the market value of
-sealed units still on hand.
+**Executive** is the portfolio: net worth, recorded lifetime spending,
+estimated unrealized gain, realized gain, and the value timeline. Net worth
+includes cards plus the market value of sealed units still on hand. Estimated
+unrealized gain is net worth minus recorded lifetime spending plus the
+acquisition cost of completed sales. Sale proceeds less fees and sold cost
+are reported separately as realized gain. Sold items leave net worth.
+Missing purchase costs and market prices contribute zero. When sold cost is
+unknown, no cost is removed for that sale, and the unrealized amount is
+marked as an estimate; its cost may already be included in spending. The
+realized amount shows only the known subtotal and excludes that sale; total
+gain remains unknown. Spending includes archived and otherwise
+removed purchases, so this estimate can differ from the actual gain on
+currently owned items. Historical spending may also be incomplete. New
+timeline points use this calculation; older points retain their original basis.
 
 **Sealed** is what is still on the shelf: units, market value, cost still
 sealed, and that value against the remaining cost. Opened units leave this

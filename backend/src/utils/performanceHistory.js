@@ -38,9 +38,10 @@ function createPerformanceHandler({ db, now = Date.now, timeZone, loadCurrent = 
       const live = loadCurrent ? await loadCurrent(params) : db.dbPath ? await require('./livePerformance').readCurrentPoint(params) : null;
       const combined = require('./livePerformance').mergeCurrent(rows, live, window.from, window.to);
       const portfolio = combined.map(point);
-      const result = { currency: 'USD', timeZone: zone, range, ...window, basis: portfolio.some(p=>p.accountingVersion===2)?'realized-plus-unrealized-v2':'gain-vs-recorded-cost', portfolio };
+      const basis = portfolio.some(p=>p.accountingVersion===3)?'recorded-spending-less-sold-basis-v3':portfolio.some(p=>p.accountingVersion===2)?'realized-plus-unrealized-v2':'gain-vs-recorded-cost';
+      const result = { currency: 'USD', timeZone: zone, range, ...window, basis, portfolio };
       if (req.query.benchmark === 'sp500') {
-        if (portfolio.some(p=>p.accountingVersion===2)) result.sp500={unavailable:true,data:[],reason:'cash-flow-aware-return-required'};
+        if (portfolio.some(p=>p.accountingVersion>=2)) result.sp500={unavailable:true,data:[],reason:'cash-flow-aware-return-required'};
         else try { result.sp500 = await (loadBenchmark || require('./sp500Benchmark').loadBenchmark)(portfolio); }
         catch { result.sp500 = { unavailable: true, data: [] }; }
       }

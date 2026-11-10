@@ -17,7 +17,7 @@ function createCollector({ db, getPortfolio, createValuation, connectRead, now =
         const timestamp = now(), valuation = createValuation('USD');
         await connection.run('BEGIN'); reading = true;
         const portfolio = await getPortfolio(user.id, game, valuation, connection);
-        const accounting = await require('./timelineAccounting').readAccounting(connection,user.id,game,valuation,portfolio,require('./performanceHistory').dayAt(timestamp,timeZone));
+        const { accounting } = await require('./dashboardAccounting').readDashboardAccounting(connection,user.id,game,valuation,portfolio,require('./performanceHistory').dayAt(timestamp,timeZone));
         const ledger = await connection.get('SELECT COALESCE(MAX(id),0) AS ledger_id FROM investment_event WHERE user_id = ?', [user.id]);
         await connection.run('COMMIT'); reading = false;
         const value = Math.round(portfolio.totalValue * 100), invested = Math.round(portfolio.totalSpent * 100);

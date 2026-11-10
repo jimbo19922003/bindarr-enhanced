@@ -22,6 +22,17 @@ async function readRecordedSpending(db,user,game,valuation){
  }
  return {knownCents,unknownCount,historyComplete:false,basis:'retained-acquisition-records',note:'Includes retained owned/sold card purchases and sealed lots, including archived lots. Rip contents are not a second purchase. Deleted purchases, missing costs, and unrecorded purchases may be absent; this is not a certified lifetime or net-contribution total.'};
 }
+async function readDashboardAccounting(db,user,game,valuation,portfolio,day){
+ const accounting=await readAccounting(db,user,game,valuation,portfolio,day);
+ const spending=await readRecordedSpending(db,user,game,valuation);
+ const recordedRemainingCents=accounting.soldBasisCents>spending.knownCents?null:spending.knownCents-accounting.soldBasisCents;
+ const value=Math.round(portfolio.totalValue*100);
+ if(!valid(value))throw new RangeError('Invalid holdings value');
+ const unrealizedGainCents=recordedRemainingCents==null?null:value-recordedRemainingCents;
+ const totalGainCents=unrealizedGainCents==null||accounting.realizedGainCents==null?null:unrealizedGainCents+accounting.realizedGainCents;
+ if((unrealizedGainCents!=null&&!Number.isSafeInteger(unrealizedGainCents))||(totalGainCents!=null&&!Number.isSafeInteger(totalGainCents)))throw new RangeError('Invalid portfolio gain');
+ return {spending,accounting:{...accounting,version:3,recordedRemainingCents,spendingUnknownCount:spending.unknownCount,unrealizedGainCents,totalGainCents}};
+}
 async function readSummary({connect,user,game='',currency='USD',now=Date.now,portfolioFor,valuationFor}){
  if(!Number.isSafeInteger(user)||user<1)throw Object.assign(new Error('Authentication required'),{status:401});
  if(!['','pokemon','mtg','lorcana'].includes(game))throw Object.assign(new Error('Unsupported game'),{status:400});
@@ -33,11 +44,10 @@ async function readSummary({connect,user,game='',currency='USD',now=Date.now,por
   const valuation=makeValuation('USD'),display=makeValuation(currency);
   const portfolio=await getPortfolio(user,game,valuation,db);
   const zone=await require('./portfolioTimeZone').readTimeZone(db);
-  const accounting=await readAccounting(db,user,game,valuation,portfolio,require('./performanceHistory').dayAt(now(),zone));
-  const spending=await readRecordedSpending(db,user,game,valuation);
+  const {accounting,spending}=await readDashboardAccounting(db,user,game,valuation,portfolio,require('./performanceHistory').dayAt(now(),zone));
   const money=async n=>n==null?null:Math.sign(n)*(await display.cents(Math.abs(n),'USD'))/100;
-  const result={currency:display.target||currency,game,asOf:new Date(now()).toISOString(),recordedAcquisitionSpending:await money(spending.knownCents),spendingUnknownCount:spending.unknownCount,spendingHistoryComplete:false,spendingNote:spending.note,remainingBasis:accounting.unknownBasisCount?null:await money(accounting.remainingBasisCents),knownRemainingBasis:await money(accounting.remainingBasisCents),realizedGain:await money(accounting.realizedGainCents),knownRealizedGain:await money(accounting.knownRealizedGainCents),unrealizedGain:await money(accounting.unrealizedGainCents),totalGain:await money(accounting.totalGainCents),unknownBasisCount:accounting.unknownBasisCount,unknownSaleCount:accounting.unknownSaleCount,staleRates:!!(valuation.metadata().staleRates||display.metadata().staleRates),returnPct:null,benchmarkAvailable:false};
+  const result={currency:display.target||currency,game,asOf:new Date(now()).toISOString(),recordedAcquisitionSpending:await money(spending.knownCents),spendingUnknownCount:spending.unknownCount,spendingHistoryComplete:false,spendingNote:spending.note,remainingBasis:accounting.unknownBasisCount?null:await money(accounting.remainingBasisCents),knownRemainingBasis:await money(accounting.remainingBasisCents),recordedRemainingInvestment:await money(accounting.recordedRemainingCents),soldBasis:await money(accounting.soldBasisCents),unknownSoldBasisCount:accounting.unknownSoldBasisCount,soldBasisExceedsSpending:accounting.soldBasisCents>spending.knownCents,realizedGain:await money(accounting.realizedGainCents),knownRealizedGain:await money(accounting.knownRealizedGainCents),unrealizedGain:await money(accounting.unrealizedGainCents),totalGain:await money(accounting.totalGainCents),unknownBasisCount:accounting.unknownBasisCount,unknownSaleCount:accounting.unknownSaleCount,unpricedCards:portfolio.cards.filter(card=>!(card.price_trend>0)).reduce((n,card)=>n+(card.quantity||1),0),unpricedSealed:portfolio.sealed.holdings.unpricedUnits||0,unpricedOpeningContents:accounting.extraUnpriced||0,staleRates:!!(valuation.metadata().staleRates||display.metadata().staleRates),returnPct:null,benchmarkAvailable:false};
   await db.run('COMMIT');began=false;return result;
  }catch(e){if(began)await db.run('ROLLBACK').catch(()=>{});throw e;}finally{await db.close();}
 }
-module.exports={readRecordedSpending,readSummary};
+module.exports={readRecordedSpending,readDashboardAccounting,readSummary};

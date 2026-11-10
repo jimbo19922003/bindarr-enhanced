@@ -36,7 +36,7 @@ export default function SalesPanel({statsTrigger,onUpdate,showToast}) {
     {!preview&&<button className="btn btn-primary" type="submit">Review sale</button>}
    </fieldset>
    {preview&&<div className="sales-review"><h4>Review: {preview.itemName}</h4><dl><div><dt>Net proceeds</dt><dd>{money(preview.netProceedsCents,preview.currency)}</dd></div><div><dt>Cost basis · {preview.source}</dt><dd>{money(preview.soldBasisCents,preview.currency)}</dd></div><div><dt>Realized Loss/Gain</dt><dd>{money(preview.realizedGainCents,preview.currency)}</dd></div></dl>
-    {preview.realizedGainCents==null&&<label className="sales-ack"><input type="checkbox" checked={ack} disabled={busy} onChange={e=>setAck(e.target.checked)} />Basis is unknown. Record proceeds without calculating profit. Unfinalized pack pulls are not treated as free.</label>}
+    {preview.realizedGainCents==null&&<label className="sales-ack"><input type="checkbox" checked={ack} disabled={busy} onChange={e=>setAck(e.target.checked)} />Basis is unknown. Record proceeds without calculating profit. Dashboard realized gain will be a partial subtotal; unrealized gain will be an estimate with no sold cost removed for this sale.</label>}
     <button className="btn btn-primary" type="button" disabled={busy||(preview.realizedGainCents==null&&!ack)} onClick={confirm}>{busy?'Saving...':'Confirm sale'}</button><button className="btn btn-secondary" type="button" disabled={busy} onClick={clearReview}>Back to details</button>
    </div>}
   </form>}

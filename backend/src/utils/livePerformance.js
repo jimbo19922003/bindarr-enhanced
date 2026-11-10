@@ -14,7 +14,7 @@ async function readCurrentPoint({ db, userId, game, timeZone, now = Date.now, co
     await connection.run('BEGIN'); reading = true;
     const timestamp = now(), valuation = valueFor('USD');
     const portfolio = await portfolioFor(userId, game, valuation, connection);
-    const accounting = typeof connection.get === 'function' && typeof connection.all === 'function' ? await require('./timelineAccounting').readAccounting(connection,userId,game,valuation,portfolio,require('./performanceHistory').dayAt(timestamp,timeZone)) : null;
+    const accounting = typeof connection.get === 'function' && typeof connection.all === 'function' ? (await require('./dashboardAccounting').readDashboardAccounting(connection,userId,game,valuation,portfolio,require('./performanceHistory').dayAt(timestamp,timeZone))).accounting : null;
     await connection.run('COMMIT'); reading = false;
     const value = Math.round(portfolio.totalValue * 100), cost = Math.round(portfolio.totalSpent * 100);
     const cards = Math.round(portfolio.cardValue * 100), sealed = Math.round(portfolio.sealed.holdings.marketValue * 100);

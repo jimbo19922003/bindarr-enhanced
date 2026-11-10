@@ -38,7 +38,7 @@ export default function SaleDialogHost({showToast}) {
    {preview&&<div className="sales-review"><dl><div><dt>Net proceeds</dt><dd>{money(preview.netProceedsCents,preview.currency)}</dd></div><div><dt>Cost basis · {preview.source}</dt><dd>{money(preview.soldBasisCents,preview.currency)}</dd></div><div><dt>Realized Loss/Gain</dt><dd>{money(preview.realizedGainCents,preview.currency)}</dd></div></dl>
     {preview.willFreezeOpening&&<small>Confirming also freezes this completed rip&apos;s cost allocation. Its acquisition details cannot be edited without a correction workflow.</small>}
     {preview.basisReason&&<small>{preview.basisReason}</small>}
-    {preview.realizedGainCents==null&&<label className="sales-ack"><input type="checkbox" checked={ack} disabled={busy} onChange={e=>setAck(e.target.checked)}/>Basis is unknown. Record proceeds without calculating profit; pack pulls are not treated as free.</label>}
+    {preview.realizedGainCents==null&&<label className="sales-ack"><input type="checkbox" checked={ack} disabled={busy} onChange={e=>setAck(e.target.checked)}/>Basis is unknown. Record proceeds without calculating profit. Dashboard realized gain will be a partial subtotal; unrealized gain will be an estimate with no sold cost removed for this sale.</label>}
     <div className="sales-confirm-actions"><button type="button" className="btn btn-secondary" disabled={busy} onClick={reset}>Back</button><button type="button" className="btn btn-primary" disabled={busy||(preview.realizedGainCents==null&&!ack)} onClick={confirm}>{busy?'Saving...':'Confirm sale'}</button></div>
    </div>}
    {error&&<p role="alert">{error} Retry here or check Sales History before starting a new sale.</p>}
