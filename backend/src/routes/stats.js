@@ -94,10 +94,11 @@ router.get('/stats', async (req, res) => {
     const gain = round(portfolio.totalValue - portfolio.totalSpent);
     const metadata = valuation.metadata();
     const bucketList = map => [...map.values()].map(row => ({ ...row, value: round(row.value) })).sort((a, b) => b.value - a.value || b.units - a.units);
-    res.json({ summary: { totalCards: portfolio.totalCards, uniqueCards: rows.length, totalValue: portfolio.totalValue, totalSpent: portfolio.totalSpent,
+    const uniqueCardCount = portfolio.uniqueCardIds.size;
+    res.json({ summary: { totalCards: portfolio.totalCards, uniqueCards: uniqueCardCount, totalValue: portfolio.totalValue, totalSpent: portfolio.totalSpent,
       roi: { abs: gain, pct: portfolio.totalSpent > 0 ? round(gain / portfolio.totalSpent * 100) : null },
       avgCardValue: portfolio.totalCards ? round(portfolio.cardValue / portfolio.totalCards) : 0, unsortedCount,
-      duplicateCopies: Math.max(portfolio.totalCards - rows.length, 0),
+      duplicateCopies: Math.max(portfolio.totalCards - uniqueCardCount, 0),
       mintRate: portfolio.totalCards ? round(nearMintCount / portfolio.totalCards * 100) : 0,
       vintageRatio: portfolio.totalCards ? round(vintageCount / portfolio.totalCards * 100) : 0,
       unpricedCards, ...metadata, change7d: change(value7dAgo, valueNowFor7d), change30d: change(value30dAgo, valueNowFor30d),

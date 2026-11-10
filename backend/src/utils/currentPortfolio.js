@@ -45,6 +45,7 @@ async function sealedData(userId, game, valuation, database = db) {
 async function currentPortfolio(userId, game, valuation, database = db) {
   const raw = await cardRows(userId, game, database);
   const cards = [];
+  const uniqueCardIds = new Set();
   let cardValueCents = 0, cardSpentCents = 0, totalCards = 0;
   const byGame = {};
   for (const source of raw) {
@@ -62,9 +63,11 @@ async function currentPortfolio(userId, game, valuation, database = db) {
     // Ensure quantity is preserved on the card object for dashboard calculations
     card.quantity = quantity;
     cards.push(card);
+    // Track unique card IDs for duplicate detection (distinct card vs collection entries)
+    uniqueCardIds.add(source.card_id);
   }
   const sealed = await sealedData(userId, game, valuation, database);
-  return { cards, totalCards, cardValue: cardValueCents / 100,
+  return { cards, totalCards, uniqueCardIds, cardValue: cardValueCents / 100,
     totalValue: round(cardValueCents / 100 + sealed.holdings.marketValue),
     totalSpent: round(cardSpentCents / 100 + sealed.spent), sealed,
     byGame: Object.fromEntries(Object.entries(byGame).map(([key, value]) => [key, { ...value, value: round(value.value) }])) };
