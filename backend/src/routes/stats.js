@@ -37,24 +37,18 @@ router.get('/stats', async (req, res) => {
       onConflict: ({ game, id }) => console.warn(`Dashboard set ID has conflicting names: ${game || 'unknown'} / ${id}`),
     });
     let unsortedCount = 0, nearMintCount = 0, vintageCount = 0, unpricedCards = 0;
-    let extraCopiesCount = 0, extraCopiesValue = 0;
     let value7dAgo = 0, valueNowFor7d = 0, value30dAgo = 0, valueNowFor30d = 0;
     const now = Date.now();
-    // Track quantities per card to calculate extra copies value
     const cardQuantities = new Map();
     for (const row of rows) {
       const quantity = row.quantity || 1;
       const cardId = row.card_id;
-      // Track cumulative quantity and price for each unique card
-      if (!cardQuantities.has(cardId)) {
-        cardQuantities.set(cardId, { totalQty: quantity, price: row.price_trend || 0 });
-      } else {
-        cardQuantities.get(cardId).totalQty += quantity;
-      }
-      // Extra copies: any quantity beyond the first copy
-      const extras = Math.max(quantity - 1, 0);
-      extraCopiesCount += extras;
-      extraCopiesValue += extras * (row.price_trend || 0);
+      const unitCents = Math.round(row.price_trend * 100);
+      const group = cardQuantities.get(cardId) || { quantity: 0, valueCents: 0, keeperCents: 0 };
+      group.quantity += quantity;
+      group.valueCents += quantity * unitCents;
+      group.keeperCents = Math.max(group.keeperCents, unitCents);
+      cardQuantities.set(cardId, group);
       if (!row.location_name) unsortedCount += quantity;
       if (row.condition === 'Near Mint') nearMintCount += quantity;
       if (isVintageSet(row.set_id)) vintageCount += quantity;
@@ -109,12 +103,17 @@ router.get('/stats', async (req, res) => {
     const metadata = valuation.metadata();
     const bucketList = map => [...map.values()].map(row => ({ ...row, value: round(row.value) })).sort((a, b) => b.value - a.value || b.units - a.units);
     const uniqueCardCount = portfolio.uniqueCardIds.size;
+    let extraCopiesCount = 0, extraCopiesValueCents = 0;
+    for (const group of cardQuantities.values()) {
+      extraCopiesCount += group.quantity - 1;
+      extraCopiesValueCents += group.valueCents - group.keeperCents;
+    }
     res.json({ summary: { totalCards: portfolio.totalCards, uniqueCards: uniqueCardCount, totalValue: portfolio.totalValue, totalSpent: portfolio.totalSpent,
       roi: { abs: gain, pct: portfolio.totalSpent > 0 ? round(gain / portfolio.totalSpent * 100) : null },
       avgCardValue: portfolio.totalCards ? round(portfolio.cardValue / portfolio.totalCards) : 0, unsortedCount,
       duplicateCopies: Math.max(portfolio.totalCards - uniqueCardCount, 0),
-      extraCopiesCount: extraCopiesCount,
-      extraCopiesValue: round(extraCopiesValue),
+      extraCopiesCount,
+      extraCopiesValue: extraCopiesValueCents / 100,
       mintRate: portfolio.totalCards ? round(nearMintCount / portfolio.totalCards * 100) : 0,
       vintageRatio: portfolio.totalCards ? round(vintageCount / portfolio.totalCards * 100) : 0,
       unpricedCards, ...metadata, change7d: change(value7dAgo, valueNowFor7d), change30d: change(value30dAgo, valueNowFor30d),

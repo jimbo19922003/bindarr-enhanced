@@ -395,7 +395,10 @@ worst follow the measure that is on. The table's Recovery column is the
 share of cost the known pulls cover, so 100% there is even.
 
 **Cards** is the collection: set completion, rarity, type or color,
-condition, extra copies, and which containers hold the cards.
+condition, extra copies, and which containers hold the cards. Extra copies are
+grouped by card ID across all collection entries. Their estimated market value
+keeps the highest-valued copy of each card and totals the remaining copies;
+copies without a market price contribute zero.
 
 Set-value charts combine card and sealed set names within each game when they
 match after Unicode, whitespace, and case normalization, even if their source
