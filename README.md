@@ -521,6 +521,11 @@ Prices retain their original quote currency and marketplace. Displays and portfo
 
 A price only exists once something fetched it. The Pokémon price sweep covers the sets you own cards from, so browsing a set you own nothing in shows `0.00` until a card from it lands in your collection.
 
+The PokéWallet pricing-issues list shows unpriced cards still in a collection or
+deck, in pages of ten. An earlier matching failure no longer appears while any
+source provides a positive card price; its mapping history is retained and the
+issue can reappear if that price is later removed.
+
 ### How often prices refresh
 
 Owned and decked cards have their prices re-fetched automatically. **Admin → Instance Settings → Refresh prices** sets how often that runs: daily (the default), every 3 days, weekly, every 30 days, or never. CardDex processes up to 25 due cards per hourly tick; unsuccessful attempts can retry on a subsequent tick. Legacy providers have their own freshness gates.

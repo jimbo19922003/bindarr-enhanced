@@ -319,6 +319,34 @@ async function main() {
     assert.strictEqual(state.issues.length, 1);
     assert.strictEqual(state.issues[0].candidates.length, 2);
     assertNoSecret(state);
+    await db.run(`UPDATE card_cache SET price_holofoil = 12, price_source = 'tcgcsv', price_currency = 'USD' WHERE id = ?`, ['tcgdex-en-cbb3c-4']);
+    assert.strictEqual((await api.status()).issues_total, 0, 'a price from another source resolves the visible issue');
+    assert.strictEqual((await api.mapManually('tcgdex-en-cbb3c-4', manualCard.id, false)).statusCode, 409);
+    assert.strictEqual((await db.get(`SELECT status FROM pokewallet_map WHERE card_id = ?`, ['tcgdex-en-cbb3c-4'])).status, 'ambiguous', 'the historical mapping is retained');
+    await db.run(`UPDATE card_cache SET price_holofoil = NULL WHERE id = ?`, ['tcgdex-en-cbb3c-4']);
+    assert.strictEqual((await api.status()).issues_total, 1, 'the issue reappears if the price is removed');
+    await db.run(`UPDATE collection SET list_type = 'sold' WHERE card_id = ?`, ['tcgdex-en-cbb3c-4']);
+    assert.strictEqual((await api.status()).issues_total, 0, 'sold-only cards are not actionable');
+    const deck = await db.run(`INSERT INTO decks (user_id, name) VALUES (1, 'Pricing issue deck')`);
+    await db.run(`INSERT INTO deck_cards (deck_id, card_id) VALUES (?, ?)`, [deck.lastID, 'tcgdex-en-cbb3c-4']);
+    assert.strictEqual((await api.status()).issues_total, 1, 'cards in decks remain actionable');
+    await db.run('DELETE FROM decks WHERE id = ?', [deck.lastID]);
+
+    await reset();
+    for (let i = 0; i < 23; i++) {
+      const id = `tcgdex-en-queue-${String(i).padStart(2, '0')}`;
+      await addCard({ id, name: `Queue ${String(i).padStart(2, '0')}`, setId: 'queue', setName: 'Queue', number: String(i) });
+      await db.run(`INSERT INTO pokewallet_map (card_id, status, reason, candidates_json, updated_at) VALUES (?, 'unmatched', 'not_found', '[]', CURRENT_TIMESTAMP)`, [id]);
+    }
+    const firstPage = await api.status();
+    const secondPage = await api.status(10);
+    const lastPage = await api.status(100);
+    assert.strictEqual(firstPage.issues_total, 23);
+    assert.strictEqual(firstPage.issues.length, 10);
+    assert.strictEqual(secondPage.issues.length, 10);
+    assert.strictEqual(lastPage.issues_offset, 20);
+    assert.strictEqual(lastPage.issues.length, 3);
+    assert.notStrictEqual(firstPage.issues[0].card_id, secondPage.issues[0].card_id);
 
     // Set code "MISSING" is not a PokéWallet code, so the first search is empty
     // and one name-only search is allowed. The number is read from the result.
@@ -488,6 +516,9 @@ async function main() {
       assert.strictEqual((await call('member-token', 'GET', '/api/settings/pokewallet')).status, 403);
       const adminStatus = await call('admin-token', 'GET', '/api/settings/pokewallet');
       assert.strictEqual(adminStatus.status, 200);
+      assert.strictEqual((await call('admin-token', 'GET', '/api/settings/pokewallet?offset=-1')).status, 400);
+      assert.strictEqual((await call('admin-token', 'GET', '/api/settings/pokewallet?offset=10&offset=20')).status, 400);
+      assert.strictEqual((await call('admin-token', 'GET', '/api/settings/pokewallet?offset=9007199254740992')).status, 400);
       const adminBody = await adminStatus.json();
       assert.strictEqual(adminBody.configured, true);
       assert.strictEqual(adminBody.key_source, 'environment');

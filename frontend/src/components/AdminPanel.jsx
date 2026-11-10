@@ -44,6 +44,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
   const [pokewallet, setPokewallet] = useState(null);
   const [pokewalletLoading, setPokewalletLoading] = useState(false);
   const mountedRef = useRef(true);
+  const pokewalletRequestRef = useRef(0);
 
   // Database backup states
   const [backups, setBackups] = useState([]);
@@ -182,15 +183,18 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
     }
   };
 
-  const fetchPokewallet = async () => {
+  const fetchPokewallet = async (offset = 0) => {
+    const request = ++pokewalletRequestRef.current;
     try {
-      const response = await fetch('/api/settings/pokewallet');
-      if (!response.ok) return;
+      const response = await fetch(`/api/settings/pokewallet?offset=${offset}`);
+      if (!response.ok) throw new Error(t('admin.pokewalletFailed'));
       const data = await response.json();
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || request !== pokewalletRequestRef.current) return;
       setPokewallet(data);
     } catch (err) {
+      if (!mountedRef.current || request !== pokewalletRequestRef.current) return;
       console.error(err);
+      showToast(t('admin.pokewalletFailed'));
     }
   };
 
@@ -201,13 +205,14 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         showToast(data.error || t('admin.pokewalletFailed'));
+        await fetchPokewallet(pokewallet?.issues_offset || 0);
         return;
       }
       if (data.status === 'key_missing') showToast(t('admin.pokewalletKeyMissing'));
       else if (data.status === 'rate_limited') showToast(t('admin.pokewalletRateLimited'));
       else if (data.status === 'already_running') showToast(t('admin.pokewalletAlreadyRunning'));
       else showToast(t('admin.pokewalletUpdated', { count: data.updated || 0 }));
-      await fetchPokewallet();
+      await fetchPokewallet(pokewallet?.issues_offset || 0);
     } catch (err) {
       console.error(err);
       showToast(t('admin.pokewalletFailed'));
@@ -227,11 +232,12 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         showToast(data.error || t('admin.pokewalletFailed'));
+        await fetchPokewallet(pokewallet?.issues_offset || 0);
         return;
       }
       if (clear) showToast(t('admin.pokewalletRemoved', { name: label }));
       else showToast(t('admin.pokewalletUpdated', { count: data.applied ? 1 : 0 }));
-      await fetchPokewallet();
+      await fetchPokewallet(pokewallet?.issues_offset || 0);
     } catch (err) {
       console.error(err);
       showToast(t('admin.pokewalletFailed'));
@@ -637,7 +643,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
               {t('admin.pokewalletSummary', {
                 updated: pokewallet.last_report.updated || 0,
                 waiting: pokewallet.last_report.waiting || 0,
-                attention: (pokewallet.issues || []).length,
+                attention: pokewallet.issues_total,
               })}
             </p>
           )}
@@ -678,6 +684,17 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
                   {candidate.amount > 0 ? ` · ${candidate.amount} ${candidate.currency}` : ''}
                 </button>
               ))}
+              {pokewallet?.issues_total > pokewallet?.issues_limit && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn-secondary btn-sm" disabled={pokewalletLoading || pokewallet.issues_offset === 0}
+                    onClick={() => fetchPokewallet(Math.max(0, pokewallet.issues_offset - pokewallet.issues_limit))}>{t('admin.pokewalletPrevious')}</button>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    {t('admin.pokewalletPage', { start: pokewallet.issues_offset + 1, end: pokewallet.issues_offset + pokewallet.issues.length, total: pokewallet.issues_total })}
+                  </span>
+                  <button type="button" className="btn btn-secondary btn-sm" disabled={pokewalletLoading || pokewallet.issues_offset + pokewallet.issues_limit >= pokewallet.issues_total}
+                    onClick={() => fetchPokewallet(pokewallet.issues_offset + pokewallet.issues_limit)}>{t('admin.pokewalletNext')}</button>
+                </div>
+              )}
             </div>
           ))}
           {(pokewallet?.recent || []).length > 0 && (

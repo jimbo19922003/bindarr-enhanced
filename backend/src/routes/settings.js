@@ -263,7 +263,11 @@ router.put('/', requireAdmin, async (req, res) => {
 // environment fallback.
 router.get('/pokewallet', requireAdmin, async (req, res) => {
   try {
-    res.json(await require('../pokewalletApi').status());
+    const raw = req.query.offset;
+    if (raw != null && (typeof raw !== 'string' || !/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)))) {
+      return res.status(400).json({ error: 'Invalid issue offset' });
+    }
+    res.json(await require('../pokewalletApi').status(Number(raw || 0)));
   } catch (error) {
     console.error(`PokéWallet status failed: ${error.message}`);
     res.status(500).json({ error: 'Failed to read PokéWallet status' });

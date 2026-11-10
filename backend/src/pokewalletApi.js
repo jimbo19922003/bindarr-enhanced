@@ -611,18 +611,29 @@ function parseCandidates(text) {
   }
 }
 
-async function openIssues() {
+const ISSUE_PAGE_SIZE = 10;
+async function openIssues(offset = 0) {
+  const where = `FROM pokewallet_map m
+       JOIN card_cache cc ON cc.id = m.card_id
+      WHERE m.status IN (${OPEN_STATUSES.map(() => '?').join(', ')})
+        AND COALESCE(cc.price_trend, 0) <= 0
+        AND COALESCE(cc.price_normal, 0) <= 0
+        AND COALESCE(cc.price_holofoil, 0) <= 0
+        AND COALESCE(cc.price_reverse_holofoil, 0) <= 0
+        AND COALESCE(cc.price_1st_edition, 0) <= 0
+        AND (EXISTS (SELECT 1 FROM collection c WHERE c.card_id = cc.id AND c.list_type != 'sold')
+          OR EXISTS (SELECT 1 FROM deck_cards d WHERE d.card_id = cc.id))`;
+  const { total } = await db.get(`SELECT COUNT(*) AS total ${where}`, OPEN_STATUSES);
+  const start = Math.min(offset, Math.max(0, Math.ceil(total / ISSUE_PAGE_SIZE) - 1) * ISSUE_PAGE_SIZE);
   const rows = await db.all(
     `SELECT m.card_id, m.status, m.reason, m.candidates_json,
             cc.name, cc.number, cc.set_name
-       FROM pokewallet_map m
-       JOIN card_cache cc ON cc.id = m.card_id
-      WHERE m.status IN (${OPEN_STATUSES.map(() => '?').join(', ')})
-      ORDER BY cc.name
-      LIMIT 40`,
-    OPEN_STATUSES
+       ${where}
+      ORDER BY cc.name COLLATE NOCASE, cc.id
+      LIMIT ? OFFSET ?`,
+    [...OPEN_STATUSES, ISSUE_PAGE_SIZE, start]
   );
-  return rows.map(row => ({
+  const issues = rows.map(row => ({
     card_id: row.card_id,
     name: row.name || '',
     number: row.number || '',
@@ -631,6 +642,7 @@ async function openIssues() {
     reason: row.reason || null,
     candidates: parseCandidates(row.candidates_json),
   }));
+  return { issues, total, offset: start };
 }
 
 async function recentQuotes() {
@@ -645,7 +657,7 @@ async function recentQuotes() {
   );
 }
 
-async function status() {
+async function status(offset = 0) {
   const days = await priceRefreshDays();
   const budget = await db.get(
     `SELECT remaining_hour, remaining_day, paused_until FROM pokewallet_budget WHERE id = 1`
@@ -656,6 +668,7 @@ async function status() {
   catch { last = null; }
   if (last && last.issues) delete last.issues;
   const active = await activeKey();
+  const open = await openIssues(offset);
   return {
     configured: !!active.key,
     key_source: active.source,
@@ -668,7 +681,10 @@ async function status() {
     remaining_hour: budget ? budget.remaining_hour : null,
     remaining_day: budget ? budget.remaining_day : null,
     last_report: last,
-    issues: await openIssues(),
+    issues: open.issues,
+    issues_total: open.total,
+    issues_offset: open.offset,
+    issues_limit: ISSUE_PAGE_SIZE,
     recent: await recentQuotes(),
   };
 }
