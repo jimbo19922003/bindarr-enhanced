@@ -372,7 +372,7 @@ function Dashboard({ statsTrigger, onNavigate, onNavigateToSet, setSelectedLocat
       <div className="glass-panel" style={{ marginBottom: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))', gap: '0.8rem' }}>
         <div><div className="metric-header">{t('dash.uniqueCount', { count: summary.uniqueCards })}</div><div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{summary.totalCards > 0 ? t('dash.nearMint', { pct: summary.mintRate }) : '—'}</div></div>
         <div><div className="metric-header">{t('dash.vintageShare', { pct: summary.vintageRatio })}</div></div>
-        <div><div className="metric-header">{t('dash.duplicates', { count: summary.duplicateCopies })}</div></div>
+        <div><div className="metric-header">{t('dash.duplicates', { count: summary.duplicateCopies })}</div><div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{summary.extraCopiesValue ? priceText(summary.extraCopiesValue, summary.currency || reportingCurrency) : '—'}</div></div>
         <div><div className="metric-header">{summary.unsortedCount > 0 ? t('dash.unsortedCount', { count: summary.unsortedCount }) : t('dash.whereCards')}</div></div>
       </div>
       {/* Main Charts & Analytics Details */}

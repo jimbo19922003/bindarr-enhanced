@@ -37,10 +37,24 @@ router.get('/stats', async (req, res) => {
       onConflict: ({ game, id }) => console.warn(`Dashboard set ID has conflicting names: ${game || 'unknown'} / ${id}`),
     });
     let unsortedCount = 0, nearMintCount = 0, vintageCount = 0, unpricedCards = 0;
+    let extraCopiesCount = 0, extraCopiesValue = 0;
     let value7dAgo = 0, valueNowFor7d = 0, value30dAgo = 0, valueNowFor30d = 0;
     const now = Date.now();
+    // Track quantities per card to calculate extra copies value
+    const cardQuantities = new Map();
     for (const row of rows) {
       const quantity = row.quantity || 1;
+      const cardId = row.card_id;
+      // Track cumulative quantity and price for each unique card
+      if (!cardQuantities.has(cardId)) {
+        cardQuantities.set(cardId, { totalQty: quantity, price: row.price_trend || 0 });
+      } else {
+        cardQuantities.get(cardId).totalQty += quantity;
+      }
+      // Extra copies: any quantity beyond the first copy
+      const extras = Math.max(quantity - 1, 0);
+      extraCopiesCount += extras;
+      extraCopiesValue += extras * (row.price_trend || 0);
       if (!row.location_name) unsortedCount += quantity;
       if (row.condition === 'Near Mint') nearMintCount += quantity;
       if (isVintageSet(row.set_id)) vintageCount += quantity;
@@ -99,6 +113,8 @@ router.get('/stats', async (req, res) => {
       roi: { abs: gain, pct: portfolio.totalSpent > 0 ? round(gain / portfolio.totalSpent * 100) : null },
       avgCardValue: portfolio.totalCards ? round(portfolio.cardValue / portfolio.totalCards) : 0, unsortedCount,
       duplicateCopies: Math.max(portfolio.totalCards - uniqueCardCount, 0),
+      extraCopiesCount: extraCopiesCount,
+      extraCopiesValue: round(extraCopiesValue),
       mintRate: portfolio.totalCards ? round(nearMintCount / portfolio.totalCards * 100) : 0,
       vintageRatio: portfolio.totalCards ? round(vintageCount / portfolio.totalCards * 100) : 0,
       unpricedCards, ...metadata, change7d: change(value7dAgo, valueNowFor7d), change30d: change(value30dAgo, valueNowFor30d),
@@ -106,7 +122,20 @@ router.get('/stats', async (req, res) => {
       types: Object.entries(types).map(([name, value]) => ({ name, value })),
       rarities: Object.entries(rarities).map(([name, value]) => ({ name, value })),
       locations: Object.entries(locations).map(([name, value]) => ({ name, value })), sets: sets.list(), cardSets,
-      topValuable: rows.slice().sort((a, b) => b.price_trend - a.price_trend).slice(0, 6),
+      topValuable: (() => {
+        const byCardId = new Map();
+        for (const row of rows) {
+          const cardId = row.card_id;
+          if (!byCardId.has(cardId)) {
+            byCardId.set(cardId, { ...row, totalValue: row.price_trend * (row.quantity || 1) });
+          } else {
+            const existing = byCardId.get(cardId);
+            existing.quantity = (existing.quantity || 1) + (row.quantity || 1);
+            existing.totalValue = existing.price_trend * existing.quantity;
+          }
+        }
+        return [...byCardId.values()].sort((a, b) => b.totalValue - a.totalValue).slice(0, 6);
+      })(),
       recentAdditions: rows.slice().sort((a, b) => parseSqliteUtc(b.added_at) - parseSqliteUtc(a.added_at)).slice(0, 6),
       topSealed: portfolio.sealed.lines.filter(line => line.line_value != null).sort((a, b) => b.line_value - a.line_value).slice(0, 6),
       setProgress: setProgress.sort((a, b) => b.percent - a.percent).slice(0, 12),
