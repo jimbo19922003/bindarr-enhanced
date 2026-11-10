@@ -3432,3 +3432,26 @@ button, input, select, textarea {
   color: var(--text-strong) !important;
 }
 
+/* On screen the sheet is scaled so a full page fits the planner. Print stays at the millimetre size. */
+@media screen {
+  .michi-sheet { zoom: 0.48; }
+}
+@media print {
+  body.michi-printing * { visibility: hidden; }
+  body.michi-printing .michi-print-root,
+  body.michi-printing .michi-print-root * { visibility: visible; }
+  body.michi-printing .michi-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    background: white;
+  }
+  body.michi-printing .michi-sheet {
+    zoom: 1;
+    margin: 0 !important;
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+  }
+}
+
