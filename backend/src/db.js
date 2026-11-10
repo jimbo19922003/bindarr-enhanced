@@ -132,7 +132,8 @@ function hashPassword(password) {
 async function splitStackedRows() {
   const stacked = await all(`SELECT * FROM collection WHERE quantity > 1`);
   if (stacked.length === 0) return 0;
-  const cols = (await all(`PRAGMA table_info(collection)`)).map(c => c.name).filter(n => n !== 'id');
+  const cols = (await all(`PRAGMA table_info(collection)`)).map(c => c.name)
+    .filter(n => !['id', 'scan_request_key', 'scan_request_hash'].includes(n));
   const placeholders = cols.map(() => '?').join(', ');
   await withTransaction(async () => {
     for (const row of stacked) {
@@ -771,6 +772,31 @@ async function initDb() {
   if (!collectionCols.some(c => c.name === 'user_id')) {
     await run(`ALTER TABLE collection ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE`);
   }
+  if (!collectionCols.some(c => c.name === 'scan_request_key')) {
+    await run(`ALTER TABLE collection ADD COLUMN scan_request_key TEXT`);
+  }
+  if (!collectionCols.some(c => c.name === 'scan_request_hash')) {
+    await run(`ALTER TABLE collection ADD COLUMN scan_request_hash TEXT`);
+  }
+  await run(`CREATE TABLE IF NOT EXISTS scan_add_receipt (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    request_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    collection_id INTEGER NOT NULL,
+    result_json TEXT,
+    PRIMARY KEY (user_id, request_key)
+  )`);
+  await run(`CREATE TABLE IF NOT EXISTS scan_queue_identity (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    instance_id TEXT NOT NULL
+  )`);
+  await run('INSERT OR IGNORE INTO scan_queue_identity (id, instance_id) VALUES (1, ?)', [crypto.randomUUID()]);
+  await run(`CREATE TRIGGER IF NOT EXISTS collection_scan_receipt
+    AFTER INSERT ON collection WHEN NEW.scan_request_key IS NOT NULL
+    BEGIN
+      INSERT INTO scan_add_receipt (user_id, request_key, request_hash, collection_id)
+      VALUES (NEW.user_id, NEW.scan_request_key, NEW.scan_request_hash, NEW.id);
+    END`);
   if (!collectionCols.some(c => c.name === 'is_trade')) {
     await run(`ALTER TABLE collection ADD COLUMN is_trade INTEGER DEFAULT 0`);
   }

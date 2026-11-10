@@ -45,6 +45,38 @@ Architecture, the scan pipeline, and the data model are in [PROJECT.md](PROJECT.
 
 ## Collection and deck workflows
 
+### Persistent scan queue
+
+In the scanner settings, enable **Use persistent scan queue** to capture the next
+card while earlier captures are matched. The existing scanner remains
+the default. Each capture keeps its selected game, language and set filters.
+Nothing is added until you review the list and choose **Add selected**. Confident
+matches are preselected; uncertain matches require you to select a card. You can
+change or clear a selection, search for another card, or remove a capture.
+Unselected captures remain for later review. The scanner's auto-add and
+confirmation settings do not change this queue behavior.
+If two consecutive captures appear to be the same card, scanning pauses and
+asks whether to keep another copy or discard the repeated photo. Matching runs
+asynchronously, so other captures may already be queued before the warning
+appears; they remain available for review. The guard depends on recognizable
+matches and cannot catch every repeated photo.
+
+Queue additions record an **unknown purchase cost**, not the market quote; edit
+the copy in the collection to enter what you paid. They use Near Mint and the
+scanner's default printing. Cached preview prices may be unavailable, and a
+price refresh on add is not guaranteed.
+
+The queue is stored in this browser on this device, separately for each account
+and server database. Processing runs while the scanner is open and resumes on
+return after navigation or reload. Accepted copies are saved individually in the
+background, not as one database operation; failure on one does not undo the
+others. Failed items can be retried; interrupted saves
+reuse a server-side receipt to avoid adding the same copy twice. If a copy was
+added but follow-up processing failed, the queue asks you to check the collection.
+Do not clear browser site data while captures are pending. Browser storage can be
+evicted or run out; a failed capture pauses scanning rather than claiming it was
+saved. Queue mode requires IndexedDB, Web Locks and a secure context.
+
 ### ManaBox imports
 
 **Decks:** Open **Deck Builder → Create Deck → + Quick Import Decklist**, choose

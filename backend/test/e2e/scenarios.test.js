@@ -125,6 +125,61 @@ async function runTests() {
       throw err;
     }
 
+    // Scan requests must never insert a second copy, even after a lost response,
+    // concurrent retries, deletion, or a failure after the insert.
+    {
+      const identityResponse = await fetch(`http://localhost:${port}/api/scan-queue/identity`, { headers: authHeaders });
+      assert.strictEqual(identityResponse.status, 200);
+      const identity = await identityResponse.json();
+      assert.strictEqual(identity.user_id, adminId);
+      const card = await db.get(`SELECT card_id FROM collection WHERE user_id = ? LIMIT 1`, [adminId]);
+      const body = { card_id: card.card_id, game: 'mtg', quantity: 1, purchase_price: null };
+      const request = (key, payload = body, instance = identity.instance_id, headers = authHeaders) =>
+        fetch(`http://localhost:${port}/api/scan-queue/add`, {
+          method: 'POST',
+          headers: { ...headers, 'Idempotency-Key': key, 'X-Scan-Instance': instance },
+          body: JSON.stringify(payload)
+        });
+      const key = 'scan-retry-test-001';
+      const responses = await Promise.all(Array.from({ length: 5 }, () => request(key)));
+      assert.ok(responses.every(response => response.status === 200));
+      const results = await Promise.all(responses.map(response => response.json()));
+      assert.ok(results.every(result => result.id === results[0].id));
+      assert.strictEqual((await db.get('SELECT COUNT(*) AS n FROM collection WHERE user_id = ? AND scan_request_key = ?', [adminId, key])).n, 1);
+      assert.strictEqual((await request(key, { ...body, condition: 'Damaged' })).status, 409);
+      assert.strictEqual((await request('scan-wrong-server-001', body, 'wrong-instance')).status, 409);
+      assert.strictEqual((await request('scan-many-copies-001', { ...body, quantity: 2 })).status, 400);
+      assert.strictEqual((await fetch(`http://localhost:${port}/api/scan-queue/add`, {
+        method: 'POST', headers: authHeaders, body: JSON.stringify(body)
+      })).status, 400);
+      await db.run('DELETE FROM collection WHERE id = ?', [results[0].id]);
+      assert.strictEqual((await (await request(key)).json()).id, results[0].id);
+      assert.strictEqual((await db.get('SELECT COUNT(*) AS n FROM collection WHERE user_id = ? AND scan_request_key = ?', [adminId, key])).n, 0);
+
+      const other = await db.run("INSERT INTO users (username, password_hash, role, share_token) VALUES ('scan-other', 'unused', 'member', 'scan-other-token')");
+      const otherToken = 'scan-other-session';
+      await db.run("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+1 day'))", [otherToken, other.lastID]);
+      const otherHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${otherToken}` };
+      const otherResult = await request(key, body, identity.instance_id, otherHeaders);
+      assert.strictEqual(otherResult.status, 200);
+      assert.notStrictEqual((await otherResult.json()).id, results[0].id);
+
+      await db.run('DELETE FROM price_history WHERE card_id = ?', [card.card_id]);
+      await db.run(`CREATE TRIGGER scan_test_price_failure BEFORE INSERT ON price_history BEGIN SELECT RAISE(ABORT, 'test price failure'); END`);
+      const partialKey = 'scan-partial-test-001';
+      const partial = await (await request(partialKey)).json();
+      assert.strictEqual(partial.needs_attention, true);
+      await db.run('DROP TRIGGER scan_test_price_failure');
+      const recovered = await (await request(partialKey)).json();
+      assert.deepStrictEqual(recovered, partial);
+      assert.strictEqual((await db.get('SELECT COUNT(*) AS n FROM collection WHERE user_id = ? AND scan_request_key = ?', [adminId, partialKey])).n, 1);
+      await db.run('UPDATE collection SET quantity = 2 WHERE id = ?', [partial.id]);
+      await db.splitStackedRows();
+      assert.strictEqual((await db.get('SELECT COUNT(*) AS n FROM collection WHERE user_id = ? AND scan_request_key = ?', [adminId, partialKey])).n, 1);
+      assert.strictEqual((await (await request(partialKey)).json()).id, partial.id);
+      console.log('PASS: F6-TC7');
+    }
+
     // F6-TC4: set/number code -> API Search -> Add -> Compartment recommendation
     try {
       const scanText = 'ELD/171';

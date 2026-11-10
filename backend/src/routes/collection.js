@@ -1,5 +1,6 @@
 // zero-cost-confirmation-v1
 const zeroCost = require('../utils/zeroCost');
+const crypto = require('crypto');
 const express = require('express');
 const db = require('../db');
 const tcgApi = require('../tcgApi');
@@ -751,7 +752,7 @@ class AddCardError extends Error {
 // and means an ungraded card, not a missing value.
 const GRADERS = ['Raw', 'PSA', 'BGS', 'CGC', 'SGC', 'TAG'];
 
-async function addCardToCollection(user, body, { openingPull = false } = {}) {
+async function addCardToCollection(user, body, { openingPull = false, scanRequest = null } = {}) {
   const {
     card_id,
     quantity = 1,
@@ -905,12 +906,13 @@ async function addCardToCollection(user, body, { openingPull = false } = {}) {
           INSERT INTO collection (
             card_id, user_id, quantity, condition, printing, language, purchase_price,
             location_id, compartment_id, position, is_trade, list_type, game,
-            grader, grade, cert_number, zero_cost_confirmed
-          ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            grader, grade, cert_number, zero_cost_confirmed, scan_request_key, scan_request_hash
+          ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           cardId, req.user.id, condition, printing, language, cost.amount,
           targetLocationId, resolved.compartment_id, resolved.position + (i * 0.001), is_trade ? 1 : 0, list_type, effectiveGame,
-          grader, gradeValue, certValue, cost.confirmedZero && list_type === 'collection' ? 1 : 0
+          grader, gradeValue, certValue, cost.confirmedZero && list_type === 'collection' ? 1 : 0,
+          scanRequest?.key || null, scanRequest?.hash || null
         ]);
         lastInsertedId = result.lastID;
         insertedIds.push(lastInsertedId);
@@ -974,10 +976,72 @@ router.get('/cards/:id/printing', async (req, res) => {
 });
 
 // 3. Add Card to Collection
-router.post('/collection', async (req, res) => {
+function canonicalRequest(value) {
+  if (Array.isArray(value)) return value.map(canonicalRequest);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalRequest(value[key])]));
+  }
+  return value;
+}
+
+async function scanReceipt(userId, key, hash) {
+  const receipt = await db.get('SELECT * FROM scan_add_receipt WHERE user_id = ? AND request_key = ?', [userId, key]);
+  if (!receipt) return null;
+  if (receipt.request_hash !== hash) throw new AddCardError(409, 'Scan request key was already used with different card details.');
+  return receipt.result_json
+    ? JSON.parse(receipt.result_json)
+    : { id: receipt.collection_id, ids: [receipt.collection_id], needs_attention: true };
+}
+
+router.get('/scan-queue/identity', async (req, res) => {
   try {
-    res.status(200).json(await addCardToCollection(req.user, req.body));
+    const identity = await db.get('SELECT instance_id FROM scan_queue_identity WHERE id = 1');
+    res.json({ instance_id: identity.instance_id, user_id: req.user.id, username: req.user.username });
   } catch (error) {
+    console.error('Could not read scan queue identity:', error);
+    res.status(500).json({ error: 'Could not initialize scan queue' });
+  }
+});
+
+router.post(['/collection', '/scan-queue/add'], async (req, res) => {
+  const key = req.get('Idempotency-Key');
+  let scanRequest = null;
+  try {
+    if (req.path === '/scan-queue/add' && !key) {
+      throw new AddCardError(400, 'A scan request key is required.');
+    }
+    if (key) {
+      if (!/^[A-Za-z0-9_-]{8,128}$/.test(key) || Number(req.body.quantity ?? 1) !== 1 || req.body.stackable) {
+        throw new AddCardError(400, 'A scan request key requires a single unstacked copy.');
+      }
+      const identity = await db.get('SELECT instance_id FROM scan_queue_identity WHERE id = 1');
+      if (!identity || req.get('X-Scan-Instance') !== identity.instance_id) {
+        throw new AddCardError(409, 'Scan queue server identity changed.');
+      }
+      const hash = crypto.createHash('sha256').update(JSON.stringify(canonicalRequest(req.body))).digest('hex');
+      scanRequest = { key, hash };
+      const previous = await scanReceipt(req.user.id, key, hash);
+      if (previous) return res.status(200).json(previous);
+    }
+    const result = await addCardToCollection(req.user, req.body, { scanRequest });
+    if (scanRequest) {
+      await db.run('UPDATE scan_add_receipt SET result_json = ? WHERE user_id = ? AND request_key = ?',
+        [JSON.stringify(result), req.user.id, key]);
+    }
+    res.status(200).json(result);
+  } catch (error) {
+    if (scanRequest) {
+      try {
+        const previous = await scanReceipt(req.user.id, scanRequest.key, scanRequest.hash);
+        if (previous) {
+          if (previous.needs_attention) console.error('Scan add inserted a copy but post-insert work failed:', error);
+          return res.status(200).json(previous);
+        }
+      } catch (receiptError) {
+        if (receiptError instanceof AddCardError) return res.status(receiptError.status).json({ error: receiptError.message });
+        console.error('Could not check scan add receipt:', receiptError);
+      }
+    }
     if (error instanceof AddCardError) {
       return res.status(error.status).json({ error: error.message, code: error.code });
     }
