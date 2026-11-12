@@ -1,4 +1,3 @@
-// performance-core-db-v1
 'use strict';
 const db = require('../db');
 const { summarizeHoldings, emptyHoldings } = require('./sealedInventory');

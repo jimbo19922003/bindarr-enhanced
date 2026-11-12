@@ -7,7 +7,6 @@ on:
       - 'backend/src/utils/carddexArtwork.js'
       - 'backend/src/routes/providerKeys.js'
       - 'backend/test/carddexKey.test.js'
-      - 'frontend/src/components/CarddexKeyPanel.jsx'
       - 'frontend/src/components/LocalCatalogStatusPanel.jsx'
       - '.github/workflows/carddex-key.yml'
 permissions:

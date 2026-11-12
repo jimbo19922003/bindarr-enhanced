@@ -82,8 +82,40 @@ const isVintageSet = (setId) => {
 // and means none of them can pass a currency that disagrees with the row. The
 // same number in a different currency is a new point: it starts the new series
 // the readers in routes/stats.js filter to.
+const FINISH_COLUMNS = {
+  Normal: 'price_normal',
+  Holofoil: 'price_holofoil',
+  'Reverse Holofoil': 'price_reverse_holofoil',
+  '1st Edition': 'price_1st_edition',
+};
+
+// Snapshot each printing's own price column off the card_cache row, one point
+// per finish that moved. Unlike price_trend this runs for every source,
+// CardDex included: CardDex history only covers its base finish, so the other
+// columns have no series anywhere else.
+async function recordFinishPrices(cardId) {
+  if (!cardId) return 0;
+  const db = require('../db');
+  const card = await db.get(`SELECT price_currency, ${Object.values(FINISH_COLUMNS).join(', ')} FROM card_cache WHERE id = ?`, [cardId]);
+  if (!card) return 0;
+  const currency = card.price_currency || 'USD';
+  let written = 0;
+  for (const [finish, column] of Object.entries(FINISH_COLUMNS)) {
+    const price = Number(card[column]);
+    if (!(price > 0) || !Number.isFinite(price)) continue;
+    const last = await db.get(`SELECT price, currency FROM price_history_finish WHERE card_id = ? AND finish = ? ORDER BY recorded_at DESC LIMIT 1`, [cardId, finish]);
+    if (last && last.price === price && (last.currency || currency) === currency) continue;
+    const res = await db.run(`INSERT OR IGNORE INTO price_history_finish (card_id, finish, price, currency, recorded_at)
+      VALUES (?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'))`, [cardId, finish, price, currency]);
+    written += res?.changes || 0;
+  }
+  return written;
+}
+
 async function recordPrice(cardId, price) {
-  if (!cardId || !(price > 0)) return false;
+  if (!cardId) return false;
+  try { await recordFinishPrices(cardId); } catch (error) { console.warn(`Could not record printing prices for ${cardId}: ${error.message}`); }
+  if (!(price > 0)) return false;
   const db = require('../db');
   const card = await db.get(`SELECT price_currency, price_source, price_trend FROM card_cache WHERE id = ?`, [cardId]);
   // CardDex history is read from its own endpoint rather than accumulated as
@@ -219,6 +251,8 @@ module.exports = {
   DEFAULT_PRICE_REFRESH_DAYS,
   PRICE_SWEEP_INTERVAL_MS,
   resolveCardPrice,
+  recordFinishPrices,
+  FINISH_COLUMNS,
   parseCardRow,
   rebalanceCompartmentPositions,
   isVintageSet,

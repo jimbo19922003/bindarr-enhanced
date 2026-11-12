@@ -167,6 +167,7 @@ function normalizeCard(card) {
     game: 'pokemon', language: languages.toName(code), cmc: null, color_identity: [],
     ...extractPrices(card.prices, code),
     tcgplayer_product_id: card.tcgplayer_id || null,
+    illustrator: card.artist_name || null,
     tcgplayer_url: card.tcgplayer_id ? `https://www.tcgplayer.com/product/${card.tcgplayer_id}` : null,
     cardmarket_url: card.cardmarket_id ? `https://www.cardmarket.com/en/Pokemon/Products?idProduct=${card.cardmarket_id}` : null,
   };

@@ -1,6 +1,3 @@
-// sale-adjustments-v1
-// sales-ui-v1
-// sales-inventory-protection-v1
 'use strict';
 const { calculateSale } = require('./costBasis');
 const schema = `

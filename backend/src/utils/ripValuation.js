@@ -17,10 +17,13 @@ async function cardForPull(userId, pull) {
   return card ? { ...card, printing: 'Normal' } : null;
 }
 
-async function applyPullPrice(pull, card, currency, { exactPrinting = false } = {}) {
-  if (exactPrinting) {
-    const field = { Normal: 'price_normal', Holofoil: 'price_holofoil', 'Reverse Holofoil': 'price_reverse_holofoil', '1st Edition': 'price_1st_edition' }[card?.printing];
-    const price = field && Number(card?.[field]);
+// byPrinting values the pull the way the collection values the copy: the
+// printing's own quote when the provider has one, otherwise the card's general
+// market price as an estimate (resolveCardPrice). The rip form labels which one
+// the user will get and lets them override it per line.
+async function applyPullPrice(pull, card, currency, { byPrinting = false } = {}) {
+  if (byPrinting) {
+    const price = card ? Number(resolveCardPrice(card)) : 0;
     if (!pull.currentBlank || !(price > 0) || !Number.isFinite(price)) return false;
     pull.currentUnit = Math.round((await createReportingValuation(currency).money(price, card.price_currency)) * 100);
     pull.currentBlank = false;
@@ -47,7 +50,7 @@ async function repairUnpricedPulls(userId, openingIds) {
   for (const row of rows) {
     const card = await cardForPull(userId, row);
     const pull = { currentBlank: true };
-    if (!(await applyPullPrice(pull, card, row.currency, { exactPrinting: true }))) continue;
+    if (!(await applyPullPrice(pull, card, row.currency, { byPrinting: true }))) continue;
     const result = await db.run(`UPDATE sealed_pull SET current_unit_cents = ?, updated_at = datetime('now')
       WHERE id = ? AND user_id = ? AND current_unit_cents IS NULL AND current_line_cents IS NULL`,
     [pull.currentUnit, row.id, userId]);

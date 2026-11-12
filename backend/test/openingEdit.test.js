@@ -7,11 +7,11 @@ require('../src/utils/currencyConversion').convertCents = async (amount, from, t
 async function main() {
   await db.initDb(); const admin = await db.get("SELECT id FROM users WHERE username = 'admin'");
   await db.run(`INSERT INTO card_cache (id, name, game, language, price_trend, price_normal, price_currency) VALUES ('tcgdex-en-edit', 'Test card', 'pokemon', 'English', 10, 10, 'USD'), ('tcgdex-en-edit-eur', 'Euro card', 'pokemon', 'English', 5, 5, 'EUR'), ('tcgdex-en-edit-fail', 'Rollback card', 'pokemon', 'English', 5, 5, 'USD')`);
-  const app = require('express')(); app.use(require('express').json()); app.use((req, _res, next) => { req.user = { id: admin.id }; next(); });
+  const app = require('express')(); app.use(require('express').json()); app.use((req, _res, next) => { req.user = { id: Number(req.headers['x-test-user'] || admin.id) }; next(); });
   app.use('/api', require('../src/routes/sealed')); app.use('/api', require('../src/routes/sealedOpenings'));
   const server = http.createServer(app); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const send = async (method, url, body) => { const response = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: response.status, body: await response.json() }; };
+  const send = async (method, url, body, userId = admin.id) => { const response = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json', 'x-test-user': String(userId) }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: response.status, body: await response.json() }; };
   const count = async () => (await db.get('SELECT COUNT(*) AS n FROM collection WHERE user_id = ?', [admin.id])).n;
   const bodyFor = (opening, id) => ({ request_id: id, base: opening, opened_at: opening.opened_at, notes: opening.notes, entry_complete: opening.entry_complete, pulls: opening.pulls.map(pull => ({ id: pull.id, card_id: pull.card_id, name: pull.name, quantity: pull.quantity, ...(pull.line_value != null ? { line_value: pull.line_value } : pull.current_value != null ? { current_value: pull.current_value } : {}) })) });
   try {
@@ -23,6 +23,20 @@ async function main() {
     for (let i = 0; i < 20; i++) filed.push((await db.run(`INSERT INTO collection (user_id, card_id, quantity, purchase_price, game, list_type) VALUES (?, 'tcgdex-en-edit', 1, 0, 'pokemon', 'collection')`, [admin.id])).lastID);
     await db.run(`INSERT INTO sealed_pull (user_id, opening_id, card_id, collection_id, name, quantity, current_unit_cents, opened_unit_cents, filed_ids) VALUES (?, ?, 'tcgdex-en-edit', ?, 'Test card', 20, 1000, 1000, ?)`, [admin.id, inserted.lastID, filed[0], filed.join(',')]);
     await db.run('UPDATE sealed_lot SET remaining_quantity = 0, remaining_cost_cents = 0 WHERE id = ?', [lotId]);
+    const other = await db.run("INSERT INTO users (username, password_hash, role, share_token) VALUES ('other-edit-user', 'x', 'member', ?)", [require('crypto').randomBytes(32).toString('hex')]);
+    const outside = await db.run(`INSERT INTO collection (user_id, card_id, quantity, printing, game, list_type) VALUES (?, 'tcgdex-en-edit', 2, 'Reverse Holofoil', 'pokemon', 'collection')`, [admin.id]);
+    const wishlist = await db.run(`INSERT INTO collection (user_id, card_id, quantity, printing, game, list_type) VALUES (?, 'tcgdex-en-edit', 1, 'Holofoil', 'pokemon', 'wishlist')`, [admin.id]);
+    await db.run(`INSERT INTO collection (user_id, card_id, quantity, printing, game, list_type) VALUES (?, 'tcgdex-en-edit', 1, 'Holofoil', 'pokemon', 'collection')`, [other.lastID]);
+    const ownership = await send('POST', '/api/sealed/rip-ownership', { card_ids: ['tcgdex-en-edit', 'tcgdex-en-edit-eur'] });
+    assert.strictEqual(ownership.status, 200);
+    assert.strictEqual(ownership.body.counts['tcgdex-en-edit'], 22);
+    assert.deepStrictEqual(ownership.body.printings['tcgdex-en-edit'].sort(), ['Normal', 'Reverse Holofoil']);
+    assert.deepStrictEqual(ownership.body.printings['tcgdex-en-edit-eur'], []);
+    const editingOwnership = await send('POST', '/api/sealed/rip-ownership', { card_ids: ['tcgdex-en-edit'], opening_id: inserted.lastID });
+    assert.strictEqual(editingOwnership.body.counts['tcgdex-en-edit'], 2);
+    assert.deepStrictEqual(editingOwnership.body.printings['tcgdex-en-edit'], ['Reverse Holofoil']);
+    assert.strictEqual((await send('POST', '/api/sealed/rip-ownership', { card_ids: ['tcgdex-en-edit'], opening_id: inserted.lastID }, other.lastID)).status, 404);
+    await db.run('DELETE FROM collection WHERE id IN (?, ?)', [outside.lastID, wishlist.lastID]);
     const original = await send('GET', `/api/sealed/openings/${inserted.lastID}`);
     assert.strictEqual(original.status, 200); assert.strictEqual(await count(), 20);
     const opening = original.body.opening, url = `/api/sealed/openings/${opening.id}/edit`;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useSyncExternalStore } from 'react';
-import { Search, Trash2, Edit2, LayoutGrid, List, SlidersHorizontal, X, MousePointerClick } from 'lucide-react';
+import { Search, Trash2, Edit2, LayoutGrid, List, SlidersHorizontal, X, MousePointerClick, Plus, EyeOff, Heart } from 'lucide-react';
 import { getCardDisplayName, translateJapaneseName } from '../utils/langHelper';
 import { priceText, reportingTotal, reportingTotalText, subscribeCurrency, currencyRevision } from '../utils/formatPrice';
 import { CONDITIONS, PRINTINGS, GRADERS, getLanguageNamesForGame, getLanguagesForGame } from '../utils/cardOptions';
@@ -7,11 +7,15 @@ import { getPrintingBadgeLabel, getPrintingBadgeStyle, getFoilOverlayClass } fro
 import { getCardRarityBorder, getRarityBadgeLabel, getRarityBadgeStyle } from '../utils/cardRarity';
 import { sortCardsByOrder } from '../utils/cardSort';
 import { sortCardsBySetNumber } from '../utils/setCardOrder';
+import { inspectorCardForSetCard } from '../utils/setCardEntries';
 import { useMultiSelect } from '../utils/useMultiSelect';
 import { defaultGameFilter, gameOptions, GAMES, isGameEnabled, showGamePicker } from '../utils/games';
 import { langCode } from '../utils/languages';
+import { preferredPrinting } from '../utils/availablePrintings';
 import { useT } from '../utils/i18n';
 import CardInspectorModal from './CardInspectorModal';
+import QuickAddDrawer from './QuickAddDrawer';
+import CustomSetEditor from './CustomSetEditor';
 import AddToDeckSelect from './AddToDeckSelect';
 import PackPriceSplitter from './PackPriceSplitter';
 import CardImage from './CardImage';
@@ -45,6 +49,9 @@ const SORT_CRITERIA = {
   'favorite-first': [{ by: 'favorite', dir: 'desc' }, { by: 'added_at', dir: 'desc' }],
 };
 const setKey = (set) => `${set.game || 'pokemon'}:${set.id}`;
+const CUSTOM_PREFIX = 'custom:';
+const WISHLIST_CHUNK = 25;
+const slotKey = (card) => `${card.id}|${card.slot_printing || ''}`;
 
 // Small labelled field wrapper to keep the filter grid uniform.
 function Field({ label, children }) {
@@ -70,6 +77,13 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   const [setCards, setSetCards] = useState([]);
   const [setCardsLoading, setSetCardsLoading] = useState(false);
   const [setCardsError, setSetCardsError] = useState('');
+  const [customSets, setCustomSets] = useState([]);
+  const [customSetData, setCustomSetData] = useState(null);
+  const [customRevision, setCustomRevision] = useState(0);
+  // undefined = closed, null = new set, object = editing that set
+  const [editingCustomSet, setEditingCustomSet] = useState(undefined);
+  const [addCard, setAddCard] = useState(null);
+  const [wishlistProgress, setWishlistProgress] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -111,6 +125,10 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   const [notCheckedOutOnly, setNotCheckedOutOnly] = useState(false);
   const [duplicatesOnly, setDuplicatesOnly] = useState(false);
   const [missingArtworkOnly, setMissingArtworkOnly] = useState(false);
+  const selectedCustomId = selectedSetKey.startsWith(CUSTOM_PREFIX)
+    ? Number(selectedSetKey.slice(CUSTOM_PREFIX.length))
+    : null;
+  const selectedCustomSet = customSets.find(set => set.id === selectedCustomId) || null;
   const selectedSet = useMemo(
     () => availableSets.find(set => setKey(set) === selectedSetKey) || null,
     [availableSets, selectedSetKey]
@@ -128,7 +146,8 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   } = useMultiSelect({ showToast, onChanged: () => { onUpdate(); fetchCollection(); } });
 
   useEffect(() => {
-    if (subTab !== 'sets') fetchCollection();
+    // The Sets tab needs the collection too: owned tiles open these entries.
+    fetchCollection();
     fetchLocations();
     fetchSets();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,6 +260,45 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
     return () => { active = false; };
   }, [selectedSet, setViewLanguage, statsTrigger, subTab, t]);
 
+  useEffect(() => {
+    if (subTab !== 'sets') return undefined;
+    let active = true;
+    fetch(`/api/custom-sets?${new URLSearchParams({ game: setViewGame })}`)
+      .then(r => (r.ok ? r.json() : []))
+      .then(rows => { if (active) setCustomSets(Array.isArray(rows) ? rows : []); })
+      .catch(err => console.error('Error fetching custom sets:', err));
+    return () => { active = false; };
+  }, [setViewGame, subTab, customRevision]);
+
+  useEffect(() => {
+    if (subTab !== 'sets' || !selectedCustomId) {
+      setCustomSetData(null);
+      return undefined;
+    }
+    let active = true;
+    const fetchCustomSetCards = async () => {
+      setSetCardsLoading(true);
+      setSetCardsError('');
+      try {
+        const query = new URLSearchParams({ lang: langCode(setViewLanguage) });
+        const response = await fetch(`/api/custom-sets/${selectedCustomId}/cards?${query}`);
+        if (!response.ok) throw new Error(t('collection.setCardsError'));
+        const data = await response.json();
+        if (active) setCustomSetData(data);
+      } catch (error) {
+        console.error('Error fetching custom set cards:', error);
+        if (active) {
+          setCustomSetData(null);
+          setSetCardsError(t('collection.setCardsError'));
+        }
+      } finally {
+        if (active) setSetCardsLoading(false);
+      }
+    };
+    fetchCustomSetCards();
+    return () => { active = false; };
+  }, [selectedCustomId, setViewLanguage, statsTrigger, subTab, customRevision, t]);
+
   const handleDelete = async (entryId, cardName) => {
     if (!window.confirm(t('collection.confirmDeleteCard', { name: cardName }))) {
       return;
@@ -274,6 +332,90 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
     if (longPressFired.current) { longPressFired.current = false; return; }
     if (selectMode) selectAt(item.entry_id, displayCards.map(i => i.entry_id), event?.shiftKey);
     else { setInspectorCard(item); setInspectorStartEdit(false); }
+  };
+
+  const openSetCard = (card) => {
+    const target = inspectorCardForSetCard(card, collection);
+    if (!target) return;
+    setInspectorCard(target);
+    setInspectorStartEdit(false);
+  };
+
+  const activateSetCard = (card) => {
+    if (card.owned) openSetCard(card);
+    else setAddCard(card);
+  };
+
+  // Wishlist rows use the slot's printing in per-printing custom sets, otherwise
+  // the card's usual printing. Sent in chunks so progress can be shown and one
+  // request never carries a whole set.
+  const addToWishlist = async (cards) => {
+    if (!cards.length || wishlistProgress) return;
+    const groups = new Map();
+    for (const card of cards) {
+      const printing = card.slot_printing || preferredPrinting(card);
+      const language = card.language || setViewLanguage;
+      const key = `${printing}|${language}`;
+      if (!groups.has(key)) groups.set(key, { printing, language, ids: [] });
+      const group = groups.get(key);
+      if (!group.ids.includes(card.id)) group.ids.push(card.id);
+    }
+    const total = [...groups.values()].reduce((sum, group) => sum + group.ids.length, 0);
+    let added = 0;
+    let failed = 0;
+    setWishlistProgress({ done: 0, total });
+    try {
+      for (const { printing, language, ids } of groups.values()) {
+        for (let i = 0; i < ids.length; i += WISHLIST_CHUNK) {
+          const chunk = ids.slice(i, i + WISHLIST_CHUNK);
+          try {
+            const res = await fetch('/api/collection/bulk-add', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ card_ids: chunk, list_type: 'wishlist', printing, language, quantity: 1, condition: 'Near Mint', purchase_price: null }),
+            });
+            const body = await res.json().catch(() => ({}));
+            const ok = Number(body.added) || 0;
+            added += ok;
+            failed += chunk.length - ok;
+          } catch (err) {
+            console.error('Wishlist add failed:', err);
+            failed += chunk.length;
+          }
+          setWishlistProgress({ done: added + failed, total });
+        }
+      }
+    } finally {
+      setWishlistProgress(null);
+    }
+    showToast(failed
+      ? t('customSet.wishlistPartial', { added, failed })
+      : t('customSet.wishlistAdded', { count: added }));
+    if (added) onUpdate();
+  };
+
+  const addMissingToWishlist = () => {
+    const missing = orderedSetCards.filter(card => !card.owned && !card.wishlisted);
+    if (!missing.length) return;
+    if (!window.confirm(t('customSet.wishlistConfirm', { count: missing.length }))) return;
+    addToWishlist(missing);
+  };
+
+  const excludeFromCustomSet = async (card) => {
+    if (!selectedCustomId) return;
+    try {
+      const res = await fetch(`/api/custom-sets/${selectedCustomId}/cards/${encodeURIComponent(card.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'exclude' }),
+      });
+      if (!res.ok) throw new Error('exclude failed');
+      showToast(t('customSet.excluded', { name: card.name }));
+      setCustomRevision(r => r + 1);
+    } catch (err) {
+      console.error(err);
+      showToast(t('customSet.errSave'));
+    }
   };
 
   const handleViewStorage = (card) => {
@@ -406,10 +548,13 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
       if (stackByCondition) key += `-${item.condition}`;
       if (stackByPrinting) key += `-${item.printing}`;
 
+      // stack_entries keeps the real rows so the inspector can pick which
+      // print/copy to edit or sell instead of always the first one.
       if (!groups[key]) {
-        groups[key] = { ...item };
+        groups[key] = { ...item, stack_entries: [item] };
       } else {
         groups[key].quantity += item.quantity;
+        groups[key].stack_entries.push(item);
       }
     });
     return Object.values(groups);
@@ -425,11 +570,14 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [displayCards, fxRevision]
   );
+  // Custom sets come back ordered (and split per printing) by the server.
   const orderedSetCards = useMemo(
-    () => sortCardsBySetNumber(setCards),
-    [setCards]
+    () => (selectedCustomId ? customSetData?.cards || [] : sortCardsBySetNumber(setCards)),
+    [selectedCustomId, customSetData, setCards]
   );
+  const hasSetSelection = Boolean(selectedSet || selectedCustomSet);
   const ownedSetCardCount = orderedSetCards.filter(card => card.owned).length;
+  const wishableSetCardCount = orderedSetCards.filter(card => !card.owned && !card.wishlisted).length;
   const setProgressPercent = orderedSetCards.length
     ? Math.round(ownedSetCardCount / orderedSetCards.length * 100)
     : 0;
@@ -499,8 +647,8 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
       {subTab === 'sets' ? (
         <div>
           <div className="glass-panel" style={{ marginBottom: '1.25rem', padding: '1rem 1.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-              <h3 className="chart-title" style={{ margin: 0 }}>{t('collection.setViewTitle')}</h3>
+            <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <h3 className="chart-title" style={{ margin: 0, flexBasis: '100%' }}>{t('collection.setViewTitle')}</h3>
               <Field label={t('catalog.thGame')}>
                 <select
                   className="select-control"
@@ -521,7 +669,8 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                   value={setViewLanguage}
                   onChange={(event) => {
                     setSetViewLanguage(event.target.value);
-                    setSelectedSetKey('');
+                    // Custom sets span every set, so they survive a language change.
+                    setSelectedSetKey(key => (key.startsWith(CUSTOM_PREFIX) ? key : ''));
                   }}
                   aria-label={t('card.language')}
                 >
@@ -530,6 +679,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                   ))}
                 </select>
               </Field>
+              <Field label={t('collection.setPicker')}>
               <select
                 className="select-control"
                 value={selectedSetKey}
@@ -538,19 +688,51 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                 style={{ minWidth: 'min(100%, 18rem)' }}
               >
                 <option value="">{t('collection.selectSet')}</option>
-                {availableSets.map(set => (
-                  <option key={setKey(set)} value={setKey(set)}>{set.name}</option>
-                ))}
+                {customSets.length > 0 && (
+                  <optgroup label={t('customSet.group')}>
+                    {customSets.map(set => (
+                      <option key={`custom-${set.id}`} value={`${CUSTOM_PREFIX}${set.id}`}>{set.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label={t('customSet.standardGroup')}>
+                  {availableSets.map(set => (
+                    <option key={setKey(set)} value={setKey(set)}>{set.name}</option>
+                  ))}
+                </optgroup>
               </select>
+              </Field>
+              {selectedCustomSet && (
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingCustomSet(selectedCustomSet)}>
+                  <Edit2 size={14} /> {t('customSet.edit')}
+                </button>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={() => setEditingCustomSet(null)}>
+                <Plus size={14} /> {t('customSet.new')}
+              </button>
+              {hasSetSelection && !setCardsLoading && wishableSetCardCount > 0 && (
+                <button type="button" className="btn btn-secondary" onClick={addMissingToWishlist} disabled={Boolean(wishlistProgress)}>
+                  <Heart size={14} />
+                  {wishlistProgress
+                    ? t('customSet.wishlistProgress', { done: wishlistProgress.done, total: wishlistProgress.total })
+                    : t('customSet.wishlistMissing', { count: wishableSetCardCount })}
+                </button>
+              )}
             </div>
-            {selectedSet && !setCardsLoading && !setCardsError && orderedSetCards.length > 0 && (
+            {hasSetSelection && !setCardsLoading && !setCardsError && orderedSetCards.length > 0 && (
               <p style={{ margin: '0.85rem 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                {t('collection.setProgressSummary', {
+                {t(selectedCustomSet?.completion_mode === 'printing' ? 'customSet.printingProgressSummary' : 'collection.setProgressSummary', {
                   owned: ownedSetCardCount,
                   total: orderedSetCards.length,
                   percent: setProgressPercent,
                 })}
               </p>
+            )}
+            {selectedCustomSet && customSetData?.truncated && (
+              <p role="status" style={{ margin: '0.5rem 0 0', color: 'var(--accent-yellow)', fontSize: '0.8rem' }}>{t('customSet.truncated')}</p>
+            )}
+            {hasSetSelection && !setCardsLoading && orderedSetCards.length > 0 && (
+              <p style={{ margin: '0.35rem 0 0', color: 'var(--text-muted)', fontSize: '0.75rem' }}>{t('customSet.tileHint')}</p>
             )}
           </div>
 
@@ -560,24 +742,61 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
             <div className="glass-panel" role="alert" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
               {setCardsError}
             </div>
-          ) : !selectedSet ? (
+          ) : !hasSetSelection ? (
             <div className="glass-panel" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
               {t('collection.selectSet')}
             </div>
           ) : orderedSetCards.length === 0 ? (
             <div className="glass-panel" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
-              {t('collection.noSetCards')}
+              {selectedCustomSet ? t('customSet.empty') : t('collection.noSetCards')}
             </div>
           ) : (
             <div className="card-grid">
               {orderedSetCards.map(card => (
                 <div
-                  key={card.id}
+                  key={slotKey(card)}
                   className="tcg-card"
-                  style={{ opacity: card.owned ? 1 : 0.32, filter: card.owned ? undefined : 'grayscale(1)' }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${card.name} #${card.number}${card.slot_printing ? ` · ${card.slot_printing}` : ''} — ${t(card.owned ? 'collection.setCardOwned' : 'customSet.addThisCard')}`}
+                  onClick={() => activateSetCard(card)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      activateSetCard(card);
+                    }
+                  }}
+                  title={card.owned ? undefined : t('customSet.addThisCard')}
+                  style={{ opacity: card.owned ? 1 : card.wishlisted ? 0.7 : 0.45, filter: card.owned ? undefined : card.wishlisted ? 'grayscale(0.5)' : 'grayscale(1)', cursor: 'pointer' }}
                 >
                   <div className="tcg-card-inner">
                     <CardImage card={card} className="tcg-card-image" loading="lazy" draggable={false} />
+                    {!card.owned && !card.wishlisted && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-icon-only"
+                        onClick={(event) => { event.stopPropagation(); addToWishlist([card]); }}
+                        disabled={Boolean(wishlistProgress)}
+                        title={t('customSet.wishlistOne')}
+                        aria-label={`${t('customSet.wishlistOne')}: ${card.name}`}
+                        style={{ position: 'absolute', bottom: '4px', right: '4px', zIndex: 11, width: '24px', height: '24px', padding: 0 }}
+                      >
+                        <Heart size={12} />
+                      </button>
+                    )}
+                    {selectedCustomSet && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-icon-only"
+                        onClick={(event) => { event.stopPropagation(); excludeFromCustomSet(card); }}
+                        title={t('customSet.exclude')}
+                        aria-label={`${t('customSet.exclude')}: ${card.name}`}
+                        style={{ position: 'absolute', top: '4px', right: '4px', zIndex: 11, width: '24px', height: '24px', padding: 0 }}
+                      >
+                        <EyeOff size={12} />
+                      </button>
+                    )}
                     <span style={{
                       position: 'absolute',
                       top: '6px',
@@ -588,15 +807,17 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                       fontSize: '0.6rem',
                       fontWeight: 800,
                       color: 'var(--text-strong)',
-                      background: card.owned ? 'var(--accent-green, var(--accent-blue))' : 'var(--bg-secondary)',
+                      background: card.owned ? 'var(--accent-green, var(--accent-blue))' : card.wishlisted ? 'var(--accent-red)' : 'var(--bg-secondary)',
                     }}>
-                      {t(card.owned ? 'collection.setCardOwned' : 'collection.setCardMissing')}
+                      {t(card.owned ? 'collection.setCardOwned' : card.wishlisted ? 'customSet.wishlisted' : 'collection.setCardMissing')}
                     </span>
                   </div>
                   <div className="tcg-card-info">
                     <div className="tcg-card-name">{getCardDisplayName(card.name, card.language, card.printed_name)}</div>
                     <div className="tcg-card-meta">
                       <span>#{card.number}</span>
+                      {selectedCustomSet && card.set_name && <span>{card.set_name}</span>}
+                      {card.slot_printing && <span>{card.slot_printing}</span>}
                     </div>
                   </div>
                 </div>
@@ -1123,6 +1344,39 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
         showToast={showToast}
         onViewStorage={handleViewStorage}
       />
+
+      <QuickAddDrawer
+        card={addCard}
+        game={addCard?.game || setViewGame}
+        defaults={{ printing: addCard?.slot_printing || undefined, language: addCard?.language || setViewLanguage }}
+        onClose={() => setAddCard(null)}
+        onAdded={() => onUpdate()}
+        showToast={showToast}
+      />
+
+      {editingCustomSet !== undefined && (
+        <CustomSetEditor
+          key={editingCustomSet?.id ?? 'new'}
+          set={editingCustomSet}
+          game={setViewGame}
+          language={setViewLanguage}
+          availableSets={availableSets}
+          excluded={editingCustomSet && editingCustomSet.id === selectedCustomId ? customSetData?.excluded || [] : []}
+          onClose={() => setEditingCustomSet(undefined)}
+          onSaved={(saved) => {
+            setEditingCustomSet(undefined);
+            setCustomRevision(r => r + 1);
+            setSelectedSetKey(`${CUSTOM_PREFIX}${saved.id}`);
+          }}
+          onDeleted={() => {
+            setEditingCustomSet(undefined);
+            setSelectedSetKey('');
+            setCustomRevision(r => r + 1);
+          }}
+          onChanged={() => setCustomRevision(r => r + 1)}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 }

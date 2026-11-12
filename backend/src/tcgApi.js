@@ -128,6 +128,7 @@ function formatCard(c) {
     set_id: c.set ? c.set.id : '',
     set_name: c.set ? c.set.name : '',
     number: c.number,
+    illustrator: c.artist || null,
     image_url: c.images ? (c.images.small || c.images.large) : '',
     price_trend: extractPrice(c),
     price_normal: detailed.normal,

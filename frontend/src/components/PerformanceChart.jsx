@@ -1,5 +1,3 @@
-// dashboard-accounting-v1
-// sale-aware-timeline-v1
 import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';

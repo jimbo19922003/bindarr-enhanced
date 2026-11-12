@@ -1,6 +1,11 @@
 const quantity = pull => Number.isSafeInteger(Number(pull.quantity)) && Number(pull.quantity) > 0 ? Number(pull.quantity) : 0;
 const ownedCount = (counts, id) => Number.isSafeInteger(counts[id]) && counts[id] >= 0 ? counts[id] : null;
 const order = pull => pull.id ? Number(pull.id) : Number(pull.added_order ?? String(pull.key).replace(/^new-/, '')) || 0;
+const finishRank = { Normal: 0, 'Reverse Holofoil': 1, Holofoil: 2 };
+export function isBinderUpgrade(printing, ownedPrintings) {
+  if (!Object.hasOwn(finishRank, printing) || !Array.isArray(ownedPrintings) || !ownedPrintings.length) return false;
+  return ownedPrintings.every(owned => Object.hasOwn(finishRank, owned) && finishRank[owned] < finishRank[printing]);
+}
 export function draftOwnership(pulls, counts, editing = false) {
   const result = {}, earlier = new Map();
   const sorted = pulls.filter(pull => pull.card_id && !pull.bulk).slice().sort((a, b) => Number(!a.id) - Number(!b.id) || order(a) - order(b));

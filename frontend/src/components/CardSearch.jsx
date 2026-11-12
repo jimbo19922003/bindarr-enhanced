@@ -1,15 +1,11 @@
-// zero-cost-confirmation-v1
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, X, ShieldAlert, Check, MousePointerClick, Zap, Undo2, Maximize2 } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import { Search, Plus, ShieldAlert, Check, MousePointerClick, Zap, Undo2 } from 'lucide-react';
 import { priceText } from '../utils/formatPrice';
-import CardEntryFields from './CardEntryFields';
-import CardImageZoom from './CardImageZoom';
-import { translateJapaneseName, POKEMON_EN_TO_JP, getCardDisplayName } from '../utils/langHelper';
+import QuickAddDrawer from './QuickAddDrawer';
+import { translateJapaneseName, POKEMON_EN_TO_JP } from '../utils/langHelper';
 import { useMultiSelect } from '../utils/useMultiSelect';
 import { CONDITIONS, PRINTINGS } from '../utils/cardOptions';
-import { preferredPrinting, exactPrintingPrice } from '../utils/availablePrintings';
-import { langName, isEnglish, displayName, translatedName, setReference, setCode, getLanguagesForGame, isLanguageSupported } from '../utils/languages';
+import { langName, isEnglish, displayName, translatedName, setReference, getLanguagesForGame, isLanguageSupported } from '../utils/languages';
 import { defaultGame, gameOptions, showGamePicker, gameLabel } from '../utils/games';
 import CardImage from './CardImage';
 import { useT } from '../utils/i18n';
@@ -75,10 +71,6 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
 
   // Drawer states
   const [selectedCard, setSelectedCard] = useState(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [languageLoading, setLanguageLoading] = useState(false);
-  const languageRequest = useRef(0);
-  const [isFullScreen, setIsFullScreen] = useState(false);
   const [, setLocations] = useState([]);
   
   // Form states
@@ -87,9 +79,6 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
   const [printing, setPrinting] = useState('Normal');
   const [language, setLanguage] = useState('English');
   const [purchasePrice, setPurchasePrice] = useState(0);
-  const [grader, setGrader] = useState('Raw');
-  const [grade, setGrade] = useState('');
-  const [certNumber, setCertNumber] = useState('');
   const [, setLocationId] = useState('');
 
   // Fetch physical locations on mount for the form dropdown
@@ -429,29 +418,6 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
     }
   };
 
-  const handleLanguageChange = async (newLang) => {
-    if (!selectedCard) return;
-    const ticket = ++languageRequest.current;
-    setLanguageLoading(true);
-    try {
-      const targetGame = selectedCard.game || game;
-      const resp = await fetch(`/api/cards/${encodeURIComponent(selectedCard.id)}/printing?lang=${encodeURIComponent(newLang)}&game=${encodeURIComponent(targetGame)}`);
-      if (!resp.ok) throw new Error('Could not load the selected language');
-      const localized = await resp.json();
-      if (!localized?.id) throw new Error('Could not load the selected language');
-      if (ticket !== languageRequest.current) return;
-      const next = { ...selectedCard, ...localized, available_printings: localized.available_printings ?? null, language: newLang };
-      setSelectedCard(next);
-      setLanguage(newLang);
-      setPrinting(previous => preferredPrinting(next, previous));
-    } catch (e) {
-      console.warn('Could not switch to localized printing:', e);
-      if (ticket === languageRequest.current) showToast(e.message);
-    } finally {
-      if (ticket === languageRequest.current) setLanguageLoading(false);
-    }
-  };
-
   const handleGameChange = (newGame) => {
     setGame(newGame);
     if (!isLanguageSupported(newGame, searchLang)) {
@@ -461,84 +427,18 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
   };
 
   const openQuickAdd = (card) => {
-    languageRequest.current++;
-    setLanguageLoading(false);
     setSelectedCard(card);
-    setPurchasePrice(0); // Default to 0 purchase spend
-    // The card itself knows which printing it is, so the copy is recorded in that
-    // language rather than defaulting to English and needing a manual correction.
-    setLanguage(card.language || langName(searchLang));
-    setPrinting(preferredPrinting(card));
-
-    setIsDrawerOpen(true);
   };
 
+  // Closing resets the shared add fields, as it did before the drawer was split
+  // out: the next search starts from defaults, in the searched language.
   const closeDrawer = () => {
-    languageRequest.current++;
-    setLanguageLoading(false);
-    setIsDrawerOpen(false);
-    setIsFullScreen(false);
     setSelectedCard(null);
     setQuantity(1);
     setCondition('Near Mint');
     setPrinting('Normal');
-    // Back to the searched language, not hard-coded English: someone adding a run
-    // of Japanese cards should not have to re-pick it for every card.
     setLanguage(langName(searchLang));
     setPurchasePrice(0);
-    setGrader('Raw');
-    setGrade('');
-    setCertNumber('');
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedCard || languageLoading) return;
-
-    try {
-      const response = await fetch('/api/collection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          card_id: selectedCard.id,
-          quantity: parseInt(quantity, 10),
-          condition,
-          printing,
-          language,
-          purchase_price: purchasePrice === '' ? null : Number(purchasePrice),
-          location_id: null,
-          grader,
-          grade: grade === '' ? null : parseFloat(grade),
-          cert_number: certNumber.trim() || null
-        })
-      });
-
-      if (response.ok) {
-        showToast(t('search.addedToCollection', { name: displayName(selectedCard) }));
-        
-        // Trigger confetti for rare/valuable cards!
-        const rarity = (selectedCard.rarity || '').toLowerCase();
-        const price = selectedCard.price_trend || 0;
-        if (rarity.includes('holo') || rarity.includes('secret') || rarity.includes('ultra') || price > 10) {
-          confetti({
-            particleCount: 150,
-            spread: 80,
-            origin: { y: 0.6 }
-          });
-        }
-
-        onAddSuccess(); // Update stats
-        closeDrawer();
-      } else {
-        // A rejected cert number (already in the collection) explains itself; the
-        // generic message would send the user back to re-type a correct number.
-        const body = await response.json().catch(() => null);
-        showToast(body?.error || t('search.errAddDb'));
-      }
-    } catch (err) {
-      console.error(err);
-      showToast(t('search.errSave'));
-    }
   };
 
   // Helper to determine location type layout guidance
@@ -944,81 +844,14 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
         </div>
       )}
 
-      {/* Drawer Dialog Backdrop */}
-      <div className={`drawer-backdrop ${isDrawerOpen ? 'open' : ''}`} onClick={closeDrawer}></div>
-
-      {/* Quick Add Drawer Sheet */}
-      <div className={`quick-add-drawer ${isDrawerOpen ? 'open' : ''}`}>
-        {selectedCard && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
-              <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
-                <h3 style={{ color: 'var(--text-strong)', fontSize: '1.25rem', margin: 0, wordBreak: 'break-word' }}>{t('search.addCardTitle')}</h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0.25rem 0 0 0', wordBreak: 'break-word' }}>
-                  {getCardDisplayName(selectedCard.name, language, selectedCard.printed_name, selectedCard.game || game)}
-                  {translatedName(selectedCard) && <span style={{ color: 'var(--text-muted)' }}> ({translatedName(selectedCard)})</span>}
-                  {' '}({selectedCard.set_name}
-                  {/* Code only where the set name isn't readable to an English speaker. */}
-                  {!isEnglish(selectedCard.language) && setCode(selectedCard) ? ` / ${setCode(selectedCard)}` : ''}
-                  {' • '}#{selectedCard.number})
-                </p>
-              </div>
-              <button className="btn btn-secondary btn-icon-only" onClick={closeDrawer} style={{ borderRadius: '50%', flexShrink: 0 }}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)', width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
-              {/* Tap the art to enlarge, same as the collection inspector. */}
-              <div
-                onClick={() => setIsFullScreen(true)}
-                title={t('inspector.zoomHint')}
-                style={{ position: 'relative', flexShrink: 0, cursor: 'pointer', lineHeight: 0 }}
-              >
-                <CardImage card={selectedCard} style={{ width: '75px', aspectRatio: 0.718, objectFit: 'cover', borderRadius: 'var(--radius-sm)', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' }} />
-                <div style={{
-                  position: 'absolute', bottom: '4px', right: '4px',
-                  background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)',
-                  padding: '2px 4px', borderRadius: '4px', color: '#fff',
-                  display: 'flex', alignItems: 'center', pointerEvents: 'none',
-                  border: '1px solid rgba(255,255,255,0.15)'
-                }}>
-                  <Maximize2 size={11} />
-                </div>
-              </div>
-              <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('search.tcgMarketPrice', { printing })}</div>
-                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-yellow)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{exactPrintingPrice(selectedCard, printing) == null ? t('card.printingUnpriced') : priceText(exactPrintingPrice(selectedCard, printing), selectedCard.price_currency)}</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{t('search.rarityLabel')} <span style={{ color: 'var(--text-strong)', fontWeight: 600 }}>{selectedCard.rarity}</span></div>
-              </div>
-            </div>
-
-            <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
-              <CardEntryFields
-                quantity={quantity} purchasePrice={purchasePrice} condition={condition} printing={printing} language={language}
-                onQuantity={setQuantity} onPurchasePrice={setPurchasePrice} onCondition={setCondition} onPrinting={setPrinting} onLanguage={handleLanguageChange}
-                game={selectedCard?.game || game} card={selectedCard}
-                grader={grader} grade={grade} certNumber={certNumber}
-                onGrader={setGrader} onGrade={setGrade} onCertNumber={setCertNumber}
-              />
-
-              <div className="quick-add-footer" style={{ marginTop: '1.25rem', paddingTop: '1rem' }}>
-                <div className="quick-add-footer-actions">
-                  <button type="button" className="btn btn-secondary" onClick={closeDrawer}>{t('common.cancel')}</button>
-                  <button type="submit" className="btn btn-primary" disabled={languageLoading}>{t('search.addToCollection')}</button>
-                </div>
-              </div>
-            </form>
-          </div>
-        )}
-      </div>
-
-      {/* Outside the drawer on purpose: .quick-add-drawer is transformed, and a
-          transformed ancestor becomes the containing block for position:fixed,
-          which would trap this overlay inside the drawer instead of the page. */}
-      {isFullScreen && selectedCard && (
-        <CardImageZoom card={selectedCard} onClose={() => setIsFullScreen(false)} />
-      )}
+      <QuickAddDrawer
+        card={selectedCard}
+        game={game}
+        defaults={{ quantity, condition, language: langName(searchLang) }}
+        onClose={closeDrawer}
+        onAdded={() => onAddSuccess()}
+        showToast={showToast}
+      />
     </div>
   );
 }

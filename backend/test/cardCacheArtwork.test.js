@@ -21,3 +21,22 @@ test('partial lookup refreshes preserve artwork while explicit new artwork repla
  await cacheNormalizedCards([{...base,id:'tcgdex-en-base1-5',image_url:''}],'pokemon');
  assert.equal((await db.get('SELECT image_url FROM card_cache WHERE id=?',['tcgdex-en-base1-5'])).image_url,'');
 });
+
+test('illustrator is captured, preserved across briefs without one, and replaced by a new value',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'illustrator-cache-test-')),filename=path.join(root,'test.db');await fs.writeFile(filename,'');
+ const db=await openConnection(filename);t.after(async()=>{await db.close();await fs.rm(root,{recursive:true,force:true});});
+ const module={exports:{}};
+ vm.runInNewContext(await fs.readFile(path.join(__dirname,'../src/utils/cardCache.js'),'utf8'),{module,exports:module.exports,require:name=>{if(name!=='../db')throw new Error('Unexpected dependency');return db;}});
+ const {cacheNormalizedCards,CARD_CACHE_COLUMNS}=module.exports;
+ await db.exec('CREATE TABLE card_cache ('+CARD_CACHE_COLUMNS.map(name=>name==='id'?'id TEXT PRIMARY KEY':name+' TEXT').join(',')+',price_1st_edition REAL,last_updated TEXT)');
+ const base={id:'tcgdex-en-base1-58',name:'Pikachu',set_id:'base1',number:'58',language:'English'};
+ const read=async()=>(await db.get('SELECT illustrator FROM card_cache WHERE id=?',[base.id])).illustrator;
+ await cacheNormalizedCards([{...base,illustrator:'  Mitsuhiro Arita  '}],'pokemon');
+ assert.equal(await read(),'Mitsuhiro Arita');
+ for(const illustrator of [null,undefined,'','  ']){
+  await cacheNormalizedCards([{...base,illustrator}],'pokemon');
+  assert.equal(await read(),'Mitsuhiro Arita');
+ }
+ await cacheNormalizedCards([{...base,illustrator:['Ann','Bo']}],'mtg');
+ assert.equal(await read(),'Ann, Bo');
+});

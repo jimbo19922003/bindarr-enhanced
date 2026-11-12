@@ -1,4 +1,3 @@
-// sale-aware-timeline-v1
 'use strict';
 function mergeCurrent(rows, live, from, to) {
   const days = new Map(rows.map(row => [row.day, row]));

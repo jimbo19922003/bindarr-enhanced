@@ -8,7 +8,7 @@ const HOUR = 3600000;
 const DAY = 24 * HOUR;
 const MAX_CARDS_PER_RUN = 25;
 
-function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, recordPrice = async () => {}, now = Date.now, refreshDays = priceRefreshDays }) {
+function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, recordPrice = async () => {}, recordFinishPrices = async () => {}, now = Date.now, refreshDays = priceRefreshDays }) {
   let ready;
   const pending = new Map();
   function initialize() {
@@ -118,6 +118,7 @@ function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, rec
     }
     if (quote) {
       if (!await writeQuote(card, quote)) return { status: 'changed' };
+      try { await recordFinishPrices(card.id); } catch (error) { console.warn(`Could not record printing prices for ${card.id}: ${error.message}`); }
       await database.run(`UPDATE pokewallet_map SET status = 'skipped_priced', reason = 'existing_quote'
         WHERE card_id = ? AND status = 'currency_conflict'`, [card.id]);
       await database.run(`INSERT INTO carddex_price_attempt (card_id, attempted_at, next_attempt_at, status, provider_id, quote_at)
@@ -213,7 +214,21 @@ function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, rec
     }
     return { points: rows || [], status };
   }
-  return { refreshCard, sweep, initialize, history };
+  // The cached CardDex series for a currency, without fetching. Used when the
+  // card is now priced by another source (TCGCSV) so its chart keeps the
+  // history it already had instead of restarting at the switch.
+  async function cachedHistory(card) {
+    await initialize();
+    const source = card.price_currency === 'EUR' ? 'cardmarket' : card.price_currency === 'USD' ? 'tcgplayer' : null;
+    if (!source) return [];
+    const cached = await database.get(`SELECT body FROM carddex_history_cache WHERE card_id = ? AND source = ?`, [card.id, source]);
+    if (!cached) return [];
+    try {
+      const rows = JSON.parse(cached.body);
+      return Array.isArray(rows) ? rows.filter(row => Number(row?.price) > 0 && Number.isFinite(Date.parse(row?.recorded_at))) : [];
+    } catch { return []; }
+  }
+  return { refreshCard, sweep, initialize, history, cachedHistory };
 }
 
 let instance;
@@ -222,6 +237,7 @@ function getPokemonPrices() {
     const db = require('./db');
     const connect = () => require('./utils/salesRepository').openConnection(db.dbPath);
     instance = createPokemonPrices({ database: db, carddex: createCarddexArtworkClient({ connect }), tcgcsv: require('./tcgcsvApi'), recordPrice: require('./utils/priceHelpers').recordPrice,
+      recordFinishPrices: require('./utils/priceHelpers').recordFinishPrices,
       pokewallet: require('./pokewalletApi') });
   }
   return instance;

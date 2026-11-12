@@ -1,4 +1,3 @@
-// rip-unit-allocation-v1
 const {openingLineValue}=require('./openingWeights');
 'use strict';
 const {allocateOpeningCost}=require('./costBasis');

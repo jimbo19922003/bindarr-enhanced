@@ -1,4 +1,3 @@
-// sales-inventory-protection-v1
 'use strict';
 
 const express = require('express');

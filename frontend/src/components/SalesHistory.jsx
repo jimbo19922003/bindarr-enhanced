@@ -1,4 +1,3 @@
-// sale-adjustments-v1
 import {useEffect,useState} from 'react';
 import {Bar,BarChart,CartesianGrid,Legend,ResponsiveContainer,Tooltip,XAxis,YAxis} from 'recharts';
 import {getCurrency} from '../utils/formatPrice';

@@ -1,10 +1,10 @@
-// rip-unit-allocation-v1
 import OpeningBasisPanel from './OpeningBasisPanel';
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { langCode } from '../utils/languages';
-import { draftOwnership, candidateOwnership } from '../utils/ripOwnership';
-import { sameDraftCard, stackRipCard } from '../utils/ripStacking';
+import { draftOwnership, candidateOwnership, isBinderUpgrade } from '../utils/ripOwnership';
+import { canSplitRipLine, splitRipLine, MAX_RIP_LINES } from '../utils/ripLines';
+import { resolveCardPrice } from '../utils/resolveCardPrice';
 import { availablePrintings, preferredPrinting, exactPrintingPrice } from '../utils/availablePrintings';
 import CardImage from './CardImage';
 let nextLine = 0;
@@ -16,7 +16,15 @@ function OwnershipBadge({ info, loading }) {
   const fresh = info.kind === 'new' || info.kind === 'first';
   return <span title={info.title} data-ownership={info.kind} style={{ display: 'inline-block', margin: '0.25rem 0', padding: '0.15rem 0.4rem', borderRadius: 4, fontSize: '0.72rem', fontWeight: 600, color: fresh ? 'var(--type-grass)' : 'var(--text-secondary)', border: '1px solid var(--border-glass)' }}>{info.kind === 'unknown' && loading ? 'Checking ownership…' : info.text}</span>;
 }
-export default function RipForm({ product, lot, existingOpening, busy, t, showToast, onClose, onSubmit }) {
+// What the server will value a new card line at: the printing's own quote when
+// the provider has one, otherwise the card's general market price as an estimate.
+function lineQuote(card, printing) {
+  const exact = exactPrintingPrice(card, printing);
+  if (exact > 0) return { amount: exact, estimate: false };
+  const general = Number(resolveCardPrice(card));
+  return general > 0 && Number.isFinite(general) ? { amount: general, estimate: true } : null;
+}
+export default function RipForm({ product, lot, existingOpening, busy, saveStatus, onStopWaiting, t, showToast, onClose, onSubmit }) {
   const editing = !!existingOpening, currency = existingOpening?.currency || lot.currency;
   const inputRef = useRef(null), chosen = useRef(false), request = useRef(0), mutation = useRef(null), live = useRef(true);
   const [openedAt, setOpenedAt] = useState(() => existingOpening?.opened_at || today());
@@ -24,7 +32,7 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
   const [sets, setSets] = useState([]), [setId, setSetId] = useState(''), [resolved, setResolved] = useState(null), [setError, setSetError] = useState(false);
   const [query, setQuery] = useState(''), [pulls, setPulls] = useState(() => (existingOpening?.pulls || []).map(initialPull));
   const [removed, setRemoved] = useState([]), [matches, setMatches] = useState([]), [looking, setLooking] = useState(false);
-  const [owned, setOwned] = useState({}), [ownershipPending, setOwnershipPending] = useState(0), [ownershipError, setOwnershipError] = useState(false);
+  const [owned, setOwned] = useState({}), [ownedPrintings, setOwnedPrintings] = useState({}), [ownershipPending, setOwnershipPending] = useState(0), [ownershipError, setOwnershipError] = useState(false);
   const language = langCode(product.language || 'en');
   useEffect(() => {
     const requestRef = request;
@@ -39,9 +47,10 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
       const response = await fetch('/api/sealed/rip-ownership', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', body: JSON.stringify({ card_ids: ids, ...(editing ? { opening_id: existingOpening.id } : {}) }) });
       const data = await response.json().catch(() => ({})); if (!response.ok || !data.counts) throw new Error('ownership');
       const counts = Object.fromEntries(ids.map(id => [id, Number.isSafeInteger(data.counts[id]) && data.counts[id] >= 0 ? data.counts[id] : null]));
-      if (live.current) { setOwned(previous => ({ ...previous, ...counts })); setOwnershipError(false); }
+      const printings = Object.fromEntries(ids.map(id => [id, Array.isArray(data.printings?.[id]) ? data.printings[id] : null]));
+      if (live.current) { setOwned(previous => ({ ...previous, ...counts })); setOwnedPrintings(previous => ({ ...previous, ...printings })); setOwnershipError(false); }
     } catch {
-      if (live.current) { setOwned(previous => ({ ...previous, ...Object.fromEntries(ids.map(id => [id, null])) })); setOwnershipError(true); }
+      if (live.current) { setOwned(previous => ({ ...previous, ...Object.fromEntries(ids.map(id => [id, null])) })); setOwnedPrintings(previous => ({ ...previous, ...Object.fromEntries(ids.map(id => [id, null])) })); setOwnershipError(true); }
     } finally { if (live.current) setOwnershipPending(value => Math.max(0, value - 1)); }
   };
   useEffect(() => {
@@ -64,13 +73,13 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
   const statuses = draftOwnership(pulls, owned, editing);
   const changeSet = value => { chosen.current = true; request.current++; setLooking(false); setSetId(value); setMatches([]); inputRef.current?.focus(); };
   const addCard = card => {
-    const printing = preferredPrinting(card), amount = exactPrintingPrice(card, printing), sourceCurrency = String(card.price_currency || 'USD').toUpperCase(), sequence = ++nextLine;
-    const price = amount > 0 && Number.isFinite(amount) && sourceCurrency === currency ? amount.toFixed(2) : '';
+    if (pulls.length >= MAX_RIP_LINES) { showToast(t('sealed.maxLines', { count: MAX_RIP_LINES })); return; }
+    const printing = preferredPrinting(card), sequence = ++nextLine;
     const incoming = { key: `new-${sequence}`, added_order: sequence, card_id: card.id, name: card.name, number: card.number || '', set_name: card.set_name || selected?.name || '',
-      image_url: /^https?:\/\//.test(card.image_url || '') ? card.image_url : '', quantity: '1', current_value: price, value_at_opening: '', bulk: false, lineMode: false, original_price: amount > 0 ? `${sourceCurrency} ${amount.toFixed(2)}` : '',
+      image_url: /^https?:\/\//.test(card.image_url || '') ? card.image_url : '', quantity: '1', current_value: '', value_at_opening: '', bulk: false, lineMode: false,
       printing, card, language: card.language || product.language || 'English', condition: 'Near Mint' };
-    if (pulls.some(pull => sameDraftCard(pull, incoming) && Number(pull.quantity) >= 5000)) { showToast('A pull can contain at most 5,000 copies.'); return; }
-    setPulls(current => stackRipCard(current, incoming));
+    // Each add is its own line: duplicates are often different printings.
+    setPulls(current => [incoming, ...current]);
     setQuery(''); setMatches([]); inputRef.current?.focus();
   };
   const lookup = async () => {
@@ -89,6 +98,11 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
     } catch (error) { if (ticket === request.current) showToast(error.message); } finally { if (ticket === request.current) { setLooking(false); inputRef.current?.focus(); } }
   };
   const editPull = (key, field, value) => setPulls(current => current.map(pull => pull.key === key ? { ...pull, [field]: value } : pull));
+  const split = pull => {
+    if (pulls.length - 1 + Number(pull.quantity) > MAX_RIP_LINES) { showToast(t('sealed.maxLines', { count: MAX_RIP_LINES })); return; }
+    setPulls(current => splitRipLine(current, pull.key, () => ++nextLine));
+  };
+  const atLineLimit = () => { if (pulls.length < MAX_RIP_LINES) return false; showToast(t('sealed.maxLines', { count: MAX_RIP_LINES })); return true; };
   const remove = pull => { setRemoved(current => [pull, ...current]); setPulls(current => current.filter(row => row.key !== pull.key)); };
   const submit = event => {
     event.preventDefault(); if (busy || looking) return;
@@ -96,7 +110,7 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
       const row = { name: pull.name.trim() || t('sealed.otherCards'), quantity: Number(pull.quantity), card_id: pull.card_id || '', set_name: pull.set_name || '', number: pull.number || '', ...(pull.image_url ? { image_url: pull.image_url } : {}) };
       if (pull.id) { row.id = pull.id; if (pull.lineMode) { if (pull.line_value !== '') row.line_value = pull.line_value; } else if (pull.current_value !== '') row.current_value = pull.current_value; }
       else if (pull.bulk) { if (pull.line_value.trim()) row.line_value = pull.line_value.trim(); if (pull.value_at_opening.trim()) row.opened_line_value = pull.value_at_opening.trim(); }
-      else row.printing = pull.printing;
+      else { row.printing = pull.printing; if (String(pull.current_value || '').trim()) row.current_value = String(pull.current_value).trim(); }
       return row;
     }) };
     if (editing) {
@@ -142,19 +156,33 @@ export default function RipForm({ product, lot, existingOpening, busy, t, showTo
           {!pull.bulk && !pull.id && <label>{t('card.printing')}<select className="input-control" value={pull.printing} onChange={e => editPull(pull.key, 'printing', e.target.value)}>
             {availablePrintings(pull.card).options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>{!availablePrintings(pull.card).verified && <small>{t('card.printingUnverified')}</small>}</label>}
-          {!pull.bulk && <small style={{ display: 'block' }}>{pull.id ? `${currency} ${pull.current_value || '—'}` : exactPrintingPrice(pull.card, pull.printing) ? `${String(pull.card.price_currency || 'USD').toUpperCase()} ${exactPrintingPrice(pull.card, pull.printing).toFixed(2)} source quote; valued in ${currency} on save` : t('card.printingUnpriced')}</small>}
+          {!pull.bulk && !pull.id && owned[pull.card_id] > 0 && isBinderUpgrade(pull.printing, ownedPrintings[pull.card_id]) && <span title={t('sealed.binderUpgradeHelp')} style={{ display: 'block', color: 'var(--type-grass)', fontSize: '0.72rem', fontWeight: 600 }}>{t('sealed.binderUpgrade')}</span>}
+          {!pull.bulk && pull.id && <small style={{ display: 'block' }}>{`${currency} ${pull.current_value || '—'}`}</small>}
+          {!pull.bulk && !pull.id && <QuoteLine card={pull.card} printing={pull.printing} currency={currency} t={t} />}
           <label>{t('card.quantity')}<input className="input-control" type="number" min="1" max="5000" required value={pull.quantity} onChange={e => editPull(pull.key, 'quantity', e.target.value)} /></label>
+          {!pull.bulk && !pull.id && <label>{t('sealed.valueEach', { currency })}<input className="input-control" inputMode="decimal" placeholder={t('sealed.valueAuto')} value={pull.current_value} onChange={e => editPull(pull.key, 'current_value', e.target.value)} /></label>}
+          {canSplitRipLine(pull) && <button className="btn btn-secondary" type="button" onClick={() => split(pull)}>{t('sealed.splitLines')}</button>}
           {pull.bulk && <label>{pull.id && !pull.lineMode ? t('sealed.pullValue') : t('sealed.lineValue')}<input className="input-control" value={pull.id && !pull.lineMode ? pull.current_value : pull.line_value} onChange={e => editPull(pull.key, pull.id && !pull.lineMode ? 'current_value' : 'line_value', e.target.value)} /></label>}
           <button className="btn btn-secondary" type="button" onClick={() => remove(pull)}>{pull.id ? 'Remove from rip' : Number(pull.quantity) > 1 ? 'Remove line' : t('search.undo')}</button>
         </div>)}
       </div>
-      {removed.length > 0 && <button className="btn btn-secondary" type="button" onClick={() => { const [last, ...rest] = removed; setPulls(current => [last, ...current]); setRemoved(rest); }}>Undo last removal</button>}
-      <button className="btn btn-secondary" type="button" onClick={() => setPulls(current => [{ key: `new-${++nextLine}`, bulk: true, lineMode: true, card_id: '', name: t('sealed.otherCards'), quantity: '1', line_value: '', current_value: '', value_at_opening: '', set_name: product.set_name || '' }, ...current])}>{t('sealed.addBulk')}</button>
+      {removed.length > 0 && <button className="btn btn-secondary" type="button" onClick={() => { if (atLineLimit()) return; const [last, ...rest] = removed; setPulls(current => [last, ...current]); setRemoved(rest); }}>Undo last removal</button>}
+      <button className="btn btn-secondary" type="button" onClick={() => !atLineLimit() && setPulls(current => [{ key: `new-${++nextLine}`, bulk: true, lineMode: true, card_id: '', name: t('sealed.otherCards'), quantity: '1', line_value: '', current_value: '', value_at_opening: '', set_name: product.set_name || '' }, ...current])}>{t('sealed.addBulk')}</button>
       <small>Saving records this rip as complete. You can edit its contents later unless a sale has frozen the opening&apos;s acquisition basis.</small>
     </fieldset>
+    {saveStatus && <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', color: saveStatus.error ? 'var(--accent-red)' : 'var(--text-secondary)' }}>
+      <span style={{ flex: 1 }}>{saveStatus.error || t('sealed.savingRip', { seconds: saveStatus.seconds })}</span>
+      {!saveStatus.error && saveStatus.seconds >= 15 && onStopWaiting && <button className="btn btn-secondary" type="button" onClick={onStopWaiting}>{t('sealed.stopWaiting')}</button>}
+    </div>}
     <div className="quick-add-footer"><div className="quick-add-footer-actions">
       <button className="btn btn-secondary" type="button" onClick={onClose} disabled={busy}>{t('common.cancel')}</button>
-      <button className="btn btn-primary" type="submit" disabled={busy || looking}>{editing ? 'Save changes' : t('sealed.addToCollection')}</button>
+      <button className="btn btn-primary" type="submit" disabled={busy || looking}>{busy ? t('sealed.saving') : editing ? 'Save changes' : t('sealed.addToCollection')}</button>
     </div></div>
   </form>;
+}
+function QuoteLine({ card, printing, currency, t }) {
+  const quote = lineQuote(card, printing), source = String(card?.price_currency || 'USD').toUpperCase();
+  if (!quote) return <small style={{ display: 'block' }}>{t('card.printingUnpriced')}</small>;
+  const price = `${source} ${quote.amount.toFixed(2)}`;
+  return <small style={{ display: 'block' }}>{quote.estimate ? t('sealed.printingEstimate', { printing, price, currency }) : t('sealed.printingQuote', { printing, price, currency })}</small>;
 }

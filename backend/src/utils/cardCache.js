@@ -12,13 +12,18 @@ const COLUMNS = [
   'price_reverse_holofoil', 'price_avg1', 'price_avg7', 'price_avg30', 'cmc',
   'color_identity', 'game', 'language', 'printed_name',
   'tcgplayer_url', 'cardmarket_url', 'tcgplayer_product_id',
-  'price_currency', 'price_source', 'available_printings',
+  'price_currency', 'price_source', 'available_printings', 'illustrator',
 ];
 
 // A page of results can be 250 cards and one round trip per card cost more than
 // the provider fetch did, so rows go in batched — chunked small enough that the
 // bound-parameter count stays well inside SQLite's limit.
 const CHUNK = 50;
+
+const cleanIllustrator = (v) => {
+  const text = Array.isArray(v) ? v.filter(Boolean).join(', ') : v;
+  return typeof text === 'string' && text.trim() ? text.trim().slice(0, 200) : null;
+};
 
 const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 
@@ -41,6 +46,8 @@ const SET_CLAUSE = COLUMNS
   .map(c => {
     if (c === 'image_url') return "image_url = CASE WHEN NULLIF(TRIM(excluded.image_url), '') IS NULL THEN card_cache.image_url ELSE excluded.image_url END";
     if (c === 'available_printings') return 'available_printings = COALESCE(excluded.available_printings, card_cache.available_printings)';
+    // Search briefs carry no illustrator; they must not erase one a full fetch stored.
+    if (c === 'illustrator') return 'illustrator = COALESCE(excluded.illustrator, card_cache.illustrator)';
     if (!PRESERVE_WITH_PRICE.has(c)) return `${c} = excluded.${c}`;
     return `${c} = CASE
       WHEN card_cache.game = 'pokemon'
@@ -109,6 +116,7 @@ async function cacheNormalizedCards(cards, game, opts = {}) {
         num(c.tcgplayer_product_id),
         c.price_currency || 'USD', c.price_source || null,
         Array.isArray(c.available_printings) && c.available_printings.length ? JSON.stringify(c.available_printings) : null,
+        cleanIllustrator(c.illustrator),
       );
     }
     await db.run(

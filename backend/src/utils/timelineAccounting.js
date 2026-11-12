@@ -1,4 +1,3 @@
-// sale-adjustments-v1
 'use strict';
 const {wholeOpeningBasis}=require('./openingGroupBasis');
 const schema=`CREATE TABLE IF NOT EXISTS portfolio_accounting_daily(user_id INTEGER NOT NULL,game TEXT NOT NULL,currency TEXT NOT NULL,time_zone TEXT NOT NULL,day TEXT NOT NULL,recorded_at INTEGER NOT NULL,accounting_json TEXT NOT NULL,PRIMARY KEY(user_id,game,currency,time_zone,day))`;

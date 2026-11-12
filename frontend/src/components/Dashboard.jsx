@@ -1,10 +1,3 @@
-// dashboard-accounting-v1
-// contextual-sales-v1
-// sales-ui-v1
-// aligned-summary-v1
-// streamlined-executive-v1
-// executive-performance-v1
-// daily-dashboard-v2
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { TrendingUp, Library, Trophy, Plus, Package, Zap } from 'lucide-react';

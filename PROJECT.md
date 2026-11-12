@@ -34,6 +34,7 @@ backend/
     routes/
       auth.js              register / login / logout / me / per-user settings
       collection.js        collection CRUD, locations & compartments, sorting, scan-match, stats, import/export
+      customSets.js        user-defined custom sets: rules + manual include/exclude, resolution, provider sync
       decks.js             deck CRUD, deck cards, checkout / return, /:id/locations locator payload
       sets.js              set catalog lookup
       settings.js          app-wide settings (admin)
@@ -487,7 +488,7 @@ for cards not yet saved.
 |-------|-----------------------|
 | `users` | `id`, `username`, `password_hash` (PBKDF2, iterations embedded), `role`, `share_token`, `share_enabled`, `tcg_api_key`, `psa_api_token`, `graded_price_api_key`, `api_key` (read-only external credential) |
 | `sessions` | `user_id`, `token`, `expires_at` — Bearer-token auth |
-| `card_cache` | Normalized card metadata keyed by provider `id`: `name` (searchable) and `printed_name` (as printed), `language`, `set_id`/`set_name`, `number`, `image_url`, `types`/`subtypes`/`supertype`, `rarity`, `cmc`, `color_identity`, `price_*` with `price_source`/`price_currency`, `tcgplayer_product_id`, `tcgplayer_url`/`cardmarket_url`, `game`, `last_updated`. Written only through `utils/cardCache.cacheNormalizedCards`, which upserts — `INSERT OR REPLACE` re-created the row and reset every column outside the provider's own list |
+| `card_cache` | Normalized card metadata keyed by provider `id`: `name` (searchable) and `printed_name` (as printed), `language`, `set_id`/`set_name`, `number`, `image_url`, `types`/`subtypes`/`supertype`, `rarity`, `illustrator` (artist, kept when a later write has none), `cmc`, `color_identity`, `price_*` with `price_source`/`price_currency`, `tcgplayer_product_id`, `tcgplayer_url`/`cardmarket_url`, `game`, `last_updated`. Written only through `utils/cardCache.cacheNormalizedCards`, which upserts — `INSERT OR REPLACE` re-created the row and reset every column outside the provider's own list |
 | `collection` | One row per owned stack: `id` (entry_id), `user_id`, `card_id`→card_cache, `quantity`, `condition`, `printing`, `language`, `purchase_price`, `location_id`, `compartment_id`, `position`, `list_type` (`collection`/`trade`), `is_trade`, `game`, `added_at`; per-copy grading (`grader`, `grade`, `cert_number`) and per-copy value (`market_value`, `market_value_source`, `market_value_at`) |
 | `locations` | Physical containers: `user_id`, `name`, `type`, `sort_order`, `foil_sorting`, `rule_type`, `rule_config`, `game` |
 | `compartments` | Pages/rows within a location: `location_id`, `idx`, `label`, `capacity`, `rule_config` |
@@ -495,9 +496,12 @@ for cards not yet saved.
 | `decks` | `user_id`, `name`, `description`, `checked_out`, `checked_out_at`, `created_at` |
 | `deck_cards` | Deck contents: `deck_id`, `card_id`, `quantity` |
 | `price_history` | Per-card price points over time, powering trend charts |
+| `custom_sets` | User-defined checklists: `user_id`, `name`, `game`, `completion_mode` (`card`/`printing`), `rules_json` (`names`, `illustrators`, `set_ids`, `rarities`) |
+| `custom_set_cards` | Manual overrides per custom set: `custom_set_id`, `card_id`, `mode` (`include`/`exclude`) |
+| `price_history_finish` | Per-printing price points (Normal, Holofoil, Reverse Holofoil, 1st Edition), so a copy's chart follows the column its value comes from |
 | `sets` | Set catalog (names/ordering) for dividers and set-scoped scan |
 | `pokemontcgapi_cache` | Bounded persistent response cache: `request` (credential digest + path/query), `body`, `etag`, `fetched_at`; no API keys |
-| `app_settings` | App-wide key/value settings (e.g. registration toggle) |
+| `app_settings` | App-wide key/value settings (e.g. registration toggle, `hidden_tabs` JSON list of nav tabs an admin hid) |
 
 **Entry identity**: a `collection.id` (`entry_id`) uniquely identifies one
 physical stack. Features that track individual copies (checkout locator, storage

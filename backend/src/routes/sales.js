@@ -1,5 +1,3 @@
-// sale-adjustments-v1
-// contextual-sales-v1
 'use strict';
 function createRouter({service}) {
  const router=require('express').Router();

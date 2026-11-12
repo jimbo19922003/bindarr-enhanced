@@ -32,6 +32,7 @@ Try it without installing anything at **[thenotoriousjeremy.github.io/bindarr](h
 - **Physical location tracking** — binders by page and slot (1–9), boxes by row and divider, with layout and scalable image-list views. Drag cards between pockets to arrange a binder, or file them by tapping on a phone.
 - **Deck Builder & checkout** — build decks, edit their properties, import ManaBox decklists, reserve cards for play, and see exactly which checked-out deck makes a copy unavailable.
 - **Search and bulk add** — search or browse a whole set with multi-select; pin a set and add by collector number one keystroke at a time.
+- **Set completion and custom sets** — Collection › Sets shows owned and missing cards for any set; tap a missing card to add it, or wishlist every missing card in one go. Build your own sets (a species master set, an illustrator, a rarity across sets) from rules plus hand-picked cards.
 - **Collection filters** — find duplicates of the same catalog card across conditions and finishes, or cards with no provider artwork reference and no local artwork. Image links are not checked for availability.
 - **Dashboard** — Executive (net worth, total invested, timeline), Sealed (what is still on the shelf), Rip report (opened product against its cost), and Cards (set completion, rarity, type, and where copies live).
 - **Sealed product** — a Pokémon catalog and the purchase lots you bought, kept apart from loose cards. Open a unit, record the pulls, and file those cards into the collection.
@@ -100,6 +101,48 @@ its cards are game-scoped.
 Deck cards that cannot currently be used have a red warning. The label shows
 the missing copy count and, when another checked-out deck holds the copy, that
 deck's name — for example, `1 unavailable — Goblin Stampede`.
+
+### Sets and custom sets
+
+Collection › Sets shows every card in a set for the chosen game and language,
+with owned cards in colour and missing ones greyed out. Tap an owned card to
+open it (several copies open as a stack with the print picker); tap a missing
+card to open the **Add this card** drawer for that exact card.
+
+To collect toward a set, use the heart on a missing card to wishlist it, or
+**Wishlist N missing** to wishlist every missing card at once (you are asked to
+confirm first). Wishlisted cards show a red *Wishlisted* badge, stay counted as
+missing, and appear under **Collection → Wishlist**, where the bulk *Move to
+collection* action files them once you have them. In a per-printing custom set
+each wishlist entry uses the slot's printing; otherwise the card's usual
+printing.
+
+**New custom set** builds your own checklist, listed under *Custom sets* in the
+same picker. A custom set is:
+
+- **Rules** — card name contains, illustrator contains, in set, rarity is. A card
+  must match every rule type you fill in; any entry within a type matches. At
+  least a name, illustrator or set rule is needed for rules to match anything.
+- **Manual cards** — search and **Include** cards the rules miss; hide a card
+  from the grid with its eye button and restore it from the editor.
+- **Completion** — *Card* (any copy completes a slot) or *Printing* (each
+  printing — Normal, Reverse Holofoil, … — is its own slot, master-set style).
+
+Rules match the cards Bindarr has cached, in the language selected on the
+Sets tab; manually included cards show in any language. **Fetch matching cards
+from provider** searches for your name rules (up to 5 names, 500 cards each) so
+printings nobody has looked up yet are included. Illustrator data is recorded
+as cards are cached: TCGdex search results don't carry it, so illustrator rules
+see cards once they have been opened, scanned or added, or after the local
+Pokémon catalogue is (re)installed. Ownership matches by game, set and
+collector number in any language, the same as the standard set view.
+
+### Hiding tabs
+
+Admins can hide optional tabs — Sealed, Sales History, Storage, Deck Builder
+and Notes — for every user under **Admin → Instance Settings → Hide tabs**.
+Only the navigation button goes away; nothing is deleted, and links from other
+views (such as *View in storage*) still open the tab.
 
 ### Container views
 
@@ -433,9 +476,24 @@ When adding a card manually or recording a new rip pull, choose its printing.
 Where TCGdex supplies verified availability, the picker only offers those
 printings; otherwise it warns that the choices are unverified. Older local
 catalogues acquire this metadata when re-imported or their sets are synced.
-New rip pulls use the selected printing's quote in the opening currency, and
-stay unpriced if that specific quote is unavailable. Existing recorded pulls
-are not changed.
+New rip pulls use the selected printing's quote, converted to the opening
+currency. When the provider has no quote for that printing (often Reverse
+Holofoil), the line says so and the pull is valued from the card's general
+market price as an estimate. **Value each** on a new line overrides either
+figure; leave it blank to use the market price. Existing recorded pulls are
+not changed.
+
+Each card added to a rip gets its own line, so two copies of the same card
+can be recorded as different printings. A line typed up to a larger quantity
+has **Split into single lines**. A rip holds at most 100 lines.
+
+Saving a rip files and prices every card, which can take a while. The drawer
+shows a running timer, and **Stop waiting** appears after 15 seconds. The
+request is abandoned after 3 minutes. A stopped or timed-out save may still
+finish on the server, so check the openings list before saving again. A
+price refresh that takes longer than 10 seconds while a card is filed does
+not hold up the save. The card is filed with its cached price, and the
+refresh finishes in the background.
 
 **Rip report** compares the known value of pulls with what the opened units
 cost. Missing prices are left out of the value. The set chart ranks that gap
@@ -504,6 +562,10 @@ Every price source Bindarr talks to — TCGplayer, Scryfall, Cardmarket — quot
 For Pokémon slabs it can also be fetched. Put a [PokemonPriceTracker](https://www.pokemonpricetracker.com/api) key in **Settings → API Keys** and a **Fetch graded price** button appears on graded copies. It fills in what that card sells for on eBay at that grade — PSA, BGS or CGC, half grades included — and says how many sales the figure rests on. If the grade has no recorded sales it tells you which grades do, rather than guessing.
 
 One card per press, never a background sweep: each lookup spends 2 of the free tier's 100 daily credits, and a sweep over a collection would spend a week's worth on one boot. Magic slabs have no source, so they stay hand-entered.
+
+With **Stack** on, the card view for a stack that holds more than one copy shows a button per printing with its count (for example *Normal ×2*, *Reverse Holofoil ×1*), and one per copy when a printing has several. Edit, delete and **Sell this copy** act on the copy you picked.
+
+The price-history chart follows the price shown above it. A copy whose printing has its own price, such as a Reverse Holofoil, charts that printing's series. Bindarr records it whenever the price changes, starting with this release, so a new series needs one recorded change before it draws a line. Other copies chart the card's general price. After an English Pokémon card moves from CardDex to the TCGCSV mirror, its chart still includes the CardDex history already cached in the same currency. The S&P 500 comparison on the dashboard uses daily portfolio snapshots, not card history, and needs at least two days of them.
 
 ### Cards in other languages
 

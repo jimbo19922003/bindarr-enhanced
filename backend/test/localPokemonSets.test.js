@@ -5,7 +5,7 @@ const {createPokemonLocalCatalog}=require('../src/utils/pokemonLocalCatalog');
 const {createLocalPokemonSetsHandler,resolveLanguage}=require('../src/routes/localPokemonSets');
 async function fixture(t,{enabled=true}={}){
  const root=await fs.mkdtemp(join(tmpdir(),'local-set-route-')),file=join(root,'catalog.db');await fs.writeFile(file,'');const connect=()=>openConnection(file),db=await connect();
- try{await db.exec('CREATE TABLE card_cache(id TEXT PRIMARY KEY,name TEXT,printed_name TEXT,supertype TEXT,subtypes TEXT,types TEXT,rarity TEXT,set_id TEXT,set_name TEXT,number TEXT,image_url TEXT,game TEXT,language TEXT,available_printings TEXT)');}finally{await db.close();}
+ try{await db.exec('CREATE TABLE card_cache(id TEXT PRIMARY KEY,name TEXT,printed_name TEXT,supertype TEXT,subtypes TEXT,types TEXT,rarity TEXT,set_id TEXT,set_name TEXT,number TEXT,image_url TEXT,game TEXT,language TEXT,available_printings TEXT,illustrator TEXT)');}finally{await db.close();}
  let fallbacks=0;const app=express();app.get('/api/sets',createLocalPokemonSetsHandler({connect,enabled:()=>enabled}));app.get('/api/sets',(_req,res)=>{fallbacks++;res.json({legacy:true});});
  const server=http.createServer(app);await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  t.after(async()=>{await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true});});

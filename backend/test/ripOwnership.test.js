@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 async function main() {
   const source = fs.readFileSync(path.join(__dirname, '../../frontend/src/utils/ripOwnership.js'), 'utf8');
-  const { draftOwnership, candidateOwnership } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+  const { draftOwnership, candidateOwnership, isBinderUpgrade } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
   const first = { key: 'new-1', card_id: 'a', quantity: '1' };
   const second = { key: 'new-2', card_id: 'a', quantity: '1' };
   let result = draftOwnership([second, first], { a: 0 });
@@ -26,6 +26,15 @@ async function main() {
   assert.strictEqual(candidateOwnership('b', [saved], {}, true).kind, 'unknown');
   assert.strictEqual(candidateOwnership('a', [saved], { a: 2 }, true).kind, 'owned');
   assert.deepStrictEqual(draftOwnership([{ key: 'bulk', bulk: true, quantity: '20' }], {}), {});
+  assert.strictEqual(isBinderUpgrade('Reverse Holofoil', ['Normal']), true);
+  assert.strictEqual(isBinderUpgrade('Holofoil', ['Normal', 'Reverse Holofoil']), true);
+  assert.strictEqual(isBinderUpgrade('Reverse Holofoil', ['Holofoil']), false);
+  assert.strictEqual(isBinderUpgrade('Holofoil', ['Holofoil', 'Normal']), false);
+  assert.strictEqual(isBinderUpgrade('Normal', ['Normal']), false);
+  assert.strictEqual(isBinderUpgrade('Holofoil', []), false);
+  assert.strictEqual(isBinderUpgrade('Holofoil', null), false);
+  assert.strictEqual(isBinderUpgrade('Holofoil', ['Normal', 'Promo']), false);
+  assert.strictEqual(isBinderUpgrade('1st Edition', ['Normal']), false);
   console.log('ripOwnership.test.js: all assertions passed');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

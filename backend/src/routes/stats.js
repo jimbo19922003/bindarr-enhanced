@@ -1,7 +1,6 @@
-// dashboard-accounting-v1
 const express = require('express');
 const db = require('../db');
-const { resolveCardPrice, isVintageSet, parseSqliteUtc } = require('../utils/priceHelpers');
+const { resolveCardPrice, isVintageSet, parseSqliteUtc, FINISH_COLUMNS } = require('../utils/priceHelpers');
 const { summarizeHoldings } = require('../utils/sealedInventory');
 const { summarizePerformance } = require('../utils/openingPerformance');
 const { createReportingValuation } = require('../utils/reportingValuation');
@@ -188,13 +187,33 @@ router.get('/cards/:id/price-history', async (req, res) => {
     const { id } = req.params;
     const rangeKey = String(req.query.range || '30d').toLowerCase();
     const days = rangeKey === '30d' ? 30 : null;
+    const now = Date.now();
+    const card = await db.get('SELECT * FROM card_cache WHERE id = ?', [id]);
+    // The inspector's headline is the copy's own printing column when it has one
+    // (resolveCardPrice). price_trend tracks a single finish, so when that column
+    // differs from it the chart has to follow the printing's series instead, or
+    // it charts one finish under another finish's price.
+    const finish = FINISH_COLUMNS[req.query.printing] ? String(req.query.printing) : null;
+    const finishPrice = finish && card ? Number(card[FINISH_COLUMNS[finish]]) : 0;
+    if (finishPrice > 0 && finishPrice !== Number(card.price_trend)) {
+      const currency = card.price_currency || 'USD';
+      const rows = await db.all(`SELECT price, recorded_at FROM price_history_finish WHERE card_id = ? AND finish = ?
+        AND COALESCE(currency, ?) = ? ${days ? 'AND recorded_at >= datetime(\'now\', ?)' : ''} ORDER BY recorded_at ASC`,
+      days ? [id, finish, currency, currency, `-${days} days`] : [id, finish, currency, currency]);
+      const points = rows.map(row => ({ price: row.price, time: parseSqliteUtc(row.recorded_at).getTime(), source: 'recorded' })).filter(row => Number.isFinite(row.time));
+      const recordedCount = points.length;
+      points.push({ price: finishPrice, time: now, source: 'current' });
+      const data = points.filter((point, index) => !(points[index - 1] && points[index + 1] && points[index - 1].price === point.price && points[index + 1].price === point.price));
+      const spanDays = points.length >= 2 ? Math.round((points[points.length - 1].time - points[0].time) / 86400000) : 0;
+      return res.json({ data: data.map(point => ({ price: point.price, recorded_at: new Date(point.time).toISOString(), source: point.source })),
+        spanDays, windowDays: days, marketCount: 0, recordedCount, carddexCount: 0, carddexHistoryStatus: null, quoteAt: null,
+        finish, insufficientHistory: data.length < 2 });
+    }
     const sameCurrency = `(currency IS NULL OR currency = COALESCE((SELECT price_currency FROM card_cache WHERE id = price_history.card_id), currency))`;
     const recorded = await db.all(`SELECT price, recorded_at FROM price_history WHERE card_id = ?
       ${days ? 'AND recorded_at >= datetime(\'now\', ?)' : ''} AND ${sameCurrency} ORDER BY recorded_at ASC`, days ? [id, `-${days} days`] : [id]);
-    const now = Date.now();
     const points = recorded.map(row => ({ price: row.price, time: parseSqliteUtc(row.recorded_at).getTime(), source: 'recorded' })).filter(row => Number.isFinite(row.time));
     const recordedCount = points.length;
-    const card = await db.get('SELECT * FROM card_cache WHERE id = ?', [id]);
     let carddexHistoryStatus = null;
     let quoteAt = null;
     let carddexCount = 0;
@@ -220,13 +239,25 @@ router.get('/cards/:id/price-history', async (req, res) => {
         }
       }
     }
+    // A card that moved from CardDex to another source (TCGCSV for English
+    // Pokémon) keeps the CardDex series it already cached in the same currency,
+    // instead of the chart restarting at the switch. Cache only; never fetched.
+    if (card && card.game === 'pokemon' && !card.price_source?.startsWith('carddex-')) {
+      const service = require('../pokemonPrices').getPokemonPrices();
+      const cached = typeof service.cachedHistory === 'function' ? await service.cachedHistory(card) : [];
+      const cutoff = Math.min(now, ...points.map(point => point.time));
+      const cachedPoints = cached.map(row => ({ price: Number(row.price), time: Date.parse(row.recorded_at), source: 'carddex' }))
+        .filter(row => row.time < cutoff && (!days || row.time >= now - days * 86400000));
+      carddexCount = cachedPoints.length;
+      points.push(...cachedPoints);
+    }
     const anchors = days ? marketAnchors(card, now) : [];
     const marketCount = anchors.filter(row => row.source === 'market').length;
     points.push(...anchors); points.sort((a, b) => a.time - b.time);
     const data = points.filter((point, index) => !(points[index - 1] && points[index + 1] && points[index - 1].price === point.price && points[index + 1].price === point.price));
     const spanDays = points.length >= 2 ? Math.round((points[points.length - 1].time - points[0].time) / 86400000) : 0;
     res.json({ data: data.map(point => ({ price: point.price, recorded_at: new Date(point.time).toISOString(), source: point.source })),
-      spanDays, windowDays: days, marketCount, recordedCount, carddexCount, carddexHistoryStatus, quoteAt, insufficientHistory: data.length < 2 });
+      spanDays, windowDays: days, marketCount, recordedCount, carddexCount, carddexHistoryStatus, quoteAt, finish: null, insufficientHistory: data.length < 2 });
   } catch (error) { failure(res, error, 'Failed to retrieve price history'); }
 });
 module.exports = router;

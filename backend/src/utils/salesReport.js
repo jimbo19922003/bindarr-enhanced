@@ -1,4 +1,3 @@
-// sale-adjustments-v1
 'use strict';
 const bad=message=>Object.assign(new Error(message),{status:400});
 const date=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString().slice(0,10)===value;

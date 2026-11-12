@@ -401,7 +401,7 @@ router.post('/backups', async (req, res) => {
     res.status(201).json(meta);
   } catch (error) {
     console.error('BACKUP ERROR:', error);
-    res.status(500).json({ error: 'Backup failed', message: error.message });
+    res.status(500).json({ error: 'Backup failed' });
   }
 });
 

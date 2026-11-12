@@ -112,6 +112,7 @@ function normalizeCard(card, lang) {
     color_identity: [],
     game: 'pokemon',
     available_printings: tcgdexPrintings(card.variants),
+    illustrator: card.illustrator || null,
     language: languages.toName(code),
     // Cardmarket link built from the idProduct the price itself came from, so it
     // opens the exact product rather than a search — which matters here more than

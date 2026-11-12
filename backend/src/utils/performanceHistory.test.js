@@ -1,4 +1,3 @@
-// sale-aware-timeline-v1
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');

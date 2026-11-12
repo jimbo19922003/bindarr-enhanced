@@ -6,7 +6,29 @@ release also carries fuller notes on its
 
 ## [Unreleased]
 
+### Added
+- **Binder upgrade indicator for rip pulls.** A selected Reverse Holofoil or Holofoil is flagged when it outranks all existing collection copies of the same card (Normal < Reverse Holofoil < Holofoil); unranked finishes are not compared. The indicator does not check binder location or condition.
+- **Add a missing card from the Sets view.** Tapping a missing card in Collection › Sets opens the **Add this card** drawer for that card, with its printings and prices. The drawer is the same one Search uses (now shared as `QuickAddDrawer`).
+- **Custom sets.** Build your own checklists — a species master set, an illustrator, a rarity across sets — from rules (name, illustrator, set, rarity) plus manually included or hidden cards, and count completion per card or per printing. They appear under *Custom sets* in the Sets picker. New tables `custom_sets` and `custom_set_cards` and `/api/custom-sets` routes.
+- **Illustrators are recorded.** `card_cache` gains an `illustrator` column filled by TCGdex, pokemontcg.io, pokemontcgapi.com, Scryfall and Lorcast cards and the local Pokémon catalogue; reinstalling the catalogue backfills it without rebuilding scan data.
+- **Wishlist missing set cards.** Collection › Sets has a heart on each missing card and a **Wishlist N missing** button for the whole set or custom set. Wishlisted cards get a *Wishlisted* badge and still count as missing; per-printing custom sets wishlist the slot's printing.
+- **Hide optional tabs.** **Admin → Instance Settings → Hide tabs** removes Sealed, Sales History, Storage, Deck Builder and/or Notes from the navigation for every user (`app_settings.hidden_tabs`). Links from other views still open them.
+
+### Fixed
+- **Sets view controls line up.** The set picker now has a label like the game and language pickers, so the three dropdowns and the buttons share a baseline.
+- **`POST /api/collection` rejects an unknown `list_type`** instead of storing it, and wishlist adds no longer wait on the per-card Pokémon price refresh.
+- **Rip pulls get one line per card.** Adding the same card twice no longer merges the lines, so each copy can be a different printing. A line typed up to a larger quantity has **Split into single lines**.
+- **A rip pull whose printing has no quote is valued instead of left blank.** It uses the card's general market price, labelled as an estimate on the line, and **Value each** overrides it.
+- **Saving a rip no longer appears to hang.** The drawer shows a timer and **Stop waiting**, gives up after 3 minutes, and shows errors in the drawer. Each card's price refresh while filing is limited to 10 seconds, after which it continues in the background.
+- **Stacked cards can target a specific printing.** The card view lists the printings and copies in a stack, and edit, delete and **Sell this copy** act on the one picked rather than always the first entry.
+- **Owned cards in the Collection › Sets view open the card view.** Clicking (or pressing Enter on) an owned tile opens the inspector for that card; several copies open as a stack with the print picker.
+- **Server errors no longer echo internal messages.** Notes, import/export and backup-creation failures are logged on the server and return a generic error to the client.
+- **Graded slab lookup cannot add the same candidate twice.** Candidate buttons are disabled while an add is in flight.
+- **Price history matches the headline price.** A copy valued from its printing's own column (Reverse Holofoil, Holofoil, …) charts that printing's series, recorded in the new `price_history_finish` table. English Pokémon cards that moved from CardDex to the TCGCSV mirror keep their cached CardDex history in the chart.
+
 ### Changed
+- **Dependency security updates.** Non-breaking `npm audit fix` updates in `backend/` and `frontend/` (including Express and nodemon patch releases and onnxruntime-node 1.31). Remaining advisories need major upgrades (sharp 0.35, `@capacitor/assets` 4) and are not applied here.
+- **Removed obsolete patch scaffolding.** The one-off `scripts/*.py` patch scripts, their snapshot directories and the branch-push workflows that ran them, three one-shot diagnostic workflows, the unreferenced `// <name>-v1` patch markers in source, and four unused frontend components (`CarddexKeyPanel`, `RealizedGainCard`, `SalesPanel`, `SetupCardCatalogue`). Several of those scripts would have reverted current code if re-run.
 - **TCGCSV data is synced into a persistent local cache.** Bindarr checks TCGCSV's `last-updated.txt` at most once every 24 hours and downloads a new dataset only when its timestamp advances. Cached group, product and price data is reused by the application; sync requests are serialized and spaced by at least 100 ms. A 403 response pauses further TCGCSV requests for 24 hours.
 - **The TCGCSV sync is bounded and cannot stall pricing.** Only the Pokémon categories (3 and 85) are synced, and only the fields Bindarr reads are stored (an earlier cache table is slimmed in place on startup). One set answering 404, `success:false` or a non-JSON page is recorded as empty instead of wedging the sync, a dataset unfinished after 24 hours is abandoned, and a failed or paused sync no longer stops the price refresh or the scan product map from using the last complete cache. Each sync logs how many requests it sent.
 

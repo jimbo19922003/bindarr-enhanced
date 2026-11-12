@@ -1,6 +1,4 @@
-// rip-unit-allocation-v1
 import OpeningBasisPanel from './OpeningBasisPanel';
-// contextual-sales-v1
 import { useState, useEffect, useRef } from 'react';
 import { X, MapPin, Trash2, Star, Maximize2, ExternalLink, Search, Layers, RefreshCw, FlipHorizontal2 } from 'lucide-react';
 import { getCardDisplayName } from '../utils/langHelper';
@@ -42,8 +40,16 @@ function getSlotNumber(c) {
 // Self-contained: owns its edit form (PUT) and delete (DELETE) so every screen
 // gets the same rich view + edit without duplicating the form. onUpdate() lets
 // the parent refetch after a change. onViewStorage is optional (hidden if absent).
-function CardInspectorModal({ card, onClose, onUpdate, onDeleted, showToast, onViewStorage, startInEdit = false }) {
+function CardInspectorModal({ card: incoming, onClose, onUpdate, onDeleted, showToast, onViewStorage, startInEdit = false }) {
   const { t } = useT();
+  // A stacked collection row carries every entry it merged. The inspector shows,
+  // edits and sells one real entry at a time, so a stack of a normal and a
+  // reverse holo can sell either one rather than whichever entry came first.
+  const stackEntries = Array.isArray(incoming?.stack_entries) && incoming.stack_entries.length > 1 ? incoming.stack_entries : null;
+  const [picked, setPicked] = useState({ incoming, entryId: null });
+  const pickedId = picked.incoming === incoming ? picked.entryId : null;
+  const pickEntry = entryId => setPicked({ incoming, entryId });
+  const card = stackEntries ? (stackEntries.find(entry => entry.entry_id === pickedId) || stackEntries[0]) : incoming;
   const [mode, setMode] = useState('view');
   const [locations, setLocations] = useState([]);
   const [q, setQ] = useState(1);
@@ -519,6 +525,8 @@ function CardInspectorModal({ card, onClose, onUpdate, onDeleted, showToast, onV
               {(activeCard.number || activeCard.collector_number || activeCard.card_number) ? ` • #${activeCard.number || activeCard.collector_number || activeCard.card_number}` : ''}{activeCard.rarity ? ` • ${activeCard.rarity}` : ''} • {t('inspector.owned', { count: activeCard.quantity ?? 1 })}
             </p>
 
+            {stackEntries && <StackPicker entries={stackEntries} current={card} onPick={pickEntry} disabled={mode === 'edit'} t={t} />}
+
             {/* MTG cards: show color pips + type line (Pokémon energy types are
                 already conveyed via the type-glow styling elsewhere). */}
             {(activeCard.supertype === 'MTG' || activeCard.game === 'mtg') && (
@@ -728,7 +736,7 @@ function CardInspectorModal({ card, onClose, onUpdate, onDeleted, showToast, onV
               )}
 
               {/* Price History Area Chart */}
-              <PriceHistoryChart cardId={activeCard.card_id || activeCard.id} currency={activeCard.price_currency} height={100} defaultRange="30d" />
+              <PriceHistoryChart cardId={activeCard.card_id || activeCard.id} currency={activeCard.price_currency} printing={activeCard.market_value > 0 ? undefined : printing} height={100} defaultRange="30d" />
 
               {/* Specifications Details Grid */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem 1rem', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem' }}>
@@ -868,6 +876,43 @@ function CardInspectorModal({ card, onClose, onUpdate, onDeleted, showToast, onV
 
       {isFullScreen && (
         <CardImageZoom card={faceCard} onClose={() => setIsFullScreen(false)} />
+      )}
+    </div>
+  );
+}
+
+const entryKey = entry => entry.printing || 'Normal';
+function StackPicker({ entries, current, onPick, disabled, t }) {
+  const groups = [];
+  for (const entry of entries) {
+    const group = groups.find(item => item.printing === entryKey(entry));
+    if (group) { group.entries.push(entry); group.count += Number(entry.quantity) || 0; }
+    else groups.push({ printing: entryKey(entry), entries: [entry], count: Number(entry.quantity) || 0 });
+  }
+  const active = groups.find(group => group.printing === entryKey(current)) || groups[0];
+  const chip = selected => ({ fontSize: '0.75rem', padding: '0.3rem 0.6rem', ...(selected ? {} : { opacity: 0.75 }) });
+  return (
+    <div role="group" aria-label={t('inspector.stackPrints')} style={{ marginTop: '0.6rem', display: 'grid', gap: '0.4rem' }}>
+      <small style={{ color: 'var(--text-muted)' }}>{t('inspector.stackPrintsHint')}</small>
+      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+        {groups.map(group => (
+          <button key={group.printing} type="button" disabled={disabled} aria-pressed={group === active}
+            className={`btn ${group === active ? 'btn-primary' : 'btn-secondary'}`} style={chip(group === active)}
+            onClick={() => onPick(group.entries[0].entry_id)}>
+            {group.printing} ×{group.count}
+          </button>
+        ))}
+      </div>
+      {active.entries.length > 1 && (
+        <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+          {active.entries.map((entry, index) => (
+            <button key={entry.entry_id} type="button" disabled={disabled} aria-pressed={entry.entry_id === current.entry_id}
+              className={`btn ${entry.entry_id === current.entry_id ? 'btn-primary' : 'btn-secondary'}`} style={chip(entry.entry_id === current.entry_id)}
+              onClick={() => onPick(entry.entry_id)}>
+              {t('inspector.stackCopy', { index: index + 1, condition: entry.condition || 'Near Mint', count: entry.quantity ?? 1 })}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

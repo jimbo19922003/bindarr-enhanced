@@ -13,7 +13,7 @@ async function fixture(t,{configured=true}={}) {
   await fs.writeFile(path.join(directory,'en','cards.json'),JSON.stringify([{id:'sample-1',localId:'1',name:'Approved card',category:'Pokemon',set:{id:'sample'}}]));
   await writeBundleManifest({directory,commit,languages:['en']});
   let reads=0;const connect=()=>{reads++;return openConnection(file);};
-  const db=await connect();try{await db.exec('CREATE TABLE card_cache(id TEXT PRIMARY KEY,name TEXT,printed_name TEXT,supertype TEXT,subtypes TEXT,types TEXT,rarity TEXT,set_id TEXT,set_name TEXT,number TEXT,image_url TEXT,game TEXT,language TEXT,available_printings TEXT)');}finally{await db.close();}
+  const db=await connect();try{await db.exec('CREATE TABLE card_cache(id TEXT PRIMARY KEY,name TEXT,printed_name TEXT,supertype TEXT,subtypes TEXT,types TEXT,rarity TEXT,set_id TEXT,set_name TEXT,number TEXT,image_url TEXT,game TEXT,language TEXT,available_printings TEXT,illustrator TEXT)');}finally{await db.close();}
   const store=createPokemonLocalCatalog({connect}),installer=createPokemonBundleInstall({store,loadSnapshot:createCompiledSnapshotLoader({directory})});
   const app=express();app.use((req,_res,next)=>{if(req.headers['x-test-role'])req.user={role:req.headers['x-test-role']};next();});
   app.use('/install',createLocalCatalogInstallRouter({connect,installer,bundleDirectory:()=>configured?directory:undefined}));

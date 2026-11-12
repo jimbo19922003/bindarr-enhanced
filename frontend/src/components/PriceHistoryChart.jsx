@@ -20,6 +20,9 @@ export default function PriceHistoryChart({
   // The card's own currency. Stored prices are never converted, so the axis and the
   // tooltip have to read in whatever marketplace quoted them (see utils/formatPrice).
   currency,
+  // The copy's printing. The server charts that printing's own price series when
+  // it is what the headline shows, rather than the card-level trend.
+  printing,
   height = 150,
   defaultRange = '30d',
   titlePrefix,
@@ -30,6 +33,7 @@ export default function PriceHistoryChart({
   const [insufficientHistory, setInsufficientHistory] = useState(false);
   const [coverage, setCoverage] = useState({ spanDays: 0, windowDays: null, marketCount: 0, recordedCount: 0, carddexCount: 0, quoteAt: null });
   const [loading, setLoading] = useState(false);
+  const [finish, setFinish] = useState(null);
 
   useEffect(() => {
     if (!cardId) {
@@ -40,12 +44,15 @@ export default function PriceHistoryChart({
     (async () => {
       try {
         setLoading(true);
-        const response = await fetch(`/api/cards/${cardId}/price-history?range=${range}`);
+        const params = new URLSearchParams({ range });
+        if (printing) params.set('printing', printing);
+        const response = await fetch(`/api/cards/${cardId}/price-history?${params}`);
         if (response.ok) {
           const json = await response.json();
           if (!cancelled) {
             setData(json.data ?? []);
             setInsufficientHistory(!!json.insufficientHistory);
+            setFinish(json.finish || null);
             setCoverage({
               spanDays: json.spanDays ?? 0,
               windowDays: json.windowDays ?? null,
@@ -63,7 +70,7 @@ export default function PriceHistoryChart({
       }
     })();
     return () => { cancelled = true; };
-  }, [cardId, range]);
+  }, [cardId, range, printing]);
 
   const chartData = useMemo(
     () => (data || []).map(d => ({ ...d, ts: new Date(d.recorded_at).getTime() })),
@@ -137,7 +144,12 @@ export default function PriceHistoryChart({
           {t('priceHistory.quoteAsOf', { date: new Date(coverage.quoteAt).toLocaleDateString(locale) })}
         </div>
       )}
-      {!loading && !insufficientHistory && (coverage.carddexCount > 0 || coverage.marketCount > 0 || coverage.recordedCount > 0) && (
+      {!loading && finish && (
+        <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.35 }}>
+          {t('priceHistory.sourceFinish', { printing: finish })}
+        </div>
+      )}
+      {!loading && !finish && !insufficientHistory && (coverage.carddexCount > 0 || coverage.marketCount > 0 || coverage.recordedCount > 0) && (
         <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.35 }}>
           {coverage.carddexCount > 0
             ? t('priceHistory.sourceCarddex')

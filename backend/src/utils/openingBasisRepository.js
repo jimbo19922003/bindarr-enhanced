@@ -1,6 +1,4 @@
-// rip-unit-allocation-v1
 const {openingLineValue}=require('./openingWeights');
-// completed-rip-basis-v1
 'use strict';
 const { allocateOpeningCost } = require('./costBasis');
 const schema = `

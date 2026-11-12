@@ -1,6 +1,3 @@
-// sale-aware-timeline-v1
-// sp500-comparison-v1
-// live-performance-v1
 'use strict';
 const DAYS = Object.freeze({ '7d': 7, '30d': 30, '90d': 90, '1y': 365, '5y': 1826 });
 function dayAt(timestamp, timeZone) {

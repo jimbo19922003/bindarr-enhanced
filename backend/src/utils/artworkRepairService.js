@@ -1,4 +1,3 @@
-// artwork-catalogue-repair-v1
 'use strict';
 const {randomUUID}=require('node:crypto');
 const {createArtworkClient,findArtwork,saveMissingArtwork}=require('./pokemonArtworkRepair');

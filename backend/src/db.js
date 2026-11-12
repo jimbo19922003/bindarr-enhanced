@@ -1,4 +1,3 @@
-// zero-cost-confirmation-v1
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
@@ -271,6 +270,7 @@ async function initDb() {
       printed_name TEXT,
       available_printings TEXT,
       tcgplayer_product_id INTEGER,
+      illustrator TEXT,
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -304,6 +304,21 @@ async function initDb() {
       price REAL NOT NULL,
       recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY(card_id, recorded_at)
+    )
+  `);
+
+  // Per-printing price points. price_history follows price_trend, which is one
+  // finish (usually the base one); a reverse holo or holo copy is valued from its
+  // own column, so its chart needs that column's series or the headline and the
+  // graph disagree. Written by recordFinishPrices, only when a value moves.
+  await run(`
+    CREATE TABLE IF NOT EXISTS price_history_finish (
+      card_id TEXT NOT NULL,
+      finish TEXT NOT NULL,
+      price REAL NOT NULL,
+      currency TEXT,
+      recorded_at DATETIME NOT NULL,
+      PRIMARY KEY(card_id, finish, recorded_at)
     )
   `);
 
@@ -643,6 +658,12 @@ async function initDb() {
     await run(`ALTER TABLE app_settings ADD COLUMN setup_complete INTEGER NOT NULL DEFAULT 0`);
   }
 
+  // Optional nav tabs an admin has hidden for the whole install (JSON array of
+  // tab ids; see HIDEABLE_TABS in routes/settings.js).
+  if (!appSettingsCols.some(c => c.name === 'hidden_tabs')) {
+    await run(`ALTER TABLE app_settings ADD COLUMN hidden_tabs TEXT NOT NULL DEFAULT '[]'`);
+  }
+
   // Which marketplace Magic prices are read from first (#93). Scryfall quotes both
   // TCGplayer (`usd`) and Cardmarket (`eur`) for most printings; 'tcgplayer' is
   // what every install did before this column existed, so it is the default and
@@ -766,6 +787,12 @@ async function initDb() {
   // daily MTG price sweep re-fetches every owned and decked card).
   if (!cardCacheCols.some(c => c.name === 'image_url_back')) {
     await run(`ALTER TABLE card_cache ADD COLUMN image_url_back TEXT`);
+  }
+  // Card illustrator, for custom sets that collect one artist's work. Filled as
+  // cards are re-cached or a local catalogue snapshot is imported; existing rows
+  // stay null until then.
+  if (!cardCacheCols.some(c => c.name === 'illustrator')) {
+    await run(`ALTER TABLE card_cache ADD COLUMN illustrator TEXT`);
   }
 
   const collectionCols = await all(`PRAGMA table_info(collection)`);
@@ -1158,6 +1185,31 @@ async function initDb() {
       groups_fetched_at TEXT,
       full_sync_at TEXT,
       last_remote_update TEXT
+    )
+  `);
+
+  // User-defined sets (a species master set, one illustrator's cards, …). Members
+  // are the cached cards matching `rules_json`, plus `include` rows, minus
+  // `exclude` rows. completion_mode 'printing' makes every printing its own slot.
+  await run(`
+    CREATE TABLE IF NOT EXISTS custom_sets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      game TEXT NOT NULL CHECK(game IN ('pokemon', 'mtg', 'lorcana')),
+      completion_mode TEXT NOT NULL DEFAULT 'card' CHECK(completion_mode IN ('card', 'printing')),
+      rules_json TEXT NOT NULL DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_custom_sets_user ON custom_sets(user_id)`);
+  await run(`
+    CREATE TABLE IF NOT EXISTS custom_set_cards (
+      custom_set_id INTEGER NOT NULL REFERENCES custom_sets(id) ON DELETE CASCADE,
+      card_id TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK(mode IN ('include', 'exclude')),
+      PRIMARY KEY (custom_set_id, card_id)
     )
   `);
 

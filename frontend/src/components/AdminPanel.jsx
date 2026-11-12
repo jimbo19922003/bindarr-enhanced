@@ -1,4 +1,3 @@
-// provider-keys-consolidated-v1
 import { useState, useEffect, useRef } from 'react';
 import { Shield, UserPlus, Key, Trash2, ToggleLeft, ToggleRight, Search, Users, Globe, HardDriveDownload, Download, Sparkles } from 'lucide-react';
 import { useBackGuard } from '../utils/useBackGuard';
@@ -7,6 +6,15 @@ import SetupWizard from './SetupWizard';
 import ProviderKeysPanel from './ProviderKeysPanel';
 import { currencySymbol } from '../utils/formatPrice';
 import { useT } from '../utils/i18n';
+
+// Optional nav tabs; mirrors HIDEABLE_TABS in backend/src/routes/settings.js.
+const HIDEABLE_TABS = [
+  { id: 'sealed', label: 'nav.sealed' },
+  { id: 'sales-history', label: 'nav.salesHistory' },
+  { id: 'storage', label: 'nav.storage' },
+  { id: 'deckbuilder', label: 'nav.deckBuilder' },
+  { id: 'notes', label: 'nav.notes' },
+];
 
 const formatBytes = (n) => {
   if (!n) return '0 B';
@@ -40,6 +48,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
   const [mtgPriceSource, setMtgPriceSource] = useState('tcgplayer');
   const [priceRefreshDays, setPriceRefreshDays] = useState(1);
   const [portfolioTimeZone, setPortfolioTimeZone] = useState('America/Chicago');
+  const [hiddenTabs, setHiddenTabs] = useState([]);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [pokewallet, setPokewallet] = useState(null);
   const [pokewalletLoading, setPokewalletLoading] = useState(false);
@@ -177,6 +186,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
         setMtgPriceSource(data.mtg_price_source || 'tcgplayer');
         setPriceRefreshDays(data.price_refresh_days ?? 1);
         setPortfolioTimeZone(data.portfolio_time_zone);
+        setHiddenTabs(Array.isArray(data.hidden_tabs) ? data.hidden_tabs : []);
       }
     } catch (err) {
       console.error(err);
@@ -259,6 +269,7 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
           mtg_price_source: mtgPriceSource,
           price_refresh_days: Number(priceRefreshDays),
           portfolio_time_zone: portfolioTimeZone,
+          hidden_tabs: hiddenTabs,
         })
       });
 
@@ -269,6 +280,8 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
         setMtgPriceSource(data.mtg_price_source || 'tcgplayer');
         setPriceRefreshDays(data.price_refresh_days ?? 1);
         setPortfolioTimeZone(data.portfolio_time_zone);
+        setHiddenTabs(Array.isArray(data.hidden_tabs) ? data.hidden_tabs : []);
+        window.dispatchEvent(new Event('bindarr_settings_changed'));
         await fetchPokewallet();
         showToast(t('admin.settingsUpdated'));
       } else {
@@ -623,6 +636,25 @@ function AdminPanel({ user, onUpdateUser, showToast }) {
                 {t('admin.priceRefreshHint')}
               </p>
             </div>
+            <fieldset className="form-group" style={{ marginBottom: 0, border: 0, padding: 0, minWidth: 0 }}>
+              <legend style={{ marginBottom: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('admin.hiddenTabs')}</legend>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1.25rem' }}>
+                {HIDEABLE_TABS.map(({ id, label }) => (
+                  <label key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-primary)', textTransform: 'none', letterSpacing: 'normal', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={hiddenTabs.includes(id)}
+                      onChange={(e) => setHiddenTabs(prev => (e.target.checked ? [...prev, id] : prev.filter(tab => tab !== id)))}
+                      disabled={settingsLoading}
+                    />
+                    {t(label)}
+                  </label>
+                ))}
+              </div>
+              <p style={{ margin: '0.4rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                {t('admin.hiddenTabsHint')}
+              </p>
+            </fieldset>
             <button type="submit" className="btn btn-primary" style={{ padding: '0.6rem', fontWeight: 700, alignSelf: 'flex-start' }} disabled={settingsLoading}>
               {settingsLoading ? <div className="spinner" style={{ width: '14px', height: '14px', margin: 0, borderWidth: '2px' }}></div> : t('admin.saveSettings')}
             </button>

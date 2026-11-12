@@ -1,5 +1,3 @@
-// sales-ui-v1
-// performance-core-start-v1
 // Load .env from the CWD first (how a normal `npm start` from backend/ behaves),
 // then from backend/ explicitly. dotenv never overwrites an already-set variable,
 // so the first one to define a key still wins and nothing changes for existing
@@ -69,6 +67,7 @@ const setsRoutes = require('./routes/sets');
 const decksRoutes = require('./routes/decks');
 const settingsRoutes = require('./routes/settings');
 const notesRoutes = require('./routes/notes');
+const customSetsRoutes = require('./routes/customSets');
 const sealedRoutes = require('./routes/sealed');
 const sealedOpeningRoutes = require('./routes/sealedOpenings');
 const cardArtRoutes = require('./routes/cardArt');
@@ -465,6 +464,7 @@ app.use('/api', storageRoutes);
 app.use('/api', statsRoutes);
 app.use('/api', importExportRoutes);
 app.use('/api', notesRoutes);
+app.use('/api', customSetsRoutes);
 app.use('/api', sealedRoutes);
 app.use('/api', sealedOpeningRoutes);
 app.use('/api/sets', setsRoutes);

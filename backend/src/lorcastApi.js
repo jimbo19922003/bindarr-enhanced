@@ -127,6 +127,7 @@ function normalizeCard(raw, lang = 'English') {
     game: 'lorcana',
     language: langName,
     printed_name: printedName,
+    illustrator: Array.isArray(raw.illustrators) ? raw.illustrators.join(', ') : null,
     tcgplayer_url: raw.purchase_uris?.tcgplayer || (raw.tcgplayer_id ? `https://www.tcgplayer.com/product/${raw.tcgplayer_id}` : null),
     tcgplayer_product_id: raw.tcgplayer_id ? Number(raw.tcgplayer_id) : null,
   };

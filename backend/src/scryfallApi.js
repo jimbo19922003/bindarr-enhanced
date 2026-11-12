@@ -311,6 +311,7 @@ function normalizeCard(raw, lang) {
     // stays English on purpose: it is what deck lists, marketplace links and the
     // next Scryfall lookup need. Null for English printings, which have none.
     printed_name: raw.printed_name || face.printed_name || null,
+    illustrator: raw.artist || face.artist || null,
     // Scryfall's own marketplace links for THIS printing. Worth storing rather
     // than rebuilding: they search the English name, which is what TCGplayer and
     // Cardmarket actually index, so they resolve for a Japanese printing too.

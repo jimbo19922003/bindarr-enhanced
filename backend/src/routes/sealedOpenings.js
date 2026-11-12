@@ -1,4 +1,3 @@
-// rip-unit-allocation-v1
 'use strict';
 const express = require('express');
 const db = require('../db');
@@ -44,7 +43,7 @@ async function filePull(user, pull, currency, verifyPrinting) {
   if (owned?.card_id) pull.cardId = owned.card_id;
   const priced = await cardForPull(user.id, pull);
   if (verifyPrinting) validatePrinting(priced, pull.printing);
-  openings.fillFromCard(pull, priced); await applyPullPrice(pull, priced, currency, { exactPrinting: true });
+  openings.fillFromCard(pull, priced); await applyPullPrice(pull, priced, currency, { byPrinting: true });
 }
 async function resolvePull(user, raw, currency, fillPrice) {
   const pull = openings.normalizePull(raw, currency); pull.filedIds = [];

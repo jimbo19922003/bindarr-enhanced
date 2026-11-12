@@ -1,6 +1,3 @@
-// sale-adjustments-v1
-// completed-rip-basis-v1
-// contextual-sales-v1
 'use strict';
 const {createHash}=require('node:crypto');
 const {calculateSale}=require('./costBasis');

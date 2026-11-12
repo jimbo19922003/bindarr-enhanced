@@ -1,11 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useT } from '../utils/i18n';
 import RipForm from './RipForm';
 import CardImage from './CardImage';
+// A rip files every card through the collection and prices it, so a large one is
+// slow. Past this the request is abandoned rather than leaving the drawer stuck.
+const SAVE_TIMEOUT_MS = 180000;
 const money = (currency, amount) => amount == null || amount === '' ? '—' : `${currency} ${amount}`;
 export default function SealedOpenings({ product, showToast, onChanged, ripLot, onCloseRip }) {
   const { t } = useT();
+  const [saveStatus, setSaveStatus] = useState(null), pending = useRef(null);
+  useEffect(() => () => pending.current?.abort(), []);
   const [rows, setRows] = useState([]), [busy, setBusy] = useState(false), [editing, setEditing] = useState(null), [loadingEdit, setLoadingEdit] = useState(false);
   const reload = async () => {
     const response = await fetch(`/api/sealed/products/${product.id}/openings`), data = await response.json().catch(() => ({}));
@@ -18,7 +23,7 @@ export default function SealedOpenings({ product, showToast, onChanged, ripLot, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product.id]);
   const changed = async () => { await reload(); await onChanged?.(); };
-  const close = () => { if (busy) return; setEditing(null); if (ripLot) onCloseRip?.(); };
+  const close = () => { if (busy) return; setSaveStatus(null); setEditing(null); if (ripLot) onCloseRip?.(); };
   const edit = async opening => {
     if (busy || loadingEdit) return; setLoadingEdit(true);
     try {
@@ -28,12 +33,24 @@ export default function SealedOpenings({ product, showToast, onChanged, ripLot, 
   };
   const save = async body => {
     if (busy || (!editing && !ripLot)) return; setBusy(true);
+    const controller = new AbortController(), started = Date.now();
+    pending.current = controller;
+    setSaveStatus({ seconds: 0 });
+    const tick = setInterval(() => setSaveStatus(current => current && !current.error ? { seconds: Math.round((Date.now() - started) / 1000) } : current), 1000);
+    const timeout = setTimeout(() => controller.abort('timeout'), SAVE_TIMEOUT_MS);
     try {
-      const response = await fetch(editing ? `/api/sealed/openings/${editing.id}/edit` : `/api/sealed/lots/${ripLot.id}/openings`, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const response = await fetch(editing ? `/api/sealed/openings/${editing.id}/edit` : `/api/sealed/lots/${ripLot.id}/openings`, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
       const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || t('sealed.errOpening'));
-      setEditing(null); if (ripLot) onCloseRip?.(); showToast(editing ? 'Rip changes saved' : t('sealed.openingSaved')); await changed();
-    } catch (error) { showToast(error.message); } finally { setBusy(false); }
+      setSaveStatus(null); setEditing(null); if (ripLot) onCloseRip?.(); showToast(editing ? 'Rip changes saved' : t('sealed.openingSaved')); await changed();
+    } catch (error) {
+      // An abandoned request may still finish on the server, so refresh the list
+      // and tell the owner to check it rather than inviting a duplicate save.
+      const message = controller.signal.aborted ? t('sealed.saveAbandoned') : error.message || t('sealed.errOpening');
+      setSaveStatus({ error: message }); showToast(message);
+      if (controller.signal.aborted) await changed().catch(() => {});
+    } finally { clearInterval(tick); clearTimeout(timeout); if (pending.current === controller) pending.current = null; setBusy(false); }
   };
+  const stopWaiting = () => pending.current?.abort('stopped');
   const remove = async opening => {
     try {
       const response = await fetch(`/api/sealed/openings/${opening.id}`, { method: 'DELETE' }), data = await response.json().catch(() => ({}));
@@ -48,7 +65,7 @@ export default function SealedOpenings({ product, showToast, onChanged, ripLot, 
     {rows.map(opening => <OpeningCard key={opening.id} opening={opening} t={t} onEdit={() => edit(opening)} onRemove={() => remove(opening)} disabled={busy || loadingEdit} />)}
     <div className={`drawer-backdrop ${drawer ? 'open' : ''}`} onClick={close} />
     <div className={`quick-add-drawer ${drawer ? 'open' : ''}`} style={{ maxWidth: 720 }}>
-      {drawer && <RipForm key={editing ? `edit-${editing.id}` : `new-${ripLot.id}`} product={product} lot={editing ? { currency: editing.currency, total_cost: editing.cost } : ripLot} existingOpening={editing} busy={busy} t={t} showToast={showToast} onClose={close} onSubmit={save} />}
+      {drawer && <RipForm key={editing ? `edit-${editing.id}` : `new-${ripLot.id}`} product={product} lot={editing ? { currency: editing.currency, total_cost: editing.cost } : ripLot} existingOpening={editing} busy={busy} saveStatus={saveStatus} onStopWaiting={stopWaiting} t={t} showToast={showToast} onClose={close} onSubmit={save} />}
     </div>
   </section>;
 }

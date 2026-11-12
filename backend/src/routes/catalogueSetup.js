@@ -1,4 +1,3 @@
-// artwork-catalogue-repair-v1
 'use strict';
 const express=require('express');
 const {randomUUID}=require('node:crypto');

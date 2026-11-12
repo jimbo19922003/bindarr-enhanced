@@ -1,5 +1,3 @@
-// sales-inventory-protection-v1
-// opening-sale-integration-v1
 'use strict';
 const { calculateSale } = require('./costBasis');
 const openingIntegration = require('./salesOpeningIntegration');

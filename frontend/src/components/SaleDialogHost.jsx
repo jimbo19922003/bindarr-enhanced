@@ -1,5 +1,3 @@
-// sale-adjustments-v1
-// completed-rip-basis-v1
 import {useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {X} from 'lucide-react';

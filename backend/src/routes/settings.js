@@ -64,11 +64,24 @@ router.get('/version', async (req, res) => {
   }
 });
 
+// Feature tabs an admin may hide from the navigation. Core tabs (dashboard, add
+// cards, collection, settings, admin) are always shown.
+const HIDEABLE_TABS = ['sealed', 'sales-history', 'storage', 'deckbuilder', 'notes'];
+
+function parseHiddenTabs(raw) {
+  try {
+    const value = JSON.parse(raw || '[]');
+    return Array.isArray(value) ? HIDEABLE_TABS.filter(tab => value.includes(tab)) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function getEffectiveSettings() {
   const row = await db.get(`
     SELECT public_base_url, pokemon_provider, mtg_price_source, price_refresh_days, portfolio_time_zone,
            scan_exclude_tokens, scan_exclude_art_cards, scan_exclude_jumpstart, scan_exclude_promos,
-           scan_exclude_digital, setup_complete
+           scan_exclude_digital, setup_complete, hidden_tabs
     FROM app_settings WHERE id = 1
   `);
   const public_base_url = (row && row.public_base_url) || process.env.PUBLIC_BASE_URL || '';
@@ -98,6 +111,7 @@ async function getEffectiveSettings() {
     scan_exclude_promos,
     scan_exclude_digital,
     setup_complete,
+    hidden_tabs: parseHiddenTabs(row?.hidden_tabs),
   };
 }
 
@@ -126,7 +140,12 @@ router.put('/', requireAdmin, async (req, res) => {
     scan_exclude_digital,
     setup_complete,
     pokewallet_api_key,
+    hidden_tabs,
   } = req.body;
+
+  if (hidden_tabs !== undefined && (!Array.isArray(hidden_tabs) || hidden_tabs.some(tab => !HIDEABLE_TABS.includes(tab)))) {
+    return res.status(400).json({ error: `Hidden tabs must be any of: ${HIDEABLE_TABS.join(', ')}.` });
+  }
 
   if (portfolio_time_zone !== undefined && !isValidTimeZone(portfolio_time_zone)) {
     return res.status(400).json({ error: 'Portfolio timezone must be a valid IANA timezone, such as America/Chicago.' });
@@ -219,6 +238,9 @@ router.put('/', requireAdmin, async (req, res) => {
   }
   if (portfolio_time_zone !== undefined) {
     await db.run(`UPDATE app_settings SET portfolio_time_zone = ? WHERE id = 1`, [portfolio_time_zone]);
+  }
+  if (hidden_tabs !== undefined) {
+    await db.run(`UPDATE app_settings SET hidden_tabs = ? WHERE id = 1`, [JSON.stringify(parseHiddenTabs(JSON.stringify(hidden_tabs)))]);
   }
   if (scan_exclude_tokens !== undefined) {
     await db.run(`UPDATE app_settings SET scan_exclude_tokens = ? WHERE id = 1`, [scan_exclude_tokens ? 1 : 0]);

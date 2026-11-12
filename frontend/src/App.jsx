@@ -1,4 +1,3 @@
-// contextual-sales-v1
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { LayoutDashboard, Database, MapPin, Sparkles, Settings as SettingsIcon, LogOut, ShieldAlert, Plus, Swords, StickyNote, Package } from 'lucide-react';
 import Login from './components/Login';
@@ -76,6 +75,8 @@ window.fetch = function (input, options = {}) {
 };
 
 const handledOidcReturns = new Set();
+// Fired by the admin panel after instance settings are saved.
+const SETTINGS_CHANGED = 'bindarr_settings_changed';
 
 function App() {
   const { t } = useT();
@@ -91,6 +92,7 @@ function App() {
   const [pendingCollectionSet, setPendingCollectionSet] = useState(null);
   const [toast, setToast] = useState(null);
   const [statsTrigger, setStatsTrigger] = useState(0);
+  const [hiddenTabs, setHiddenTabs] = useState([]);
 
   useEffect(() => {
     const invalidate = () => setStatsTrigger(previous => previous + 1);
@@ -216,12 +218,27 @@ function App() {
     window.addEventListener('resize', check);
     document.fonts?.ready.then(check).catch(() => {});
     return () => window.removeEventListener('resize', check);
-  }, [token, user, activeTab, t]);
+  }, [token, user, activeTab, hiddenTabs, t]);
 
   useLayoutEffect(() => {
     shownTabRef.current = activeTab;
     window.scrollTo(0, scrollByTabRef.current[activeTab] || 0);
   }, [activeTab]);
+  // Optional tabs an admin hid for the install. Only the nav buttons go away:
+  // links from other views (for example "view in storage") still open them.
+  useEffect(() => {
+    if (!token) return undefined;
+    let cancelled = false;
+    const load = () => fetch('/api/settings')
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (!cancelled && data) setHiddenTabs(Array.isArray(data.hidden_tabs) ? data.hidden_tabs : []); })
+      .catch(() => {});
+    load();
+    window.addEventListener(SETTINGS_CHANGED, load);
+    return () => { cancelled = true; window.removeEventListener(SETTINGS_CHANGED, load); };
+  }, [token]);
+  const tabShown = (tab) => !hiddenTabs.includes(tab) || activeTab === tab;
+
   useEffect(() => {
     if (!user || user.role !== 'admin') return;
     let cancelled = false;
@@ -294,11 +311,11 @@ function App() {
           <button className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => goTab('dashboard')} aria-label={t('nav.dashboard')} title={t('nav.dashboard')}><LayoutDashboard size={18} /><span className="nav-tab-label">{t('nav.dashboard')}</span></button>
           <button className={`nav-tab ${activeTab === 'add-cards' ? 'active' : ''}`} onClick={() => goTab('add-cards')} aria-label={t('nav.addCards')} title={t('nav.addCards')}><Plus size={18} /><span className="nav-tab-label">{t('nav.addCards')}</span></button>
           <button className={`nav-tab ${activeTab === 'collection' ? 'active' : ''}`} onClick={() => goTab('collection')} aria-label={t('nav.collection')} title={t('nav.collection')}><Database size={18} /><span className="nav-tab-label">{t('nav.collection')}</span></button>
-          <button className={`nav-tab ${activeTab === 'sealed' ? 'active' : ''}`} onClick={() => goTab('sealed')} aria-label={t('nav.sealed')} title={t('nav.sealed')}><Package size={18} /><span className="nav-tab-label">{t('nav.sealed')}</span></button>
-          <button className={`nav-tab ${activeTab === 'sales-history' ? 'active' : ''}`} onClick={() => goTab('sales-history')} aria-label="Sales History" title="Sales History"><Database size={18} /><span className="nav-tab-label">Sales History</span></button>
-          <button className={`nav-tab ${activeTab === 'storage' ? 'active' : ''}`} onClick={() => goTab('storage')} aria-label={t('nav.storage')} title={t('nav.storage')}><MapPin size={18} /><span className="nav-tab-label">{t('nav.storage')}</span></button>
-          <button className={`nav-tab ${activeTab === 'deckbuilder' ? 'active' : ''}`} onClick={() => goTab('deckbuilder')} aria-label={t('nav.deckBuilder')} title={t('nav.deckBuilder')}><Swords size={18} /><span className="nav-tab-label">{t('nav.deckBuilder')}</span></button>
-          <button className={`nav-tab ${activeTab === 'notes' ? 'active' : ''}`} onClick={() => goTab('notes')} aria-label={t('nav.notes')} title={t('nav.notes')}><StickyNote size={18} /><span className="nav-tab-label">{t('nav.notes')}</span></button>
+          {tabShown('sealed') && <button className={`nav-tab ${activeTab === 'sealed' ? 'active' : ''}`} onClick={() => goTab('sealed')} aria-label={t('nav.sealed')} title={t('nav.sealed')}><Package size={18} /><span className="nav-tab-label">{t('nav.sealed')}</span></button>}
+          {tabShown('sales-history') && <button className={`nav-tab ${activeTab === 'sales-history' ? 'active' : ''}`} onClick={() => goTab('sales-history')} aria-label={t('nav.salesHistory')} title={t('nav.salesHistory')}><Database size={18} /><span className="nav-tab-label">{t('nav.salesHistory')}</span></button>}
+          {tabShown('storage') && <button className={`nav-tab ${activeTab === 'storage' ? 'active' : ''}`} onClick={() => goTab('storage')} aria-label={t('nav.storage')} title={t('nav.storage')}><MapPin size={18} /><span className="nav-tab-label">{t('nav.storage')}</span></button>}
+          {tabShown('deckbuilder') && <button className={`nav-tab ${activeTab === 'deckbuilder' ? 'active' : ''}`} onClick={() => goTab('deckbuilder')} aria-label={t('nav.deckBuilder')} title={t('nav.deckBuilder')}><Swords size={18} /><span className="nav-tab-label">{t('nav.deckBuilder')}</span></button>}
+          {tabShown('notes') && <button className={`nav-tab ${activeTab === 'notes' ? 'active' : ''}`} onClick={() => goTab('notes')} aria-label={t('nav.notes')} title={t('nav.notes')}><StickyNote size={18} /><span className="nav-tab-label">{t('nav.notes')}</span></button>}
           <button className={`nav-tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => goTab('settings')} aria-label={t('nav.settings')} title={t('nav.settings')}><SettingsIcon size={18} /><span className="nav-tab-label">{t('nav.settings')}</span></button>
           {user.role === 'admin' && <button className={`nav-tab ${activeTab === 'admin' ? 'active' : ''}`} onClick={() => goTab('admin')} aria-label={t('nav.admin')} title={t('nav.admin')}><ShieldAlert size={18} style={{ color: 'var(--accent-red)' }} /><span className="nav-tab-label">{t('nav.admin')}</span></button>}
         </nav>

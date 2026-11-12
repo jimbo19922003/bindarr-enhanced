@@ -1,4 +1,3 @@
-// catalogue-setup-installed-v1
 import { useEffect, useState } from 'react';
 import { Cpu, Download, Check, X, Layers, MapPin, Trash2, Pencil, ArrowLeft, ArrowRight, Camera, Database, Swords, LayoutDashboard, Settings as SettingsIcon, Languages } from 'lucide-react';
 import { GAMES, enabledGames, setGameEnabled, defaultGame, gameLabel } from '../utils/games';

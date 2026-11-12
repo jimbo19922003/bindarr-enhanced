@@ -1,4 +1,3 @@
-// contextual-sales-v1
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Archive, ArchiveRestore, Download, Package, Plus, Search, Upload, X } from 'lucide-react';

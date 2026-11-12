@@ -6,7 +6,7 @@ const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex
 const text=(v,label)=>{if(typeof v!=='string'||!v.trim()||v.length>500||v.includes('\0'))throw new TypeError('Invalid '+label);return v.trim();};
 const language=code=>{const row=LANGUAGES.find(l=>l.code===code);if(!row)throw new TypeError('Unsupported catalog language');return row;};
 const numberKey=value=>{const s=String(value).trim().toLowerCase();return /^\d+$/.test(s)?s.replace(/^0+(?=\d)/,''):s;};
-const metadata=['id','name','printed_name','supertype','subtypes','types','rarity','set_id','set_name','number','image_url','game','language','available_printings'];
+const metadata=['id','name','printed_name','supertype','subtypes','types','rarity','set_id','set_name','number','image_url','game','language','available_printings','illustrator'];
 const schema=`CREATE TABLE IF NOT EXISTS pokemon_catalog_snapshot(id INTEGER PRIMARY KEY AUTOINCREMENT,language TEXT NOT NULL,source_commit TEXT NOT NULL,content_hash TEXT NOT NULL,scan_hash TEXT NOT NULL,card_count INTEGER NOT NULL,set_count INTEGER NOT NULL,imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS pokemon_catalog_active(language TEXT PRIMARY KEY,snapshot_id INTEGER NOT NULL REFERENCES pokemon_catalog_snapshot(id),scan_refresh_required INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS pokemon_catalog_set(snapshot_id INTEGER NOT NULL REFERENCES pokemon_catalog_snapshot(id),id TEXT NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(snapshot_id,id));
@@ -20,16 +20,18 @@ function normalize(input){
  for(const raw of input.sets){const id=text(raw.id,'set ID');if(seenSets.has(id))throw new TypeError('Duplicate set ID');seenSets.add(id);if(raw.serie?.id==='tcgp'){digital.add(id);continue;}sets.push({id,name:text(raw.name,'localized set name'),series:raw.serie?.name||'',release_date:raw.releaseDate||'',printed_total:Number.isSafeInteger(raw.cardCount?.official)&&raw.cardCount.official>=0?raw.cardCount.official:null});}
  const bySet=new Map(sets.map(s=>[s.id,s])),seen=new Set(),cards=[];
  for(const raw of input.cards){const providerId=text(raw.id,'provider card ID'),setId=text(raw.set?.id,'card set ID');if(digital.has(setId))continue;if(!bySet.has(setId))throw new TypeError('Card refers to an absent set');const id=`tcgdex-${lang.code}-${providerId}`;if(seen.has(id))throw new TypeError('Duplicate card ID');seen.add(id);if(raw.localId==null||String(raw.localId).trim()==='')throw new TypeError('Missing printed collector number');let image='';if(raw.image){const u=new URL(raw.image);if(u.protocol!=='https:'||u.hostname!=='assets.tcgdex.net'||u.username||u.password||u.port||u.search||u.hash)throw new TypeError('Untrusted catalog image reference');image=raw.image.replace(/\/$/,'')+'/low.png';}
-  const name=text(raw.name,'localized card name');cards.push({id,name,printed_name:name,supertype:({Pokemon:'Pokémon',Trainer:'Trainer',Energy:'Energy'})[raw.category]||raw.category||'',subtypes:raw.stage?[String(raw.stage).replace(/(Stage)(\d)/,'$1 $2')]:[],types:Array.isArray(raw.types)?raw.types:[],rarity:raw.rarity||'',set_id:setId,set_name:bySet.get(setId).name,number:String(raw.localId),image_url:image,game:'pokemon',language:lang.name,available_printings:tcgdexPrintings(raw.variants)});
+  const name=text(raw.name,'localized card name');cards.push({id,name,printed_name:name,supertype:({Pokemon:'Pokémon',Trainer:'Trainer',Energy:'Energy'})[raw.category]||raw.category||'',subtypes:raw.stage?[String(raw.stage).replace(/(Stage)(\d)/,'$1 $2')]:[],types:Array.isArray(raw.types)?raw.types:[],rarity:raw.rarity||'',set_id:setId,set_name:bySet.get(setId).name,number:String(raw.localId),image_url:image,game:'pokemon',language:lang.name,available_printings:tcgdexPrintings(raw.variants),illustrator:typeof raw.illustrator==='string'&&raw.illustrator.trim()?raw.illustrator.trim().slice(0,200):null});
  }
  if(!sets.length||!cards.length)throw new TypeError('No physical Pokémon records in snapshot');
  sets.sort((a,b)=>a.id.localeCompare(b.id));cards.sort((a,b)=>a.id.localeCompare(b.id));
- const identityCards=cards.map(({available_printings,...card})=>card);
+ // Printings and illustrator are enrichment, not identity: adding them must not
+ // force a new snapshot or a scan rebuild.
+ const identityCards=cards.map(({available_printings,illustrator,...card})=>card);
  return {language:lang.code,commit:input.commit,sets,cards,contentHash:hash({sets,cards:identityCards}),scanHash:hash(cards.map(c=>[c.id,c.image_url]))};
 }
 const parse=row=>{if(!row)return null;const out={...row};for(const k of ['subtypes','types','color_identity'])if(typeof out[k]==='string')out[k]=JSON.parse(out[k]);return out;};
 async function upsertCard(db,card){
- const updates=metadata.filter(k=>k!=='id').map(k=>k==='name'?"name=CASE WHEN excluded.name=excluded.printed_name AND card_cache.name<>card_cache.printed_name THEN card_cache.name ELSE excluded.name END":k==='image_url'?"image_url=CASE WHEN excluded.image_url='' THEN card_cache.image_url ELSE excluded.image_url END":k==='available_printings'?'available_printings=COALESCE(excluded.available_printings,card_cache.available_printings)':`${k}=excluded.${k}`).join(',');
+ const updates=metadata.filter(k=>k!=='id').map(k=>k==='name'?"name=CASE WHEN excluded.name=excluded.printed_name AND card_cache.name<>card_cache.printed_name THEN card_cache.name ELSE excluded.name END":k==='image_url'?"image_url=CASE WHEN excluded.image_url='' THEN card_cache.image_url ELSE excluded.image_url END":k==='available_printings'?'available_printings=COALESCE(excluded.available_printings,card_cache.available_printings)':k==='illustrator'?'illustrator=COALESCE(excluded.illustrator,card_cache.illustrator)':`${k}=excluded.${k}`).join(',');
  const sql=`INSERT INTO card_cache(${metadata.join(',')}) VALUES(${metadata.map(()=>'?').join(',')}) ON CONFLICT(id) DO UPDATE SET ${updates}`;
  const prior=await db.get('SELECT game,language FROM card_cache WHERE id=?',[card.id]);
  if(prior&&(prior.game!=='pokemon'||prior.language!==card.language))throw new Error('Existing card identity conflicts with imported language or game');
@@ -41,7 +43,7 @@ function createPokemonLocalCatalog({connect}){
  return {
   importSnapshot(input){const data=normalize(input);return transaction(true,async db=>{
    await db.exec(schema);const previous=await db.get('SELECT s.*,a.scan_refresh_required FROM pokemon_catalog_active a JOIN pokemon_catalog_snapshot s ON s.id=a.snapshot_id WHERE a.language=?',[data.language]);
-   if(previous?.source_commit===data.commit){if(previous.content_hash!==data.contentHash)throw new Error('Same upstream commit produced different normalized content');for(const card of data.cards)if(card.available_printings)await db.run('UPDATE card_cache SET available_printings=? WHERE id=?',[JSON.stringify(card.available_printings),card.id]);return {...previous,unchanged:true};}
+   if(previous?.source_commit===data.commit){if(previous.content_hash!==data.contentHash)throw new Error('Same upstream commit produced different normalized content');for(const card of data.cards){if(card.available_printings)await db.run('UPDATE card_cache SET available_printings=? WHERE id=?',[JSON.stringify(card.available_printings),card.id]);if(card.illustrator)await db.run('UPDATE card_cache SET illustrator=? WHERE id=?',[card.illustrator,card.id]);}return {...previous,unchanged:true};}
    const inserted=await db.run('INSERT INTO pokemon_catalog_snapshot(language,source_commit,content_hash,scan_hash,card_count,set_count) VALUES(?,?,?,?,?,?)',[data.language,data.commit,data.contentHash,data.scanHash,data.cards.length,data.sets.length]);
    const id=inserted.lastID;
    for(const set of data.sets)await db.run('INSERT INTO pokemon_catalog_set VALUES(?,?,?)',[id,set.id,JSON.stringify(set)]);

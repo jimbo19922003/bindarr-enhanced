@@ -1,4 +1,3 @@
-// catalogue-setup-installed-v1
 'use strict';
 const express = require('express');
 const {LANGUAGES} = require('../utils/languages');

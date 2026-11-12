@@ -118,11 +118,20 @@ async function main() {
     assert.strictEqual(finishes.status, 201, JSON.stringify(finishes.body));
     const finishPulls = finishes.body.opening.pulls;
     assert.strictEqual(finishPulls[0].current_value, '10.00');
-    assert.strictEqual(finishPulls[1].current_value, null);
+    // No Reverse Holofoil quote: valued from the card's market price as an estimate.
+    assert.strictEqual(finishPulls[1].current_value, '68.56');
+    assert.strictEqual(finishPulls[1].value_at_opening, '68.56');
     const copies = await db.all('SELECT printing FROM collection WHERE user_id = ? ORDER BY id', [admin.id]);
     assert.deepStrictEqual(copies.map(row => row.printing), ['Holofoil', 'Holofoil', 'Reverse Holofoil']);
     await send('GET', `/api/sealed/products/${productId}/openings`);
-    assert.strictEqual((await db.get('SELECT current_unit_cents FROM sealed_pull WHERE id = ?', [finishPulls[1].id])).current_unit_cents, null);
+    assert.strictEqual((await db.get('SELECT current_unit_cents FROM sealed_pull WHERE id = ?', [finishPulls[1].id])).current_unit_cents, 6856);
+    const override = await send('POST', `/api/sealed/lots/${lotId}/openings`, { pulls: [
+      { card_id: 'tcgdex-en-rip-eur', quantity: 1, printing: 'Reverse Holofoil', current_value: '3.00' },
+    ] });
+    assert.strictEqual(override.status, 201, JSON.stringify(override.body));
+    assert.strictEqual(override.body.opening.pulls[0].current_value, '3.00');
+    assert.strictEqual(override.body.opening.pulls[0].value_at_opening, '3.00');
+    assert.strictEqual((await send('DELETE', `/api/sealed/openings/${override.body.opening.id}`)).status, 200);
     const gift = await send('POST', '/api/collection', { card_id: 'tcgdex-en-rip-usd', purchase_price: 0, zero_cost_confirmed: true });
     assert.strictEqual(gift.status, 200, JSON.stringify(gift.body));
     const giftCopy = await db.get('SELECT purchase_price, zero_cost_confirmed FROM collection WHERE id = ?', [gift.body.id]);

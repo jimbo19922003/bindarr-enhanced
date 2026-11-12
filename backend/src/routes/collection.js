@@ -1,4 +1,3 @@
-// zero-cost-confirmation-v1
 const zeroCost = require('../utils/zeroCost');
 const crypto = require('crypto');
 const express = require('express');
@@ -10,13 +9,13 @@ const lorcastApi = require('../lorcastApi');
 const cvScan = require('../cvScan');
 const tcgplayerCatalog = require('../tcgplayerCatalog');
 const languages = require('../utils/languages');
-const pokemonProvider = require('../utils/pokemonProvider');
 const psaApi = require('../psaApi');
 const gradedPrices = require('../gradedPrices');
 const cardApi = require('../utils/cardApi');
 const pokewallet = require('../pokewalletApi');
 const { matchSearchResults, extractQuote } = require('../utils/pokewalletMatch');
 const { searchLimiter } = require('../middleware/auth');
+const { pokemonApiFor, searchApiFor } = require('../utils/searchApi');
 const { resolveCardPrice, parseCardRow, recordPrice } = require('../utils/priceHelpers');
 const { parseSetList } = require('../utils/setQuery');
 const { compartmentLabel, isBinderType, rebalanceCompartmentByScheme, stackKey, STACK_KEY_SQL } = require('../utils/compartmentSort');
@@ -87,11 +86,7 @@ async function attachOwnedQty(cards, userId) {
 //
 // So: non-English always goes to TCGdex (pokemontcg.io is English-only), and
 // English follows whichever provider actually built the data being searched.
-// That rule lives in utils/pokemonProvider — this only maps its answer to a module.
-async function pokemonApiFor(lang) {
-  if (await require('../utils/pokemonLocalMode').isPokemonLocalModeEnabled()) return require('../utils/localPokemonSearch').getLocalPokemonSearch();
-  return pokemonProvider.apiFor(lang);
-}
+// That rule lives in utils/pokemonProvider; utils/searchApi maps its answer to a module.
 
 // Collector numbers as both providers can agree on. TCGdex zero-pads ('013')
 // where pokemontcg.io and TCGplayer do not ('13'), and letters have to survive
@@ -157,7 +152,7 @@ router.all('/search', searchLimiter, async (req, res) => {
   try {
     // Every provider takes the same options object and ignores what does not
     // apply to it, so there is one call here rather than a branch per provider.
-    const api = game === 'mtg' ? scryfallApi : (game === 'lorcana' ? lorcastApi : await pokemonApiFor(lang));
+    const api = await searchApiFor(game, lang);
     let { cards, total } = await api.searchCards({
       name, number, set, scope, userId: req.user.id, lang,
       apiKey: req.user.tcg_api_key, allPrints: prints === '1', page, limit,
@@ -238,7 +233,7 @@ router.get('/collection/cert/:certNumber', searchLimiter, async (req, res) => {
         // discriminator between printings of the same name, and the search treats
         // it as optional so a label without one still returns something.
         const number = cert.card_number || '';
-        const api = game === 'mtg' ? scryfallApi : (game === 'lorcana' ? lorcastApi : await pokemonApiFor(null));
+        const api = await searchApiFor(game, null);
         ({ cards: candidates } = await api.searchCards({
           name, number, userId: req.user.id, apiKey: req.user.tcg_api_key,
           allPrints: true, limit: 24,
@@ -591,22 +586,26 @@ router.get('/collection/sets/:setId/cards', async (req, res) => {
     return res.status(400).json({ error: 'Invalid language' });
   }
   const language = resolvedLanguage || null;
+  // A copy of any language with the same set and collector number counts.
+  const listedSql = `
+          SELECT 1 FROM collection c JOIN card_cache owned_card ON owned_card.id = c.card_id
+          WHERE c.user_id = ? AND c.list_type = ?
+            AND owned_card.game = cc.game AND owned_card.set_id = cc.set_id
+            AND trim(owned_card.number) != '' AND trim(cc.number) != ''
+            AND lower(ltrim(trim(owned_card.number), '0')) = lower(ltrim(trim(cc.number), '0'))`;
   try {
     const selectCards = async (lang) => db.all(`
       SELECT cc.id, cc.name, cc.printed_name, cc.set_id, cc.set_name, cc.number,
-        cc.image_url, cc.rarity, cc.game, cc.language,
-        EXISTS (
-          SELECT 1 FROM collection c JOIN card_cache owned_card ON owned_card.id = c.card_id
-          WHERE c.user_id = ? AND c.list_type = 'collection'
-            AND owned_card.game = cc.game AND owned_card.set_id = cc.set_id
-            AND trim(owned_card.number) != '' AND trim(cc.number) != ''
-            AND lower(ltrim(trim(owned_card.number), '0')) = lower(ltrim(trim(cc.number), '0'))
-        ) AS owned
+        cc.image_url, cc.rarity, cc.game, cc.language, cc.available_printings,
+        cc.price_trend, cc.price_currency, cc.price_normal, cc.price_holofoil,
+        cc.price_reverse_holofoil, cc.price_1st_edition,
+        EXISTS (${listedSql}) AS owned,
+        EXISTS (${listedSql}) AS wishlisted
       FROM card_cache cc
       WHERE cc.game = ? AND cc.set_id = ?${lang ? ' AND cc.language = ?' : ''}
     `, lang
-      ? [req.user.id, game, req.params.setId, lang]
-      : [req.user.id, game, req.params.setId]);
+      ? [req.user.id, 'collection', req.user.id, 'wishlist', game, req.params.setId, lang]
+      : [req.user.id, 'collection', req.user.id, 'wishlist', game, req.params.setId]);
 
     const readCachedCards = async () => {
       if (language) return selectCards(language);
@@ -752,6 +751,8 @@ class AddCardError extends Error {
 // and means an ungraded card, not a missing value.
 const GRADERS = ['Raw', 'PSA', 'BGS', 'CGC', 'SGC', 'TAG'];
 
+const ADD_PRICE_REFRESH_MS = 10000;
+
 async function addCardToCollection(user, body, { openingPull = false, scanRequest = null } = {}) {
   const {
     card_id,
@@ -773,6 +774,9 @@ async function addCardToCollection(user, body, { openingPull = false, scanReques
 
   if (!card_id) {
     throw new AddCardError(400, 'card_id is required');
+  }
+  if (!['collection', 'wishlist'].includes(list_type)) {
+    throw new AddCardError(400, 'Invalid list_type');
   }
 
   const cost = zeroCost.parsePurchaseCost(body, { openingPull });
@@ -841,12 +845,26 @@ async function addCardToCollection(user, body, { openingPull = false, scanReques
     // while displaying the name the card is actually printed with.
     card = await tcgdexApi.learnEnglishName(card);
 
-    // Price supported English TCGdex identities before filing the copy.
-    if (card.game === 'pokemon' && String(card.id || '').startsWith('tcgdex-en-')) {
+    // Price supported English TCGdex identities before filing the copy. Bounded:
+    // a rip files every pull through here in sequence, and a slow provider must
+    // not hold the whole save open. A refresh that misses the budget still lands
+    // in card_cache for the next read. Wishlist adds skip it: a whole set's missing
+    // cards can be wishlisted at once, and nothing is valued off a wishlist row.
+    if (list_type === 'collection' && card.game === 'pokemon' && String(card.id || '').startsWith('tcgdex-en-')) {
       try {
-        await require('../pokemonPrices').getPokemonPrices().refreshCard(card);
-        const refreshed = await db.get(`SELECT * FROM card_cache WHERE id = ?`, [card.id]);
-        if (refreshed) card = refreshed;
+        const refresh = Promise.resolve(require('../pokemonPrices').getPokemonPrices().refreshCard(card));
+        let timer;
+        const finished = await Promise.race([
+          refresh.then(() => true),
+          new Promise(resolve => { timer = setTimeout(() => resolve(false), ADD_PRICE_REFRESH_MS); }),
+        ]).finally(() => clearTimeout(timer));
+        if (finished) {
+          const refreshed = await db.get(`SELECT * FROM card_cache WHERE id = ?`, [card.id]);
+          if (refreshed) card = refreshed;
+        } else {
+          refresh.catch(() => {});
+          console.warn(`Pokémon price on add timed out for ${card.id}; filing with the cached price.`);
+        }
       } catch (err) {
         console.warn(`Pokémon price on add skipped for ${card.id}: ${err.code || 'upstream'}`);
       }
@@ -1086,7 +1104,7 @@ router.post('/collection/bulk-add', async (req, res) => {
   res.status(failed.length && !added.length ? 500 : 200).json({
     message: failed.length
       ? `Added ${added.length} of ${card_ids.length} cards; ${failed.length} failed.`
-      : `Added ${added.length} card${added.length === 1 ? '' : 's'}${qty > 1 ? ` (x${qty} each)` : ''} to collection.`,
+      : `Added ${added.length} card${added.length === 1 ? '' : 's'}${qty > 1 ? ` (x${qty} each)` : ''} to ${shared.list_type === 'wishlist' ? 'wishlist' : 'collection'}.`,
     added: added.length,
     failed
   });

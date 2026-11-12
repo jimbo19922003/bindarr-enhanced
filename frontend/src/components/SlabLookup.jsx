@@ -54,7 +54,7 @@ export default function SlabLookup({ onAddSuccess, showToast }) {
   };
 
   const addCandidate = async (card) => {
-    if (!result) return;
+    if (!result || adding) return;
     setAdding(card.id);
     try {
       const res = await fetch('/api/collection', {
@@ -189,7 +189,7 @@ export default function SlabLookup({ onAddSuccess, showToast }) {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={adding === card.id}
+                    disabled={adding !== null}
                     onClick={() => addCandidate(card)}
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem', fontSize: '0.72rem', padding: '0.4rem' }}
                   >

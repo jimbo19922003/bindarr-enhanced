@@ -1,4 +1,3 @@
-// rip-unit-allocation-v1
 const {resizeOpeningLine}=require('../utils/openingWeights');
 'use strict';
 const express = require('express');
@@ -48,16 +47,23 @@ router.post('/sealed/rip-ownership', async (req, res) => {
       if (!(await db.get('SELECT id FROM sealed_opening WHERE id = ? AND user_id = ?', [openingId, req.user.id]))) throw fail('Opening not found', 404);
     }
     const counts = Object.fromEntries(ids.map(id => [id, 0]));
+    const printings = Object.fromEntries(ids.map(id => [id, []]));
     if (ids.length) {
       const exclude = openingId == null ? '' : ` AND NOT EXISTS (SELECT 1 FROM sealed_pull sp WHERE sp.user_id = c.user_id AND sp.opening_id = ? AND instr(',' || COALESCE(sp.filed_ids, '') || ',', ',' || c.id || ',') > 0)`;
-      const rows = await db.all(`SELECT c.card_id, SUM(COALESCE(c.quantity, 1)) AS owned FROM collection c
-        WHERE c.user_id = ? AND c.list_type = 'collection' AND c.card_id IN (${ids.map(() => '?').join(',')})${exclude} GROUP BY c.card_id`,
+      const rows = await db.all(`SELECT c.card_id, c.printing, SUM(COALESCE(c.quantity, 1)) AS owned FROM collection c
+        WHERE c.user_id = ? AND c.list_type = 'collection' AND c.card_id IN (${ids.map(() => '?').join(',')})${exclude} GROUP BY c.card_id, c.printing`,
       [req.user.id, ...ids, ...(openingId == null ? [] : [openingId])]);
-      for (const row of rows) counts[row.card_id] = row.owned;
+      for (const row of rows) {
+        counts[row.card_id] += row.owned;
+        if (row.owned > 0) printings[row.card_id].push(row.printing);
+      }
     }
     res.set('Cache-Control', 'private, no-store');
-    res.json({ counts, excluded_opening_id: openingId, identity: 'catalog-card-any-finish' });
-  } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : 'Could not check collection ownership' }); }
+    res.json({ counts, printings, excluded_opening_id: openingId, identity: 'catalog-card-any-finish' });
+  } catch (error) {
+    if (!error.status) console.error('Could not check rip ownership:', error);
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'Could not check collection ownership' });
+  }
 });
 
 router.put('/sealed/openings/:id/edit', async (req, res) => {
@@ -88,9 +94,10 @@ router.put('/sealed/openings/:id/edit', async (req, res) => {
         if (raw.printing != null) validatePrinting(card, pull.printing);
         if (pull.collectionId) throw fail('New entries must not supply existing collection links');
         opening.fillFromCard(pull, card);
-        pull.currentUnit = null; pull.currentLine = null; pull.currentBlank = true;
+        // A value typed on the line is the owner's override; a blank one is priced
+        // from the catalog. The opening snapshot always derives from the result.
         pull.openedUnit = null; pull.openedLine = null;
-        await applyPullPrice(pull, { ...card, printing: pull.printing }, original.currency, { exactPrinting: true });
+        await applyPullPrice(pull, { ...card, printing: pull.printing }, original.currency, { byPrinting: true });
         opening.snapshotOpeningValue(pull);
       } else if (!pull.savedId) opening.snapshotOpeningValue(pull);
       if (!pull.name) throw fail('Pull name is required');

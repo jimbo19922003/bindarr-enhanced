@@ -1,4 +1,3 @@
-// zero-cost-confirmation-v1
 import { installZeroCostConfirmation } from './utils/zeroCostConfirmation.mjs';
 import { Capacitor } from '@capacitor/core';
 

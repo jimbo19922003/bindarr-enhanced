@@ -1,4 +1,3 @@
-// sale-aware-timeline-v1
 'use strict';
 const { dailySchema, dailyUpsert } = require('../../../shared/investmentLedgerSchema.json');
 function createCollector({ db, getPortfolio, createValuation, connectRead, now = Date.now, timeZone = 'America/Chicago', getTimeZone = async () => timeZone, scopes = ['', 'pokemon', 'mtg', 'lorcana'] }) {
