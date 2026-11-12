@@ -43,6 +43,8 @@ async function runTests() {
   const server = spawn('node', [path.join(projectRoot, 'backend/src/server.js')], {
     env: { ...process.env, PORT: port, DB_PATH: tmpDb, HTTPS_PORT: '', ALLOW_REGISTRATION: 'true' },
   });
+  let serverErrors = '';
+  server.stderr.on('data', data => { serverErrors += data.toString(); });
   const json = { 'Content-Type': 'application/json' };
 
   try {
@@ -51,8 +53,9 @@ async function runTests() {
 
     const login = async (username, password) => {
       const r = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: json, body: JSON.stringify({ username, password }) });
-      assert.strictEqual(r.status, 200, `login ${username}`);
-      return { ...json, Authorization: `Bearer ${(await r.json()).token}` };
+      const body = await r.json();
+      assert.strictEqual(r.status, 200, `login ${username}: ${JSON.stringify(body)}\n${serverErrors}`);
+      return { ...json, Authorization: `Bearer ${body.token}` };
     };
     const admin = await login('admin', process.env.DEFAULT_ADMIN_PASSWORD || 'test-admin-password');
     const reg = await fetch(`${base}/api/auth/register`, {

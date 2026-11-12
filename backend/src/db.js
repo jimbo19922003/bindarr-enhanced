@@ -59,32 +59,53 @@ const dbConnection = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
+// busy_timeout already waits out ordinary lock contention. A SQLITE_BUSY that comes
+// back immediately is a WAL snapshot conflict instead: this shared connection had a
+// read in flight while another connection (daily performance, sales, a test harness)
+// committed, so its next write cannot upgrade that stale snapshot and SQLite skips
+// the busy handler. The statement did not apply, and the conflict clears once the
+// in-flight read finishes, so retry it briefly rather than failing the request.
+const BUSY_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800];
+const IMMEDIATE_BUSY_MS = 1000;
+
+async function retryBusy(attempt, delays = BUSY_RETRY_DELAYS_MS) {
+  for (let i = 0; ; i++) {
+    const startedAt = Date.now();
+    try {
+      return await attempt();
+    } catch (err) {
+      if (err?.code !== 'SQLITE_BUSY' || i >= delays.length || Date.now() - startedAt > IMMEDIATE_BUSY_MS) throw err;
+      await new Promise(resolve => setTimeout(resolve, delays[i]));
+    }
+  }
+}
+
 // Helper wrappers for Promise-based SQL operations
 function run(sql, params = []) {
-  return new Promise((resolve, reject) => {
+  return retryBusy(() => new Promise((resolve, reject) => {
     dbConnection.run(sql, params, function (err) {
       if (err) reject(err);
       else resolve({ lastID: this.lastID, changes: this.changes });
     });
-  });
+  }));
 }
 
 function get(sql, params = []) {
-  return new Promise((resolve, reject) => {
+  return retryBusy(() => new Promise((resolve, reject) => {
     dbConnection.get(sql, params, (err, row) => {
       if (err) reject(err);
       else resolve(row);
     });
-  });
+  }));
 }
 
 function all(sql, params = []) {
-  return new Promise((resolve, reject) => {
+  return retryBusy(() => new Promise((resolve, reject) => {
     dbConnection.all(sql, params, (err, rows) => {
       if (err) reject(err);
       else resolve(rows);
     });
-  });
+  }));
 }
 
 // Run fn inside BEGIN IMMEDIATE / COMMIT, rolling back if it throws.
@@ -1357,6 +1378,7 @@ module.exports = {
   seedStarterLocations,
   adoptOrphanRows,
   hashPassword,
+  retryBusy,
   // Exported for tests — the rename runs at module load, so it can't be
   // exercised through a normal require.
   resolveDbPath,
