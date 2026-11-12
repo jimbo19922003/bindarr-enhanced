@@ -146,12 +146,12 @@ Partial TCGdex set refreshes preserve previously fetched rarities and other full
 card metadata. If an older refresh replaced a rarity with `Common`, fetching the
 full card again restores its provider metadata; changing filters alone does not.
 
-### Trade binder and wanted cards
+### Trade pages and wanted items
 
 Open an owned card's detail modal and click **Mark for trade** (or **Remove from
 trade**) to change its trade status immediately without entering Edit Card.
 For stacked cards, this applies to the selected entry, not every copy in the stack.
-Alternatively, edit an owned copy and check **Listed in Trade Binder**, or
+Alternatively, edit an owned copy and check **Listed on trade pages**, or
 select specific copies and use **Mark Trade**. **For Trade Only** filters your
 collection to those copies. Put wanted cards in **Collection → Wishlist**.
 
@@ -165,7 +165,7 @@ Use **Sealed → Add → search → Add to wishlist** to want a sealed product w
 recording a purchase. Alternatively create one manually without **Add purchase
 lot**, enter the wanted quantity and save. Manage quantities in **Sealed →
 Wishlist**. Sealed wishlist entries do not count as owned inventory or spending.
-Both sealed trade listings and wishlist entries can be placed in trade binders,
+Both sealed trade listings and wishlist entries can be placed on trade pages,
 offered alongside cards, and balanced with cash.
 
 Everything else lives in the top-level **Trades** tab (an admin can hide it like
@@ -194,17 +194,17 @@ priced individually (lowest-numbered copies are assigned first). There is no req
 advertised copies and quantities and calculates its own request-time snapshot.
 Proposals never reserve, remove, transfer, or automatically accept cards.
 
-**Trades → Binders** shows the master list and any custom trade binders. Each
-binder has its own name, link and on/off switch, and contains only the trade
-cards, sealed lots and wishlist items you put in it. A binder link works even when the master
+**Trades → Trade pages** shows the master list and any custom trade pages. Each
+page has its own name, link and on/off switch, and contains only the trade
+cards, sealed lots and wishlist items you add to it. A page link works even when the master
 link is disabled. Click stacks to select them, then add, remove or move them
-between binders, or **Unlist** them (trade copies become ordinary collection
+between pages, or **Unlist** them (trade copies become ordinary collection
 copies; wanted entries leave the wishlist). Currency and the Discord webhook are
 shared by all links.
 
 Read proposals in **Trades → Inbox**, filtered by status: **New**, **Active**
 (being negotiated), **Declined**, **Archived** or **Completed**. Each request
-shows the binder it came from and a private note. Discord contacts are
+shows the trade page it came from and a private note. Discord contacts are
 self-reported, not authenticated identities: verify them and arrange any trade
 directly. The inbox records contact, message, selected copies, estimated values
 and notification status independently of subsequent inventory/price changes.
@@ -241,7 +241,7 @@ proposal contacts.
 
 Trade-only tokens cannot unlock the collection-sharing API. Disable trade
 sharing to revoke access, or **Revoke and replace link** to invalidate the old master
-link (binder links rotate separately) while retaining saved proposals. Anonymous reads, quote requests and
+link (custom page links rotate separately) while retaining saved proposals. Anonymous reads, quote requests and
 submissions are rate-limited (submissions: five per hour per IP and fifty per hour
 per trade link). Configure `TRUST_PROXY` correctly behind a proxy; visitors sharing
 an IP also share its limit.

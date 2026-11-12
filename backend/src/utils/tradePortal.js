@@ -403,13 +403,13 @@ function createTradePortal({ db, connect = () => require('./salesRepository').op
     if (!Array.isArray(value) || value.length > max || value.some(item => !validEntryId(item))) throw fail(400, 'Invalid item selection');
     return [...new Set(value)];
   };
-  const binderName = value => text(value, 60, 'binder name', true);
+  const binderName = value => text(value, 60, 'trade page name', true);
   const presentBinder = row => ({ id: row.id, name: row.name, token: row.token, enabled: !!row.enabled,
     created_at: row.created_at, items: row.items ?? 0 });
 
   async function binder(userId, binderId, sql = db) {
-    const row = await sql.get('SELECT * FROM trade_binder WHERE id = ? AND user_id = ?', [id(binderId, 'binder'), userId]);
-    if (!row) throw fail(404, 'Trade binder not found');
+    const row = await sql.get('SELECT * FROM trade_binder WHERE id = ? AND user_id = ?', [id(binderId, 'trade page'), userId]);
+    if (!row) throw fail(404, 'Trade page not found');
     return row;
   }
 
@@ -428,7 +428,7 @@ function createTradePortal({ db, connect = () => require('./salesRepository').op
     await settings(userId);
     return transaction(async sql => {
       const { count } = await sql.get('SELECT COUNT(*) AS count FROM trade_binder WHERE user_id = ?', [userId]);
-      if (count >= MAX_BINDERS) throw fail(409, `You can have up to ${MAX_BINDERS} trade binders`);
+      if (count >= MAX_BINDERS) throw fail(409, `You can have up to ${MAX_BINDERS} trade pages`);
       const inserted = await sql.run('INSERT INTO trade_binder(user_id, name, token, enabled) VALUES (?, ?, ?, ?)',
         [userId, name, token(), body.enabled === false ? 0 : 1]);
       return presentBinder(await binder(userId, inserted.lastID, sql));
@@ -447,12 +447,12 @@ function createTradePortal({ db, connect = () => require('./salesRepository').op
   // Binder membership is limited to the owner's currently listed trade copies and wanted entries.
   async function assign(userId, body) {
     const entries = entryIds(body.entry_ids);
-    const addTo = ids(body.add_to ?? [], 'binder', MAX_BINDERS), removeFrom = ids(body.remove_from ?? [], 'binder', MAX_BINDERS);
-    if (!entries.length || (!addTo.length && !removeFrom.length)) throw fail(400, 'Choose cards and a binder');
+    const addTo = ids(body.add_to ?? [], 'trade page', MAX_BINDERS), removeFrom = ids(body.remove_from ?? [], 'trade page', MAX_BINDERS);
+    if (!entries.length || (!addTo.length && !removeFrom.length)) throw fail(400, 'Choose items and a trade page');
     return transaction(async sql => {
       for (const binderId of [...addTo, ...removeFrom]) await binder(userId, binderId, sql);
       if (addTo.length && (await cards(userId, entries, sql)).length !== entries.length) {
-        throw fail(409, 'Only cards listed for trade or on your wanted list can be added to a binder');
+        throw fail(409, 'Only items listed for trade or on your wanted list can be added to a trade page');
       }
       for (const binderId of removeFrom) {
         await sql.run(`DELETE FROM trade_binder_item WHERE binder_id = ? AND entry_id IN (${entries.map(() => '?').join(',')})`,
