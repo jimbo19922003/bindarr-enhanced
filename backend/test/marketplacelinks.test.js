@@ -114,10 +114,10 @@ const AFFILIATE_SEARCH =
     { name: 'Cardmarket', currency: 'EUR' },
     'a Cardmarket-priced row is labelled as such'
   );
-  assert.strictEqual(
+  assert.deepStrictEqual(
     links.priceSource({ game: 'pokemon', language: 'Japanese', price_trend: 12, price_source: 'tcgcsv', price_currency: 'USD' }),
-    null,
-    'a TCGplayer USD row needs no label — USD is the display currency'
+    { name: 'TCGCSV · TCGplayer', currency: 'USD' },
+    'TCGCSV provenance is shown even when the quote uses the display currency'
   );
   // A price borrowed from the English printing (TCGplayer has no German catalogue)
   // must say so — the currency is right, the card is not.
