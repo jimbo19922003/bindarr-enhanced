@@ -41,8 +41,12 @@ const PRESERVE_WITH_PRICE = new Set([
   'tcgplayer_url', 'cardmarket_url', 'tcgplayer_product_id',
 ]);
 
-const SET_CLAUSE = COLUMNS
-  .filter(c => c !== 'id' && c !== 'name')
+const BRIEF_COLUMNS = new Set([
+  'printed_name', 'set_id', 'set_name', 'number', 'image_url', 'game', 'language',
+]);
+
+const setClause = (incomplete) => COLUMNS
+  .filter(c => c !== 'id' && c !== 'name' && (!incomplete || BRIEF_COLUMNS.has(c)))
   .map(c => {
     if (c === 'image_url') return "image_url = CASE WHEN NULLIF(TRIM(excluded.image_url), '') IS NULL THEN card_cache.image_url ELSE excluded.image_url END";
     if (c === 'available_printings') return 'available_printings = COALESCE(excluded.available_printings, card_cache.available_printings)';
@@ -76,6 +80,9 @@ const SET_CLAUSE = COLUMNS
   })
   .join(', ');
 
+const SET_CLAUSE = setClause(false);
+const BRIEF_SET_CLAUSE = setClause(true);
+
 // `name` is the one column an incoming row can be WORSE at. A non-English TCGdex
 // card carries its localized name in both `name` and `printed_name` because TCGdex
 // has no English name to give (see tcgdexApi.normalizeCard) — but one may since have
@@ -91,11 +98,12 @@ const NAME_CLAUSE = `name = CASE
 //
 // `opts.incomplete` marks rows written from a partial source — a TCGdex set brief
 // carries only id/name/number/image, no rarity, types or prices. Such a row is
-// stamped as already-stale so every freshness check in the app treats it as
-// needing a refetch, instead of it looking current forever and showing a real
-// card with $0.00 and the wrong rarity.
+// stamped as already-stale on insert. On update, only brief fields change:
+// existing full metadata, prices and freshness must survive a set browse.
 async function cacheNormalizedCards(cards, game, opts = {}) {
   const stamp = opts.incomplete ? `'1970-01-01 00:00:00'` : 'CURRENT_TIMESTAMP';
+  const updates = opts.incomplete ? BRIEF_SET_CLAUSE : SET_CLAUSE;
+  const updatedStamp = opts.incomplete ? 'card_cache.last_updated' : stamp;
   const rowSql = `(${COLUMNS.map(() => '?').join(', ')}, ${stamp})`;
   const rows = (cards || []).filter(c => c && c.id);
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -122,7 +130,7 @@ async function cacheNormalizedCards(cards, game, opts = {}) {
     await db.run(
       `INSERT INTO card_cache (${COLUMNS.join(', ')}, last_updated)
        VALUES ${chunk.map(() => rowSql).join(', ')}
-       ON CONFLICT(id) DO UPDATE SET ${NAME_CLAUSE}, ${SET_CLAUSE}, last_updated = ${stamp}`,
+       ON CONFLICT(id) DO UPDATE SET ${NAME_CLAUSE}, ${updates}, last_updated = ${updatedStamp}`,
       params
     );
   }

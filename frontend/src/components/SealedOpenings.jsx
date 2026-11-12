@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useT } from '../utils/i18n';
 import RipForm from './RipForm';
 import CardImage from './CardImage';
+import { sealedPackGroups } from '../utils/sealedPackGroups';
 // A rip files every card through the collection and prices it, so a large one is
 // slow. Past this the request is abandoned rather than leaving the drawer stuck.
 const SAVE_TIMEOUT_MS = 180000;
@@ -80,7 +81,7 @@ export default function SealedOpenings({ product, showToast, onChanged, ripLot, 
         {converted && <ConversionContents key={`${converted.opening_id}-${converted.allocation_status}-${JSON.stringify(converted.packs.map(pack => pack.market_value))}-${JSON.stringify(opening.pulls)}`}
           conversion={converted} opening={opening} t={t} disabled={busy || loadingEdit}
           onSave={body => saveValues(opening.id, body)}
-          onOpen={pack => { setSaveStatus(null); setActivePack({ ...pack, cost_pending: converted.allocation_status === 'pending' }); }}
+          onOpen={pack => { setSaveStatus(null); setActivePack({ ...pack, source_product_name: product.name, source_product_type: product.product_type, cost_pending: converted.allocation_status === 'pending' }); }}
           onEdit={(child, pack) => edit(child, { ...pack, id: pack.product_id })}
           onRemove={remove} />}
       </OpeningCard>;
@@ -131,24 +132,37 @@ function ConversionContents({ conversion, opening, t, disabled, onSave, onOpen, 
   const [packValues, setPackValues] = useState(() => Object.fromEntries(conversion.packs.map(pack => [pack.id, pack.market_value ?? ''])));
   const [promoValues, setPromoValues] = useState(() => Object.fromEntries(opening.pulls.map(pull => [pull.id, pull.opened_line_value ?? (pull.value_at_opening == null ? '' : (Number(pull.value_at_opening) * pull.quantity).toFixed(2))])));
   const pending = conversion.allocation_status === 'pending';
+  const groups = sealedPackGroups(conversion.packs.map(pack => ({ ...pack, parent_opening_id: conversion.opening_id })));
   return <section style={{ display: 'grid', gap: '0.65rem' }}>
     <h4>{t('sealed.packContents')}</h4>
     <p>{t(pending ? 'sealed.pendingCostHelp' : 'sealed.frozenMarketSplit')}</p>
     {pending && <form onSubmit={e => { e.preventDefault(); onSave({ packs: conversion.packs.map(pack => ({ lot_id: pack.id, market_value: packValues[pack.id] })), promos: opening.pulls.map(pull => ({ pull_id: pull.id, market_value: promoValues[pull.id] })) }); }} style={{ display: 'grid', gap: '0.45rem' }}>
       <p>{t('sealed.marketValuesHelp', { currency: opening.currency })}</p>
-      {conversion.packs.map((pack, index) => <label key={pack.id}>{t('sealed.packNumber', { number: index + 1 })}: {pack.name}
-        <input className="input-control" inputMode="decimal" value={packValues[pack.id]} disabled={disabled} onChange={e => setPackValues(current => ({ ...current, [pack.id]: e.target.value }))} />
+      {groups.map(group => <label key={group.key}>{group.lots[0].name} × {group.quantity}
+        <input className="input-control" inputMode="decimal" value={packValues[group.lots[0].id]} disabled={disabled}
+          onChange={e => { const value = e.target.value; setPackValues(current => ({ ...current, ...Object.fromEntries(group.lots.map(pack => [pack.id, value])) })); }} />
       </label>)}
       {opening.pulls.map(pull => <label key={pull.id}>{t('sealed.promoMarketValue', { name: pull.name, count: pull.quantity, currency: opening.currency })}
         <input className="input-control" inputMode="decimal" value={promoValues[pull.id]} disabled={disabled} onChange={e => setPromoValues(current => ({ ...current, [pull.id]: e.target.value }))} />
       </label>)}
       <button className="btn btn-secondary" type="submit" disabled={disabled}>{t('sealed.saveMarketValues')}</button>
     </form>}
-    {conversion.packs.map((pack, index) => <div key={pack.id} style={{ padding: '0.65rem', borderLeft: '2px solid var(--border-glass)', display: 'grid', gap: '0.5rem' }}>
-      <strong>{t('sealed.packNumber', { number: index + 1 })}: {pack.name}</strong>
-      <span>{t(pack.remaining_quantity ? 'sealed.packUnopened' : 'sealed.packOpened')} · {pending ? t('sealed.allocationPending') : money(pack.currency, pack.total_cost)}</span>
-      {!!pack.remaining_quantity && <button className="btn btn-primary" type="button" disabled={disabled || !!pack.archived_at || !!pack.product_archived_at} onClick={() => onOpen(pack)}>{t('sealed.openThisPack')}</button>}
-      {pack.openings.map(child => <OpeningCard key={child.id} opening={child} t={t} onEdit={() => onEdit(child, pack)} onRemove={() => onRemove(child)} disabled={disabled} />)}
-    </div>)}
+    {groups.map(group => {
+      const pack = group.lots[0];
+      const next = group.lots.find(item => item.remaining_quantity > 0 && !item.archived_at && !item.product_archived_at);
+      const hasOpenings = group.lots.some(item => item.openings.length > 0);
+      return <div key={group.key} style={{ padding: '0.65rem', borderLeft: '2px solid var(--border-glass)', display: 'grid', gap: '0.5rem' }}>
+        <strong>{pack.name} × {group.quantity}</strong>
+        <span>{t('sealed.onHand', { count: group.remaining })} · {pending ? t('sealed.allocationPending') : money(pack.currency, (group.costCents / 100).toFixed(2))}</span>
+        {next && <button className="btn btn-primary" type="button" disabled={disabled} onClick={() => onOpen(next)}>{t('sealed.letItRip')}</button>}
+        <details open={hasOpenings}><summary>{t('sealed.packDetails')}</summary>
+          {group.lots.map((item, index) => <div key={item.id}>
+            <strong>{t('sealed.packNumber', { number: index + 1 })}</strong>
+            <span> · {t(item.remaining_quantity ? 'sealed.packUnopened' : 'sealed.packOpened')} · {pending ? t('sealed.allocationPending') : money(item.currency, item.total_cost)}</span>
+            {item.openings.map(child => <OpeningCard key={child.id} opening={child} t={t} onEdit={() => onEdit(child, item)} onRemove={() => onRemove(child)} disabled={disabled} />)}
+          </div>)}
+        </details>
+      </div>;
+    })}
   </section>;
 }

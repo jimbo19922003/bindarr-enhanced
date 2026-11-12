@@ -77,6 +77,8 @@ function CardInspectorModal({ card: incoming, onClose, onUpdate, onDeleted, show
   const [printings, setPrintings] = useState(null);
   const [findingPrintings, setFindingPrintings] = useState(false);
   const hasToggledRef = useRef(false);
+  const quickTogglePending = useRef(false);
+  const [toggling, setToggling] = useState(false);
 
   useBackGuard(isFullScreen, () => setIsFullScreen(false));
 
@@ -259,7 +261,9 @@ function CardInspectorModal({ card: incoming, onClose, onUpdate, onDeleted, show
   };
 
   const handleQuickToggle = async (field, value) => {
-    if (!targetEntryId) return;
+    if (!targetEntryId || quickTogglePending.current) return;
+    quickTogglePending.current = true;
+    setToggling(true);
     const nextFavorite = field === 'favorite' ? (value ? 1 : 0) : (favorite ? 1 : 0);
     const nextIsTrade = field === 'is_trade' ? (value ? 1 : 0) : (isTrade ? 1 : 0);
     const nextListType = field === 'list_type' ? value : listType;
@@ -300,6 +304,9 @@ function CardInspectorModal({ card: incoming, onClose, onUpdate, onDeleted, show
       if (field === 'favorite') { setFavorite(favorite); card.favorite = favorite; }
       if (field === 'list_type') { setListType(listType); card.list_type = listType; }
       showToast && showToast(t('inspector.errUpdateGeneric'));
+    } finally {
+      quickTogglePending.current = false;
+      setToggling(false);
     }
   };
 
@@ -823,7 +830,6 @@ function CardInspectorModal({ card: incoming, onClose, onUpdate, onDeleted, show
                 </div>
               )}
 
-              {/* Main Actions Row: Edit Card + Icon buttons for Favorite & Delete */}
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setMode('edit')}>
                   {t('inspector.editCard')}
@@ -835,8 +841,21 @@ function CardInspectorModal({ card: incoming, onClose, onUpdate, onDeleted, show
                   style={{ fontSize: '0.8rem', padding: '0.45rem 0.5rem', maxWidth: '140px' }}
                 />
 
+                {listType === 'collection' && (
+                  <button
+                    type="button"
+                    className={`btn ${isTrade === 1 ? 'btn-primary' : 'btn-secondary'}`}
+                    disabled={toggling}
+                    aria-pressed={isTrade === 1}
+                    onClick={() => handleQuickToggle('is_trade', isTrade === 1 ? 0 : 1)}
+                  >
+                    {t(isTrade === 1 ? 'inspector.removeTrade' : 'inspector.markTrade')}
+                  </button>
+                )}
+
                 {activeCard.list_type === 'wishlist' && (
                   <button 
+                    disabled={toggling}
                     className="btn btn-secondary" 
                     style={{ backgroundColor: 'rgba(74,222,128,0.2)', color: 'var(--type-grass)', border: '1px solid rgba(74,222,128,0.3)', padding: '0 0.75rem', fontSize: '0.8rem' }} 
                     onClick={() => handleQuickToggle('list_type', 'collection')}
@@ -851,6 +870,7 @@ function CardInspectorModal({ card: incoming, onClose, onUpdate, onDeleted, show
                   className={`btn ${favorite === 1 ? 'btn-primary' : 'btn-secondary'} btn-icon-only`}
                   style={{ borderRadius: 'var(--radius-sm)', padding: '0.6rem', ...(favorite === 1 ? { backgroundColor: 'rgba(250,204,21,0.2)', color: '#facc15', border: '1px solid rgba(250,204,21,0.3)' } : {}) }}
                   onClick={() => handleQuickToggle('favorite', favorite === 1 ? 0 : 1)}
+                  disabled={toggling}
                   title={t(favorite === 1 ? 'inspector.unfavorite' : 'inspector.favorite')}
                 >
                   <Star size={16} fill={favorite === 1 ? '#facc15' : 'none'} />

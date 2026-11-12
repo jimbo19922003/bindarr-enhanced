@@ -11,18 +11,30 @@ export function standardSetCards(cards, set, fullSet = false) {
   return cards.filter(card => isBaseSetNumber(card.number, set.printed_total));
 }
 
-export function standardSetCompletion(set, collection, fullSet = false) {
+const positiveTotal = value => (Number.isSafeInteger(value) && value > 0 ? value : null);
+const completionKey = number => {
+  const key = String(number ?? '').trim().toLowerCase();
+  return /^\d+$/.test(key) ? key.replace(/^0+(?=\d)/, '') : key;
+};
+
+// Promo sets print no "/N" total, so their full total is also their base total.
+// With no catalogue totals at all (Lorcana before its cards are cached), the
+// set's loaded card list stands in, counting only owned numbers in that list.
+export function standardSetCompletion(set, collection, fullSet = false, setCards = []) {
   if (!set) return null;
-  const total = fullSet ? set.total : set.printed_total;
-  if (!Number.isSafeInteger(total) || total <= 0) return null;
-  const numbers = new Set(collection
+  const total = fullSet ? positiveTotal(set.total) : positiveTotal(set.printed_total) || positiveTotal(set.total);
+  const owned = new Set(collection
     .filter(card => card.game === set.game && card.set_id === set.id)
-    .map(card => {
-      const key = String(card.number ?? '').trim().toLowerCase();
-      return /^\d+$/.test(key) ? key.replace(/^0+(?=\d)/, '') : key;
-    })
-    .filter(key => key && (fullSet || set.game === 'mtg' || isBaseSetNumber(key, total))));
-  return { owned: numbers.size, total, percent: Math.min(Math.round(numbers.size / total * 100), 100) };
+    .map(card => completionKey(card.number))
+    .filter(Boolean));
+  if (total) {
+    const counted = [...owned].filter(key => fullSet || set.game === 'mtg' || isBaseSetNumber(key, total)).length;
+    return { owned: counted, total, percent: Math.min(Math.round(counted / total * 100), 100) };
+  }
+  const listed = new Set((setCards || []).map(card => completionKey(card.number)).filter(Boolean));
+  if (!listed.size) return null;
+  const counted = [...owned].filter(key => listed.has(key)).length;
+  return { owned: counted, total: listed.size, percent: Math.min(Math.round(counted / listed.size * 100), 100) };
 }
 
 export function ownedEntriesForSetCard(card, collection) {
@@ -51,4 +63,45 @@ export function inspectorCardForSetCard(card, collection) {
     quantity: entries.reduce((sum, entry) => sum + (entry.quantity || 0), 0),
     stack_entries: entries,
   };
+}
+
+// Printing quality ladder for the set view. Magic and Lorcana only use Normal
+// (nonfoil) and Holofoil (foil), which sit on the same ladder.
+export const PRINTING_RANK = { Normal: 0, Promo: 0, 'Reverse Holofoil': 1, Holofoil: 2, '1st Edition': 3 };
+const printingRank = printing => PRINTING_RANK[printing || 'Normal'] ?? 0;
+
+function verifiedPrintings(card) {
+  let available = card?.available_printings;
+  if (typeof available === 'string') {
+    try { available = JSON.parse(available); } catch { return null; }
+  }
+  return Array.isArray(available) && available.length && available.every(value => value in PRINTING_RANK) ? available : null;
+}
+
+// For an owned card with known printings: its best owned printing, the better
+// printings that exist, and whether one of them is an upgrade. Null when the
+// card is not owned or its printings are unknown, so it is never guessed at.
+export function printingUpgrade(card, collection) {
+  const available = verifiedPrintings(card);
+  if (!available) return null;
+  const entries = ownedEntriesForSetCard(card, collection);
+  if (!entries.length) return null;
+  const best = Math.max(...entries.map(entry => printingRank(entry.printing)));
+  const better = available.filter(printing => printingRank(printing) > best)
+    .sort((a, b) => printingRank(b) - printingRank(a));
+  return { upgradeAvailable: better.length > 0, better };
+}
+
+// Share of owned, judgeable cards already held in their top printing.
+export function setPrintingQuality(cards, collection) {
+  let judged = 0;
+  let upgrades = 0;
+  for (const card of cards) {
+    const result = printingUpgrade(card, collection);
+    if (!result) continue;
+    judged++;
+    if (result.upgradeAvailable) upgrades++;
+  }
+  if (!judged) return null;
+  return { maxed: judged - upgrades, owned: judged, upgrades, percent: Math.floor((judged - upgrades) / judged * 100) };
 }

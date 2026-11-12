@@ -8,7 +8,8 @@ const progress = (ownedUnique, totalCards) => totalCards == null ? null : ({
 
 function completionCounts(numbers, metadata, game) {
   const keys = [...new Set(numbers.filter(value => value != null).map(numberKey).filter(Boolean))];
-  const baseTotal = totalOf(metadata.printed_total);
+  // Promo sets print no "/N" total, so their full total is also their base total.
+  const baseTotal = totalOf(metadata.printed_total) || totalOf(metadata.total);
   const fullTotal = totalOf(metadata.total);
   const baseOwned = game === 'mtg' ? keys.length : keys.filter(key => /^\d+$/.test(key) && Number(key) >= 1 && Number(key) <= baseTotal).length;
   return {

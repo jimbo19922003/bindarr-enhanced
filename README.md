@@ -31,7 +31,7 @@ Try it without installing anything at **[thenotoriousjeremy.github.io/bindarr](h
 - **Camera scanning** — photograph a card and the server identifies it from the image alone. Works for Magic, Pokémon, and Lorcana.
 - **Physical location tracking** — binders by page and slot (1–9), boxes by row and divider, with layout and scalable image-list views. Drag cards between pockets to arrange a binder, or file them by tapping on a phone.
 - **Deck Builder & checkout** — build decks, edit their properties, import ManaBox decklists, reserve cards for play, and see exactly which checked-out deck makes a copy unavailable.
-- **Search and bulk add** — search or browse a whole set with multi-select; pin a set and add by collector number one keystroke at a time.
+- **Search and bulk add** — search or browse a whole set with multi-select; pin a set and add by collector number one keystroke at a time. A number with the set size, like `151/128`, narrows the search to sets printed with that many cards, so no set needs picking.
 - **Set completion and custom sets** — Collection › Sets shows owned and missing cards for any set; tap a missing card to add it, or wishlist every missing card in one go. Build your own sets (a species master set, an illustrator, a rarity across sets) from rules plus hand-picked cards.
 - **Collection filters** — find duplicates of the same catalog card across conditions and finishes, or cards with no provider artwork reference and no local artwork. Image links are not checked for availability.
 - **Dashboard** — Executive (net worth, total invested, timeline), Sealed (what is still on the shelf), Rip report (opened product against its cost), and Cards (set completion, rarity, type, and where copies live).
@@ -107,7 +107,10 @@ deck's name — for example, `1 unavailable — Goblin Stampede`.
 Collection › Sets shows every card in a set for the chosen game and language,
 with owned cards in colour and missing ones greyed out. Tap an owned card to
 open it (several copies open as a stack with the print picker); tap a missing
-card to open the **Add this card** drawer for that exact card.
+card to open the **Add this card** drawer for that exact card. Choose **Add to
+collection** or **Add to wishlist** there; both use the selected printing,
+language and quantity. Cards already wishlisted do not offer another wishlist
+action in that drawer.
 
 To collect toward a set, use the heart on a missing card to wishlist it, or
 **Wishlist N missing** to wishlist every missing card at once (you are asked to
@@ -123,6 +126,8 @@ same picker. A custom set is:
 - **Rules** — card name contains, illustrator contains, in set, rarity is. A card
   must match every rule type you fill in; any entry within a type matches. At
   least a name, illustrator or set rule is needed for rules to match anything.
+  **Save** also includes text still in a rule input and the currently selected
+  set; **Add rule** lets you add multiple entries before saving.
 - **Manual cards** — search and **Include** cards the rules miss; hide a card
   from the grid with its eye button and restore it from the editor.
 - **Completion** — *Card* (any copy completes a slot) or *Printing* (each
@@ -136,6 +141,63 @@ as cards are cached: TCGdex search results don't carry it, so illustrator rules
 see cards once they have been opened, scanned or added, or after the local
 Pokémon catalogue is (re)installed. Ownership matches by game, set and
 collector number in any language, the same as the standard set view.
+
+Partial TCGdex set refreshes preserve previously fetched rarities and other full
+card metadata. If an older refresh replaced a rarity with `Common`, fetching the
+full card again restores its provider metadata; changing filters alone does not.
+
+### Trade binder and wanted cards
+
+Open an owned card's detail modal and click **Mark for trade** (or **Remove from
+trade**) to change its trade status immediately without entering Edit Card.
+For stacked cards, this applies to the selected entry, not every copy in the stack.
+Alternatively, edit an owned copy and check **Listed in Trade Binder**, or
+select specific copies and use **Mark Trade**. **For Trade Only** filters your
+collection to those copies. Put wanted cards in **Collection → Wishlist**.
+
+Under **Settings → Trade-only sharing**, choose the valuation currency, enable
+anonymous proposals, save, and copy the independent trade link. Visitors see
+available copies and wanted cards side by side (stacked on phones), select
+quantities on both sides, and send a proposal with their Discord username or
+profile link and an optional message. No account is needed. This is a virtual
+trade list; no physical storage binder is required.
+
+The comparison uses current cached quotes converted to the owner's chosen
+currency, including per-copy market-value overrides where present. Its percentage
+is `(offered − requested) / requested × 100`: positive means the visitor offers
+more value. Missing prices/FX or a zero comparison value leave the percentage
+unknown. Fallback finish/grade quotes are estimates; shipping and cash are not
+included. There is no required fairness threshold. The server revalidates the
+advertised copies and quantities and calculates its own request-time snapshot.
+Proposals never reserve, remove, transfer, or automatically accept cards.
+
+Read proposals in **Settings → Trade request inbox**. Discord contacts are
+self-reported, not authenticated identities: verify them and arrange any trade
+directly. The inbox records contact, message, selected copies, estimated values
+and notification status independently of subsequent inventory/price changes.
+Delete proposals when no longer needed.
+
+For optional notifications, create a Discord channel webhook under **Edit Channel
+→ Integrations → Webhooks**, and save its HTTPS `discord.com` webhook URL in the
+trade-only settings. Treat this URL as a secret; it is never returned by the API.
+Notifications contain the contact and a card summary; the full proposal/message
+stays in Bindarr. Notification failures do not discard proposals and can be
+retried from the inbox. A timed-out delivery can have reached Discord, so a retry
+may duplicate a notification. A server interruption can leave delivery pending;
+the inbox makes that state visible for manual retry. Real Discord delivery needs
+outbound HTTPS access. Protect database backups, which include the webhook and
+proposal contacts.
+
+Trade-only tokens cannot unlock the collection-sharing API. Disable trade
+sharing to revoke access, or **Revoke and replace link** to invalidate all old
+trade links while retaining saved proposals. Anonymous reads, quote requests and
+submissions are rate-limited (submissions: five per hour per IP and fifty per hour
+per trade link). Configure `TRUST_PROXY` correctly behind a proxy; visitors sharing
+an IP also share its limit.
+
+**Collection Sharing remains separate**: its older Collection/Trade Binder/
+Wishlist links still expose all three tabs with the same collection token.
+Leave that feature disabled if you want to share *only* trade/wanted cards.
 
 ### Hiding tabs
 
@@ -423,6 +485,16 @@ In **Collection → Sets**, base mode also hides cards outside the base-set rang
 full mode shows them again. **Add missing to wishlist** uses the visible checklist.
 If the base total is unavailable, all cards remain visible with an explanatory
 message. Custom-set checklists and their completion rules are unchanged.
+**Show → Owned only** and **Unowned only** narrow the grid to cards you own or
+do not own yet; progress and
+**Add missing to wishlist** still use the full checklist. For standard sets,
+**Max quality** shows how many owned cards are already held in their best
+available printing (Normal < Reverse Holo < Holo < 1st Edition; foil beats
+nonfoil for Magic and Lorcana). Owned cards with a better printing get an
+upgrade badge, and **Show → Upgrade available** lists only those. Cards whose
+available printings are unknown are not counted.
+The set picker lists **Owned** sets first — your custom sets, then standard
+sets you hold at least one card from — followed by **Unowned** sets.
 
 ## Sealed inventory
 
@@ -482,6 +554,28 @@ market value per pack), then record its promo cards in the same form. Each pack
 stays in sealed inventory with its own identity, nested beneath the converted
 product's opening. **Open this pack** records that pack's pulls whenever you
 choose; the other packs remain unopened.
+
+Converted packs are displayed as a quantity group per source opening in sealed
+inventory and conversion contents, rather than one row per pack. The source
+product name is shown in inventory and when ripping; different source boxes
+stay separate. **Open this pack** opens the next available pack in that group.
+Expand **Individual packs / history** for per-pack actions and history. Individual
+records are retained internally to preserve cost rounding, sales and rip history.
+
+The form searches the sealed catalog (the same search as **Add sealed**) for the
+first pack group's set. When exactly one booster pack from that set matches, it
+is picked automatically; otherwise **Find pack in catalog** lists the matches.
+A picked pack fills in the name, set, and market value, and the pack product is
+linked to that catalog product so its market price refreshes like any other
+sealed item. Converting the same catalog pack again reuses that product. Editing
+a pack's name or set by hand removes the link. Without catalog access, enter
+packs by hand as before.
+
+Promo cards usually come from a Black Star promo set rather than the product's
+own set, so the **Promo card set** picker sits in the promos section. It
+defaults to the promo set of the product's series (for example MEP for Mega
+Evolution products), or the newest promo set when the series is unknown. Promo
+sets are listed first; any other set can still be chosen.
 
 Purchase cost is split proportionally between packs and promos using their
 market values at product opening, in the purchase currency. Promo quantities
@@ -573,6 +667,11 @@ same measure as a smaller one. 0% is even with cost. Green is ahead and red
 is behind. A **$ / %** switch shows the same ranking in money, and best and
 worst follow the measure that is on. The table's Recovery column is the
 share of cost the known pulls cover, so 100% there is even.
+
+The table groups openings by set, by product type, or **By source**. By source
+counts packs converted out of an ETB, box, or collection under that product,
+together with its promos, so the whole product's result reads as one row.
+Packs bought on their own are listed as purchased packs.
 
 **Cards** is the collection: set completion, rarity, type or color,
 condition, extra copies, and which containers hold the cards. Extra copies are

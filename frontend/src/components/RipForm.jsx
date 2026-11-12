@@ -8,9 +8,12 @@ import { resolveCardPrice } from '../utils/resolveCardPrice';
 import { availablePrintings, preferredPrinting, exactPrintingPrice } from '../utils/availablePrintings';
 import CardImage from './CardImage';
 import PriceQuoteDetails from './PriceQuoteDetails';
+import PackCatalogPicker from './PackCatalogPicker';
+import { defaultPromoSet, isPromoSet } from '../utils/promoSets';
 let nextLine = 0;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const normalizedNumber = value => String(value || '').replace(/^#/, '').split('/')[0].trim().toLowerCase().replace(/^0+(?=\d)/, '');
+const CATALOG_LINK = { provider: '', provider_product_id: '', image_url: '', catalog_market_price: '', catalog_market_currency: '', market_source: '' };
 const initialPull = pull => ({ ...pull, key: `saved-${pull.id}`, quantity: String(pull.quantity), bulk: !pull.card_id, lineMode: pull.line_value != null, current_value: String(pull.current_value ?? ''), line_value: String(pull.line_value ?? ''), value_at_opening: String(pull.value_at_opening ?? '') });
 function OwnershipBadge({ info, loading }) {
   if (!info) return null;
@@ -32,7 +35,7 @@ export default function RipForm({ product, lot, existingOpening, convertToPacks 
   const inputRef = useRef(null), chosen = useRef(false), request = useRef(0), mutation = useRef(null), live = useRef(true);
   const [openedAt, setOpenedAt] = useState(() => existingOpening?.opened_at || today());
   const [notes, setNotes] = useState(() => existingOpening?.notes || '');
-  const [packGroups, setPackGroups] = useState(() => [{ key: ++nextLine, name: t('sealed.defaultPackName', { name: product.set_name || product.name }), set_name: product.set_name || '', set_id: product.set_id || '', quantity: '1', market_value: '' }]);
+  const [packGroups, setPackGroups] = useState(() => [{ key: ++nextLine, name: t('sealed.defaultPackName', { name: product.set_name || product.name }), set_name: product.set_name || '', set_id: product.set_id || '', quantity: '1', market_value: '', ...CATALOG_LINK }]);
   const [promosComplete, setPromosComplete] = useState(true);
   const [sets, setSets] = useState([]), [setId, setSetId] = useState(''), [resolved, setResolved] = useState(null), [setError, setSetError] = useState(false);
   const [query, setQuery] = useState(''), [pulls, setPulls] = useState(() => (existingOpening?.pulls || []).map(initialPull));
@@ -69,11 +72,16 @@ export default function RipForm({ product, lot, existingOpening, convertToPacks 
     fetch(`/api/sets?game=pokemon&lang=${encodeURIComponent(language)}`).then(async response => { if (!response.ok) throw new Error('sets'); return response.json(); })
       .then(data => { if (!cancelled) { setSets(Array.isArray(data) ? data.filter(row => row.id) : []); setSetError(false); } }).catch(() => { if (!cancelled) setSetError(true); });
     fetch(`/api/sealed/card-set?${params}`).then(async response => { if (!response.ok) throw new Error('default set'); return response.json(); }).then(data => {
-      if (cancelled || !data.set_id) return; setResolved({ id: data.set_id, name: data.set_name || product.set_name || data.set_id }); if (!chosen.current) setSetId(data.set_id);
+      if (cancelled || !data.set_id) return; setResolved({ id: data.set_id, name: data.set_name || product.set_name || data.set_id }); if (!chosen.current && !convertToPacks) setSetId(data.set_id);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [product.set_id, product.set_name, language]);
+  }, [product.set_id, product.set_name, language, convertToPacks]);
   const options = sets.slice(); if (resolved && !options.some(row => row.id === resolved.id)) options.push(resolved);
+  // A converted product's promos come from a promo set, not the product's own set.
+  const promoDefault = convertToPacks ? defaultPromoSet(sets, resolved?.id || product.set_id)?.id || '' : '';
+  useEffect(() => { if (promoDefault && !chosen.current) setSetId(promoDefault); }, [promoDefault]);
+  const sortedOptions = options.slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const promoOptions = sortedOptions.filter(isPromoSet), otherOptions = sortedOptions.filter(row => !isPromoSet(row));
   const selected = options.find(row => row.id === setId), searchSetLabel = setId ? selected?.name || setId : 'All Pokémon sets';
   const statuses = draftOwnership(pulls, owned, editing);
   const changeSet = value => { chosen.current = true; request.current++; setLooking(false); setSetId(value); setMatches([]); inputRef.current?.focus(); };
@@ -121,6 +129,11 @@ export default function RipForm({ product, lot, existingOpening, convertToPacks 
     setPulls(current => splitRipLine(current, pull.key, () => ++nextLine));
   };
   const atLineLimit = () => { if (pulls.length < MAX_RIP_LINES) return false; showToast(t('sealed.maxLines', { count: MAX_RIP_LINES })); return true; };
+  const pickPack = (key, row) => setPackGroups(current => current.map(group => group.key !== key ? group : {
+    ...group, name: row.name, set_name: row.set_name || group.set_name, set_id: row.set_id || group.set_id,
+    market_value: row.market_price || group.market_value, provider: row.provider, provider_product_id: row.provider_product_id,
+    image_url: row.image_url || '', catalog_market_price: row.market_price || '', catalog_market_currency: row.market_currency || '', market_source: row.market_source || '',
+  }));
   const remove = pull => { setRemoved(current => [pull, ...current]); setPulls(current => current.filter(row => row.key !== pull.key)); };
   const submit = event => {
     event.preventDefault(); if (busy || looking) return;
@@ -131,7 +144,10 @@ export default function RipForm({ product, lot, existingOpening, convertToPacks 
       else { row.printing = pull.printing; if (String(pull.current_value || '').trim()) row.current_value = String(pull.current_value).trim(); }
       return row;
     }) };
-    if (convertToPacks) payload.packs = packGroups.map(({ name, set_name, set_id, quantity, market_value }) => ({ name, set_name, set_id, quantity: Number(quantity), market_value, language: product.language || 'English' }));
+    if (convertToPacks) payload.packs = packGroups.map(({ name, set_name, set_id, quantity, market_value, provider, provider_product_id, image_url, catalog_market_price, catalog_market_currency, market_source }) => ({
+      name, set_name, set_id, quantity: Number(quantity), market_value, language: product.language || 'English',
+      ...(provider_product_id ? { provider, provider_product_id, image_url, catalog_market_price, catalog_market_currency, market_source } : {}),
+    }));
     if (editing || convertToPacks) {
       if (editing) payload.base = existingOpening;
       const signature = JSON.stringify(payload);
@@ -140,9 +156,23 @@ export default function RipForm({ product, lot, existingOpening, convertToPacks 
     }
     onSubmit(payload);
   };
+  const optionRow = row => <option key={row.id} value={row.id}>{row.name} ({row.id})</option>;
+  const setPicker = <>
+    <label htmlFor="rip-card-set">{convertToPacks ? t('sealed.promoCardSet') : 'Card search set'}</label>
+    <select id="rip-card-set" className="input-control" value={setId} onChange={e => changeSet(e.target.value)}>
+      <option value="">All Pokémon sets — search by name</option>
+      {setId && !options.some(row => row.id === setId) && <option value={setId}>{setId}</option>}
+      {promoOptions.length > 0 && <optgroup label={t('sealed.promoSetsGroup')}>{promoOptions.map(optionRow)}</optgroup>}
+      {promoOptions.length > 0 ? <optgroup label={t('sealed.otherSetsGroup')}>{otherOptions.map(optionRow)}</optgroup> : otherOptions.map(optionRow)}
+    </select>
+    <small>{convertToPacks ? t('sealed.promoCardSetHelp', { set: product.set_name || 'Unspecified' }) : `Sealed product set: ${product.set_name || 'Unspecified'}. Changing the search set keeps the existing pulls.`}</small>
+    {setError && <p role="status">Could not load the set list. Use all-set name search or a set ID override.</p>}
+    <details><summary>Set ID override</summary><input className="input-control" aria-label="Card search set ID override" value={setId} onChange={e => changeSet(e.target.value)} /></details>
+  </>;
   return <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', width: '100%' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
       <div><h3 style={{ margin: 0 }}>{convertToPacks ? t('sealed.convertToPacks') : editing ? 'Edit rip' : t('sealed.letItRip')}</h3><p>{product.name || product.set_name}</p>
+        {lot.source_product_name && <p>{t('sealed.packSource', { name: lot.source_product_name })}</p>}
         <p>{existingOpening?.cost_pending || lot.cost_pending ? t('sealed.pendingCostHelp') : editing ? `Original opening cost: ${currency} ${existingOpening.cost} — unchanged by editing` : convertToPacks ? t('sealed.conversionSourceCost', { cost: `${currency} ${conversionCost}` }) : t('sealed.ripLot', { cost: `${currency} ${lot.total_cost}`, date: lot.purchased_at ? ` on ${lot.purchased_at}` : '' })}</p></div>
       <button className="btn btn-secondary" type="button" onClick={onClose} disabled={busy} aria-label={t('common.cancel')}><X size={18} /></button>
     </div>
@@ -150,30 +180,24 @@ export default function RipForm({ product, lot, existingOpening, convertToPacks 
     <p>Saving recalculates allocated opening costs from the saved opening-time values and revised quantities. The original opening cost is unchanged. Missing values remain pending; allocations frozen by a sale require a correction workflow.</p>
     <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: '0.9rem', minWidth: 0 }}>
       <label>{t('sealed.openedOn')}<input className="input-control" type="date" value={openedAt} onChange={e => setOpenedAt(e.target.value)} /></label>
-      <label htmlFor="rip-card-set">Card search set</label>
-      <select id="rip-card-set" className="input-control" value={setId} onChange={e => changeSet(e.target.value)}>
-        <option value="">All Pokémon sets — search by name</option>
-        {setId && !options.some(row => row.id === setId) && <option value={setId}>{setId}</option>}
-        {options.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map(row => <option key={row.id} value={row.id}>{row.name} ({row.id})</option>)}
-      </select>
-      <small>Sealed product set: {product.set_name || 'Unspecified'}. Changing the search set keeps the existing pulls.</small>
-      {setError && <p role="status">Could not load the set list. Use all-set name search or a set ID override.</p>}
-      <details><summary>Set ID override</summary><input className="input-control" aria-label="Card search set ID override" value={setId} onChange={e => changeSet(e.target.value)} /></details>
+      {!convertToPacks && setPicker}
       <label>{t('sealed.notes')}<input className="input-control" value={notes} onChange={e => setNotes(e.target.value)} /></label>
       {convertToPacks && <section style={{ display: 'grid', gap: '0.6rem' }}>
         <h4>{t('sealed.packContents')}</h4>
         <p>{t('sealed.conversionHelp', { currency })}</p>
-        {packGroups.map(group => <div key={group.key} style={{ border: '1px solid var(--border-glass)', padding: '0.6rem', display: 'grid', gap: '0.4rem' }}>
+        {packGroups.map((group, index) => <div key={group.key} style={{ border: '1px solid var(--border-glass)', padding: '0.6rem', display: 'grid', gap: '0.4rem' }}>
           {['name', 'set_name', 'quantity', 'market_value'].map(field => <label key={field}>{t(`sealed.packField.${field}`, { currency })}
             <input className="input-control" type={field === 'quantity' ? 'number' : 'text'} min={field === 'quantity' ? 1 : undefined} max={field === 'quantity' ? 500 : undefined}
               required={field === 'name' || field === 'quantity'} inputMode={field === 'market_value' ? 'decimal' : undefined} value={group[field]}
-              onChange={e => setPackGroups(current => current.map(row => row.key === group.key ? { ...row, [field]: e.target.value, ...(field === 'set_name' ? { set_id: '' } : {}) } : row))} />
+              onChange={e => setPackGroups(current => current.map(row => row.key === group.key ? { ...row, [field]: e.target.value, ...(field === 'set_name' ? { set_id: '' } : {}), ...(field === 'name' || field === 'set_name' ? CATALOG_LINK : {}) } : row))} />
           </label>)}
+          <PackCatalogPicker group={group} autoSearch={index === 0} disabled={busy} t={t} onPick={row => pickPack(group.key, row)} />
           {packGroups.length > 1 && <button className="btn btn-secondary" type="button" onClick={() => setPackGroups(current => current.filter(row => row.key !== group.key))}>{t('sealed.removePackGroup')}</button>}
         </div>)}
-        <button className="btn btn-secondary" type="button" disabled={packGroups.length >= 20} onClick={() => setPackGroups(current => [...current, { key: ++nextLine, name: '', set_name: '', set_id: '', quantity: '1', market_value: '' }])}>{t('sealed.addPackGroup')}</button>
+        <button className="btn btn-secondary" type="button" disabled={packGroups.length >= 20} onClick={() => setPackGroups(current => [...current, { key: ++nextLine, name: '', set_name: '', set_id: '', quantity: '1', market_value: '', ...CATALOG_LINK }])}>{t('sealed.addPackGroup')}</button>
         <h4>{t('sealed.promos')}</h4>
         <label><input type="checkbox" checked={promosComplete} onChange={e => setPromosComplete(e.target.checked)} /> {t('sealed.promosComplete')}</label>
+        {setPicker}
       </section>}
       <h4 style={{ margin: 0 }}>Searching: {searchSetLabel}</h4>
       <div style={{ display: 'flex', gap: '0.5rem' }}>

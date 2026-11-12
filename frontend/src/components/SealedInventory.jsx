@@ -5,6 +5,7 @@ import { useT } from '../utils/i18n';
 import { useBackGuard } from '../utils/useBackGuard';
 import SealedOpenings from './SealedOpenings';
 import { sealedSaleTarget } from '../utils/saleTargets';
+import { sealedPackGroups } from '../utils/sealedPackGroups';
 
 const TYPES = ['booster_box', 'booster_pack', 'etb', 'tin', 'collection_box', 'blister', 'other'];
 
@@ -635,6 +636,9 @@ function SealedInventory({ showToast }) {
                   <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
                     {typeLabel(product.product_type)} · {product.language}{product.set_name ? ` · ${product.set_name}` : ''}
                   </span>
+                  {[...new Set(product.lots.filter(lot => lot.remaining_quantity > 0 && !lot.archived_at && lot.source_product_name).map(lot => lot.source_product_name))].map(name =>
+                    <small key={name} style={{ display: 'block', color: 'var(--text-secondary)' }}>{t('sealed.packSource', { name })}</small>
+                  )}
                 </span>
               </button>
               {selected && selected.id === product.id ? (
@@ -800,6 +804,7 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
   const [sort, setSort] = useState({ key: 'purchased_at', dir: 'desc' });
   const [lot, setLot] = useState({ quantity: '1', remaining_quantity: '', total_cost: '', currency: 'USD', purchased_at: todayISO(), location_id: '', notes: '' });
   const lots = [...(product.lots || [])].sort((a, b) => compareLots(a, b, sort));
+  const lotGroups = sealedPackGroups(lots);
 
   useEffect(() => { setRipLot(null); }, [product.id]);
 
@@ -826,6 +831,7 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
                 </button>
               </th>
               <th>{t('sealed.quantity')}</th>
+              <th>{t('sealed.source')}</th>
               <th aria-sort={sort.key === 'total_cost' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
                 <button type="button" onClick={() => toggleSort('total_cost')} style={{ background: 'none', border: 0, padding: 0, color: 'inherit', font: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', cursor: 'pointer' }}>
                   {t('sealed.colPaid')}{sortMark('total_cost')}
@@ -838,11 +844,14 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
             </tr>
           </thead>
           <tbody>
-            {lots.map(item => (
+            {lotGroups.map(group => group.lots[0].parent_opening_id ? (
+              <ConvertedLotGroup key={group.key} group={group} t={t} onRip={setRipLot} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot}
+                onSell={!product.archived_at ? item => { const target = sealedSaleTarget(item, product); if (target) window.dispatchEvent(new CustomEvent("bindarr_sell_item", { detail: { ...target, onSold: onChanged } })); } : null} />
+            ) : group.lots.map(item => (
               <LotRow key={item.id} lot={item} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot} onRip={() => setRipLot(item)}
                 onConvert={!product.archived_at && !item.parent_opening_id && product.product_type !== 'booster_pack' ? () => setRipLot({ ...item, convert: true }) : null}
                 onSell={!product.archived_at && !item.cost_pending ? () => { const target = sealedSaleTarget(item, product); if (target) window.dispatchEvent(new CustomEvent("bindarr_sell_item", { detail: { ...target, onSold: onChanged } })); } : null} />
-            ))}
+            )))}
           </tbody>
         </table>
       </div>
@@ -880,6 +889,29 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
   );
 }
 
+function ConvertedLotGroup({ group, t, onRip, onUpdateLot, onArchiveLot, onSell }) {
+  const [expanded, setExpanded] = useState(false);
+  const first = group.lots[0];
+  const next = group.lots.find(lot => lot.remaining_quantity > 0 && !lot.archived_at);
+  return <>
+    <tr>
+      <td>{first.purchased_at || '—'}</td>
+      <td>{group.quantity}</td>
+      <td>{first.source_product_name || t('sealed.convertedProduct')}<small style={{ display: 'block' }}>#{first.parent_opening_id}</small></td>
+      <td>{first.cost_pending ? t('sealed.allocationPending') : moneyLabel((group.costCents / 100).toFixed(2), first.currency)}</td>
+      <td>{group.remaining}</td>
+      <td className="hide-mobile">{first.cost_pending ? t('sealed.allocationPending') : moneyLabel((group.remainingCostCents / 100).toFixed(2), first.currency)}</td>
+      <td className="hide-mobile">{first.location_name || '—'}</td>
+      <td><div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        {next && <button className="btn btn-primary" type="button" onClick={() => onRip(next)}>{t('sealed.letItRip')}</button>}
+        <button className="btn btn-secondary" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{t('sealed.packDetails')}</button>
+      </div></td>
+    </tr>
+    {expanded && group.lots.map(lot => <LotRow key={lot.id} lot={lot} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot}
+      onRip={() => onRip(lot)} onSell={onSell && !lot.cost_pending ? () => onSell(lot) : null} />)}
+  </>;
+}
+
 function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip, onConvert, onSell }) {
   const [remaining, setRemaining] = useState(String(lot.remaining_quantity));
   const [cost, setCost] = useState(lot.total_cost);
@@ -892,6 +924,7 @@ function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip, onConvert, onSell })
     <tr style={{ opacity: lot.archived_at ? 0.6 : 1 }}>
       <td>{lot.purchased_at || '—'}</td>
       <td>{lot.quantity}</td>
+      <td>{lot.source_product_name || (lot.parent_opening_id ? t('sealed.convertedProduct') : t('sealed.purchasedSource'))}</td>
       <td>
         {lot.cost_pending ? t('sealed.allocationPending') : <input className="input-control" value={cost} onChange={e => setCost(e.target.value)} disabled={!!lot.parent_opening_id} aria-label={t('sealed.cost')} style={{ width: '6rem' }} />}
       </td>

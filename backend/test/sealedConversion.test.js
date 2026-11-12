@@ -59,6 +59,14 @@ async function main() {
     let data = await listed(product), converted = data.conversions[0];
     assert.strictEqual(converted.allocation_status, 'finalized');
     assert.strictEqual(converted.packs.length, 3);
+    const inventory = await send('GET', '/api/sealed/products');
+    const packProduct = inventory.body.products.find(item => item.id === converted.packs[0].product_id);
+    assert.strictEqual(packProduct.lots.length, 2);
+    assert.strictEqual(packProduct.lots[0].source_product_name, 'Mixed pack UPC');
+    assert.strictEqual(packProduct.lots[0].source_product_type, 'collection_box');
+    assert.strictEqual(packProduct.lots[0].parent_opening_id, parentId);
+    const otherInventory = await send('GET', '/api/sealed/products', undefined, other);
+    assert.ok(!otherInventory.body.products.some(item => item.id === packProduct.id), 'Sources stay user scoped');
     assert.deepStrictEqual(converted.packs.map(pack => pack.total_cost_cents), [1000, 1000, 2001]);
     assert.strictEqual(converted.packs.reduce((sum, pack) => sum + pack.total_cost_cents, opened.body.opening.cost_cents), 6001);
     assert.strictEqual((await spending(user)).knownCents, 6001, 'Converted pack lots are not additional spending');
@@ -172,6 +180,23 @@ async function main() {
     await db.run('DELETE FROM users WHERE id = ?', [other]);
     assert.strictEqual(await db.get('SELECT opening_id FROM sealed_product_conversion WHERE user_id = ?', [other]), undefined);
     assert.deepStrictEqual(await db.all('PRAGMA foreign_key_check'), []);
+
+    // A pack picked from the sealed catalog becomes a linked, quoted product, and
+    // a second conversion of the same catalog pack reuses it.
+    const catalogPack = { name: 'Catalog Booster Pack', set_name: 'Catalog Set', set_id: 'cat', quantity: 1, market_value: '4.50',
+      provider: 'pokewallet', provider_product_id: 'pk_0123456789abcdef', catalog_market_price: '4.25', catalog_market_currency: 'USD', market_source: 'pokewallet' };
+    for (const [index, requestId] of ['convert-catalog-0001', 'convert-catalog-0002'].entries()) {
+      const box = await create(`Catalog box ${index}`, '10');
+      const made = await send('POST', `/api/sealed/lots/${box.lots[0].id}/openings`, { request_id: requestId, entry_complete: true, pulls: [], packs: [catalogPack] });
+      assert.strictEqual(made.status, 201, JSON.stringify(made.body));
+    }
+    const linked = await db.all("SELECT * FROM sealed_product WHERE provider_product_id = 'pk_0123456789abcdef'");
+    assert.strictEqual(linked.length, 1, 'the same catalog pack is one product');
+    assert.strictEqual(linked[0].market_price_cents, 425);
+    assert.strictEqual(linked[0].market_source, 'pokewallet');
+    assert.strictEqual((await db.get('SELECT COUNT(*) AS n FROM sealed_lot WHERE product_id = ?', [linked[0].id])).n, 2);
+    const unlinked = await db.get("SELECT provider, provider_product_id FROM sealed_product WHERE name = 'Set A pack'");
+    assert.deepStrictEqual({ ...unlinked }, { provider: '', provider_product_id: '' }, 'a hand-typed pack stays unlinked');
   } finally { await new Promise(resolve => server.close(resolve)); }
   console.log('sealedConversion.test.js: all assertions passed');
 }

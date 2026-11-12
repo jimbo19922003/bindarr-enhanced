@@ -1095,6 +1095,21 @@ async function initDb() {
     market_unit_cents INTEGER CHECK(market_unit_cents >= 0),
     allocated_cost_cents INTEGER CHECK(allocated_cost_cents >= 0)
   )`);
+  // Databases created by early staged-conversion builds lack the allocation columns.
+  const conversionCols = await all('PRAGMA table_info(sealed_product_conversion)');
+  if (!conversionCols.some(column => column.name === 'allocation_status')) {
+    await run(`ALTER TABLE sealed_product_conversion ADD COLUMN allocation_status TEXT NOT NULL DEFAULT 'pending' CHECK(allocation_status IN ('pending', 'finalized'))`);
+  }
+  if (!conversionCols.some(column => column.name === 'allocation_json')) {
+    await run('ALTER TABLE sealed_product_conversion ADD COLUMN allocation_json TEXT');
+  }
+  const packLotCols = await all('PRAGMA table_info(sealed_pack_lot)');
+  if (!packLotCols.some(column => column.name === 'market_unit_cents')) {
+    await run('ALTER TABLE sealed_pack_lot ADD COLUMN market_unit_cents INTEGER CHECK(market_unit_cents >= 0)');
+  }
+  if (!packLotCols.some(column => column.name === 'allocated_cost_cents')) {
+    await run('ALTER TABLE sealed_pack_lot ADD COLUMN allocated_cost_cents INTEGER CHECK(allocated_cost_cents >= 0)');
+  }
   await run(`CREATE INDEX IF NOT EXISTS idx_sealed_pack_parent ON sealed_pack_lot(opening_id)`);
   await run(`
     CREATE TABLE IF NOT EXISTS sealed_pull (
@@ -1236,6 +1251,8 @@ async function initDb() {
       PRIMARY KEY (custom_set_id, card_id)
     )
   `);
+
+  for (const statement of require('./utils/tradePortal').schema) await run(statement);
 
   // --- PERFORMANCE INDEXES ---
   // `user_id` first, because it is the predicate on essentially every read in the

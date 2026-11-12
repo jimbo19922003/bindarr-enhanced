@@ -13,9 +13,12 @@ const round = n => Number(n.toFixed(2));
 async function openingPerformanceFor(userId, game) {
   if (game && game !== 'pokemon') return summarizePerformance([]);
   const rows = await db.all(`SELECT o.id AS opening_id, o.product_id, o.quantity AS units, o.cost_cents, o.currency,
-    o.entry_complete, p.set_name, p.product_type, sp.quantity AS pull_quantity,
+    o.entry_complete, p.set_name, p.product_type, source.product_type AS source_type, sp.quantity AS pull_quantity,
     sp.current_unit_cents, sp.current_line_cents, sp.opened_unit_cents, sp.opened_line_cents
     FROM sealed_opening o JOIN sealed_product p ON p.id = o.product_id AND p.user_id = o.user_id
+    LEFT JOIN sealed_pack_lot pack ON pack.lot_id = o.lot_id
+    LEFT JOIN sealed_opening parent ON parent.id = pack.opening_id AND parent.user_id = o.user_id
+    LEFT JOIN sealed_product source ON source.id = parent.product_id AND source.user_id = o.user_id
     LEFT JOIN sealed_pull sp ON sp.opening_id = o.id AND sp.user_id = o.user_id
     WHERE o.user_id = ? ORDER BY o.id, sp.id`, [userId]);
   return summarizePerformance(rows);

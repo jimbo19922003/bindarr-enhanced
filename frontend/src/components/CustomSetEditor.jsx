@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { X, Plus, Trash2, Search, RefreshCw, Undo2 } from 'lucide-react';
 import { langCode } from '../utils/languages';
 import { useT } from '../utils/i18n';
+import { withPendingRules } from '../utils/customSetRules';
 import CardImage from './CardImage';
 
 const EMPTY_RULES = { names: [], illustrators: [], set_ids: [], rarities: [] };
@@ -32,9 +33,8 @@ function Chips({ values, label = value => value, onRemove }) {
 
 // One free-text rule list (names, illustrators, rarities) with optional
 // suggestions from cards Bindarr has already cached.
-function TermRule({ id, label, hint, values, onChange, suggestions }) {
+function TermRule({ id, label, hint, values, onChange, draft, setDraft, suggestions }) {
   const { t } = useT();
-  const [draft, setDraft] = useState('');
   const add = () => {
     const value = draft.trim();
     if (value && !values.some(v => v.toLowerCase() === value.toLowerCase())) onChange([...values, value]);
@@ -69,6 +69,7 @@ export default function CustomSetEditor({ set, game, language, availableSets, ex
   const [name, setName] = useState(set?.name || '');
   const [mode, setMode] = useState(set?.completion_mode || 'card');
   const [rules, setRules] = useState({ ...EMPTY_RULES, ...(set?.rules || {}) });
+  const [drafts, setDrafts] = useState({ names: '', illustrators: '', rarities: '' });
   const [setPick, setSetPick] = useState('');
   const [illustrators, setIllustrators] = useState([]);
   const [rarities, setRarities] = useState([]);
@@ -93,13 +94,14 @@ export default function CustomSetEditor({ set, game, language, availableSets, ex
   }, [game]);
 
   const setRule = key => values => setRules(prev => ({ ...prev, [key]: values }));
+  const draftProps = key => ({ draft: drafts[key], setDraft: value => setDrafts(prev => ({ ...prev, [key]: value })) });
   const setName_ = id => availableSets.find(s => s.id === id)?.name || id;
 
   const save = async () => {
     if (!name.trim()) { showToast(t('customSet.errName')); return; }
     setSaving(true);
     try {
-      const body = { name: name.trim(), completion_mode: mode, rules };
+      const body = { name: name.trim(), completion_mode: mode, rules: withPendingRules(rules, { ...drafts, set_ids: setPick }) };
       const res = set
         ? await fetch(`/api/custom-sets/${set.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         : await fetch('/api/custom-sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, game }) });
@@ -216,8 +218,8 @@ export default function CustomSetEditor({ set, game, language, availableSets, ex
 
         <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{t('customSet.rulesHint')}</p>
 
-        <TermRule id="custom-set-names" label={t('customSet.ruleNames')} hint={t('customSet.ruleNamesHint')} values={rules.names} onChange={setRule('names')} />
-        <TermRule id="custom-set-illustrators" label={t('customSet.ruleIllustrators')} hint={t('customSet.ruleIllustratorsHint')} values={rules.illustrators} onChange={setRule('illustrators')} suggestions={illustrators} />
+        <TermRule id="custom-set-names" label={t('customSet.ruleNames')} hint={t('customSet.ruleNamesHint')} values={rules.names} onChange={setRule('names')} {...draftProps('names')} />
+        <TermRule id="custom-set-illustrators" label={t('customSet.ruleIllustrators')} hint={t('customSet.ruleIllustratorsHint')} values={rules.illustrators} onChange={setRule('illustrators')} {...draftProps('illustrators')} suggestions={illustrators} />
 
         <div>
           <label htmlFor="custom-set-sets" style={sectionLabel}>{t('customSet.ruleSets')}</label>
@@ -234,7 +236,7 @@ export default function CustomSetEditor({ set, game, language, availableSets, ex
           <Chips values={rules.set_ids} label={setName_} onRemove={id => setRule('set_ids')(rules.set_ids.filter(v => v !== id))} />
         </div>
 
-        <TermRule id="custom-set-rarities" label={t('customSet.ruleRarities')} hint={t('customSet.ruleRaritiesHint')} values={rules.rarities} onChange={setRule('rarities')} suggestions={rarities} />
+        <TermRule id="custom-set-rarities" label={t('customSet.ruleRarities')} hint={t('customSet.ruleRaritiesHint')} values={rules.rarities} onChange={setRule('rarities')} {...draftProps('rarities')} suggestions={rarities} />
 
         {set && (
           <>

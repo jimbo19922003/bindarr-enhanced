@@ -4,6 +4,7 @@ import { GAMES, enabledGames, setGameEnabled, gameOptions, defaultGame } from '.
 import { CURRENCIES, getCurrency, setCurrency } from '../utils/formatPrice';
 import { LOCALES, localeName, useT } from '../utils/i18n';
 import { REPO_URL } from '../utils/repo';
+import { TradeSharing } from './TradePortal';
 
 // One secret: what it is called, what it buys you, and where to get one. Three of
 // these replaced three near-identical panels, so a fourth provider is a few lines
@@ -451,6 +452,8 @@ function Settings({ user, onUpdateUser, showToast }) {
         <h2 style={{ fontSize: '1.25rem', color: 'var(--text-strong)' }}>{t('settings.title')}</h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{t('settings.subtitle')}</p>
       </div>
+
+      <TradeSharing origin={origin} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }} className="settings-grid">
         {/* Sharing Panel */}

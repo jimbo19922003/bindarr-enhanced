@@ -48,9 +48,10 @@ function OpenedPerformance({ performance, t, money }) {
 
   const active = reports.find(report => report.currency === currency) || reports[0];
   const overall = active.overall;
-  const rows = (group === 'type' ? active.productTypes : active.sets).slice().sort(compareRows(sort));
+  const rows = (group === 'type' ? active.productTypes : group === 'source' ? active.sources || [] : active.sets).slice().sort(compareRows(sort));
   const labelOf = (row) => {
-    if (group === 'type') return t(`sealed.type.${row.name}`) === `sealed.type.${row.name}` ? row.name : t(`sealed.type.${row.name}`);
+    if (group === 'source' && row.name === 'booster_pack') return t('dash.openedSourceLoose');
+    if (group === 'type' || group === 'source') return t(`sealed.type.${row.name}`) === `sealed.type.${row.name}` ? row.name : t(`sealed.type.${row.name}`);
     return row.name || t('dash.openedUnspecified');
   };
   const score = (row) => (measure === 'percent' ? returnPercent(row) : row.difference);
@@ -96,6 +97,7 @@ function OpenedPerformance({ performance, t, money }) {
           <div className="sub-nav-tabs" style={{ margin: 0 }}>
             <button type="button" className={`sub-nav-tab ${group === 'set' ? 'active' : ''}`} style={{ padding: '0.35rem 0.85rem', fontSize: '0.75rem' }} onClick={() => setGroup('set')}>{t('dash.openedBySet')}</button>
             <button type="button" className={`sub-nav-tab ${group === 'type' ? 'active' : ''}`} style={{ padding: '0.35rem 0.85rem', fontSize: '0.75rem' }} onClick={() => setGroup('type')}>{t('dash.openedByType')}</button>
+            <button type="button" className={`sub-nav-tab ${group === 'source' ? 'active' : ''}`} style={{ padding: '0.35rem 0.85rem', fontSize: '0.75rem' }} onClick={() => setGroup('source')} title={t('dash.openedBySourceHint')}>{t('dash.openedBySource')}</button>
           </div>
         </div>
       </div>
@@ -188,7 +190,8 @@ function OpenedPerformance({ performance, t, money }) {
         </div>
 
         <div className="glass-panel">
-          <h3 className="chart-title">{group === 'type' ? t('dash.openedByType') : t('dash.openedBySet')}</h3>
+          <h3 className="chart-title">{group === 'type' ? t('dash.openedByType') : group === 'source' ? t('dash.openedBySource') : t('dash.openedBySet')}</h3>
+          {group === 'source' && <p style={{ margin: '-0.35rem 0 0', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{t('dash.openedBySourceHint')}</p>}
           {rows.length === 0 ? (
             <div className="chart-empty">{t('dash.openedNoRows')}</div>
           ) : (

@@ -88,18 +88,18 @@ function normalizeSearchParams({ name = '', number = '', set = '', q = '' }) {
   const input = (!cleanName && !cleanNumber && !cleanSet && rawQuery) ? rawQuery : cleanName;
 
   if (input && !cleanNumber) {
-    const pureFrac = input.match(/^#?([A-Z0-9★\-]+)\s*\/\s*[A-Z0-9★\-]+$/i);
+    const pureFrac = input.match(/^#?([A-Z0-9★\-]+)\s*\/\s*([A-Z0-9★\-]+)$/i);
     if (pureFrac) {
-      cleanNumber = pureFrac[1];
+      cleanNumber = `${pureFrac[1]}/${pureFrac[2]}`;
       if (input === cleanName) cleanName = '';
     } else if (/^#?\d+$/i.test(input) || /^#[A-Z0-9★\-]+$/i.test(input)) {
       cleanNumber = input.replace(/^#/, '');
       if (input === cleanName) cleanName = '';
     } else {
-      const fracMatch = input.match(/^(.+?)\s+#?([A-Z0-9★\-]+)\s*\/\s*[A-Z0-9★\-]+$/i);
+      const fracMatch = input.match(/^(.+?)\s+#?([A-Z0-9★\-]+)\s*\/\s*([A-Z0-9★\-]+)$/i);
       if (fracMatch) {
         cleanName = fracMatch[1].trim();
-        cleanNumber = fracMatch[2].trim();
+        cleanNumber = `${fracMatch[2]}/${fracMatch[3]}`;
       } else {
         const hashMatch = input.match(/^(.+?)\s+#([A-Z0-9★\-]+)$/i);
         if (hashMatch) {
@@ -116,17 +116,36 @@ function normalizeSearchParams({ name = '', number = '', set = '', q = '' }) {
     }
   }
 
+  // "151/128": the part after the slash is the set's printed size, kept apart so
+  // a search without a set can still be narrowed to sets of that size.
+  let printedTotal = null;
   if (cleanNumber) {
+    const total = cleanNumber.match(/\/\s*(\d+)\s*$/);
+    if (total && Number(total[1]) > 0) printedTotal = Number(total[1]);
     cleanNumber = cleanNumber.replace(/^#/, '').split('/')[0].trim();
   }
 
-  return { name: cleanName, number: cleanNumber, set: cleanSet };
+  return { name: cleanName, number: cleanNumber, set: cleanSet, printedTotal };
+}
+
+// More sets than this share the printed size, so it no longer narrows anything.
+const MAX_PRINTED_TOTAL_SETS = 12;
+
+// Set ids (comma-joined, the `set` query format) whose printed size is `total`,
+// from the same provider the search goes to so the ids are numbered alike.
+// '' when the size names no set or too many — the search then runs unnarrowed.
+async function setsForPrintedTotal(api, game, lang, total) {
+  let sets = null;
+  if (typeof api.listSets === 'function') sets = await api.listSets(lang || 'en').catch(() => null);
+  if (!Array.isArray(sets)) sets = await db.all('SELECT id, printed_total FROM sets WHERE game = ?', [game]);
+  const ids = sets.filter(s => Number(s.printed_total) === total).map(s => s.id);
+  return ids.length <= MAX_PRINTED_TOTAL_SETS ? ids.join(',') : '';
 }
 
 router.all('/search', searchLimiter, async (req, res) => {
   const query = req.method === 'POST' ? { ...req.query, ...req.body } : req.query;
   const { name: rawName, number: rawNumber, set: rawSet, scope = 'database', game = 'pokemon', lang, prints, q, image, cropped } = query;
-  const { name, number, set } = normalizeSearchParams({ name: rawName, number: rawNumber, set: rawSet, q });
+  const { name, number, set, printedTotal } = normalizeSearchParams({ name: rawName, number: rawNumber, set: rawSet, q });
   // 1-based page over `limit`-sized pages. 250 is the pokemontcg.io ceiling and
   // a sane cap on how much one Scryfall search will page through per request.
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -135,10 +154,14 @@ router.all('/search', searchLimiter, async (req, res) => {
     // Every provider takes the same options object and ignores what does not
     // apply to it, so there is one call here rather than a branch per provider.
     const api = await searchApiFor(game, lang);
-    let { cards, total } = await api.searchCards({
-      name, number, set, scope, userId: req.user.id, lang,
+    const search = (setQuery) => api.searchCards({
+      name, number, set: setQuery, scope, userId: req.user.id, lang,
       apiKey: req.user.tcg_api_key, allPrints: prints === '1', page, limit,
     });
+    const sizedSets = !set && printedTotal ? await setsForPrintedTotal(api, game, lang, printedTotal) : '';
+    let { cards, total } = await search(sizedSets || set);
+    // A mistyped size must not turn into "no such card".
+    if (sizedSets && cards.length === 0) ({ cards, total } = await search(set));
 
     // When an image from a camera scan is attached, score each candidate card
     // against the scan's visual embedding and sort by similarity descending.
@@ -1576,5 +1599,6 @@ router.post('/collection/bulk', async (req, res) => {
 });
 
 router.normalizeSearchParams = normalizeSearchParams;
+router.setsForPrintedTotal = setsForPrintedTotal;
 router.addCardToCollection = addCardToCollection;
 module.exports = router;

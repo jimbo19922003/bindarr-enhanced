@@ -2,12 +2,12 @@ import { useState, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { Search, Trash2, Edit2, LayoutGrid, List, SlidersHorizontal, X, MousePointerClick, Plus, EyeOff, Heart } from 'lucide-react';
 import { getCardDisplayName, translateJapaneseName } from '../utils/langHelper';
 import { priceText, reportingTotal, reportingTotalText, subscribeCurrency, currencyRevision } from '../utils/formatPrice';
-import { CONDITIONS, PRINTINGS, GRADERS, getLanguageNamesForGame, getLanguagesForGame } from '../utils/cardOptions';
+import { CONDITIONS, PRINTINGS, GRADERS, getLanguageNamesForGame, getLanguagesForGame, getPrintings } from '../utils/cardOptions';
 import { getPrintingBadgeLabel, getPrintingBadgeStyle, getFoilOverlayClass } from '../utils/cardPrinting';
 import { getCardRarityBorder, getRarityBadgeLabel, getRarityBadgeStyle } from '../utils/cardRarity';
 import { sortCardsByOrder } from '../utils/cardSort';
 import { sortCardsBySetNumber } from '../utils/setCardOrder';
-import { inspectorCardForSetCard, standardSetCompletion, standardSetCards } from '../utils/setCardEntries';
+import { inspectorCardForSetCard, printingUpgrade, setPrintingQuality, standardSetCompletion, standardSetCards } from '../utils/setCardEntries';
 import { useMultiSelect } from '../utils/useMultiSelect';
 import { defaultGameFilter, gameOptions, GAMES, isGameEnabled, showGamePicker } from '../utils/games';
 import { langCode } from '../utils/languages';
@@ -50,6 +50,9 @@ const SORT_CRITERIA = {
 };
 const setKey = (set) => `${set.game || 'pokemon'}:${set.id}`;
 const CUSTOM_PREFIX = 'custom:';
+// Native <optgroup>s cannot nest, so sub-groups inside "Owned" are indented with
+// non-breaking spaces (plain spaces are collapsed in <option> text).
+const INDENT = '\u00a0\u00a0\u00a0';
 const WISHLIST_CHUNK = 25;
 const slotKey = (card) => `${card.id}|${card.slot_printing || ''}`;
 
@@ -75,6 +78,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   const [setViewGame, setSetViewGame] = useState('pokemon');
   const [setViewLanguage, setSetViewLanguage] = useState('English');
   const [fullSetCompletion, setFullSetCompletion] = useState(false);
+  const [setCardFilter, setSetCardFilter] = useState('all');
   const [setCards, setSetCards] = useState([]);
   const [setCardsLoading, setSetCardsLoading] = useState(false);
   const [setCardsError, setSetCardsError] = useState('');
@@ -578,12 +582,42 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
     [selectedCustomId, customSetData, setCards, selectedSet, fullSetCompletion]
   );
   const hasSetSelection = Boolean(selectedSet || selectedCustomSet);
+  const setPickerGroups = useMemo(() => {
+    const ownedKeys = new Set(collection.filter(entry => entry.set_id).map(entry => `${entry.game || 'pokemon'}:${entry.set_id}`));
+    const owned = [];
+    const unowned = [];
+    for (const set of availableSets) (ownedKeys.has(setKey(set)) ? owned : unowned).push(set);
+    return { owned, unowned };
+  }, [availableSets, collection]);
+  // Progress and wishlist actions use the full checklist; this only narrows the grid.
+  // Printing upgrades apply to standard sets; custom per-printing slots already
+  // track each printing separately.
+  const setCardUpgrades = useMemo(() => {
+    const upgrades = new Map();
+    if (selectedCustomId) return upgrades;
+    for (const card of orderedSetCards) {
+      const result = printingUpgrade(card, collection);
+      if (result?.upgradeAvailable) upgrades.set(card.id, result.better);
+    }
+    return upgrades;
+  }, [selectedCustomId, orderedSetCards, collection]);
+  const printingQuality = useMemo(
+    () => (selectedCustomId ? null : setPrintingQuality(orderedSetCards, collection)),
+    [selectedCustomId, orderedSetCards, collection]
+  );
+  const activeSetCardFilter = selectedCustomId && setCardFilter === 'upgrades' ? 'all' : setCardFilter;
+  const visibleSetCards = useMemo(() => {
+    if (activeSetCardFilter === 'owned') return orderedSetCards.filter(card => card.owned);
+    if (activeSetCardFilter === 'unowned') return orderedSetCards.filter(card => !card.owned);
+    if (activeSetCardFilter === 'upgrades') return orderedSetCards.filter(card => setCardUpgrades.has(card.id));
+    return orderedSetCards;
+  }, [activeSetCardFilter, orderedSetCards, setCardUpgrades]);
   const ownedSetCardCount = orderedSetCards.filter(card => card.owned).length;
   const wishableSetCardCount = orderedSetCards.filter(card => !card.owned && !card.wishlisted).length;
   const setProgressPercent = orderedSetCards.length
     ? Math.round(ownedSetCardCount / orderedSetCards.length * 100)
     : 0;
-  const standardCompletion = standardSetCompletion(selectedSet, collection, fullSetCompletion);
+  const standardCompletion = standardSetCompletion(selectedSet, collection, fullSetCompletion, setCardsError ? [] : setCards);
 
   return (
     <div>
@@ -691,18 +725,25 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                 style={{ minWidth: 'min(100%, 18rem)' }}
               >
                 <option value="">{t('collection.selectSet')}</option>
-                {customSets.length > 0 && (
-                  <optgroup label={t('customSet.group')}>
+                {(customSets.length > 0 || setPickerGroups.owned.length > 0) && (
+                  <optgroup label={t('collection.ownedSetsGroup')}>
+                    {customSets.length > 0 && <option disabled value="__custom-heading">{`${INDENT}${t('customSet.group')}`}</option>}
                     {customSets.map(set => (
-                      <option key={`custom-${set.id}`} value={`${CUSTOM_PREFIX}${set.id}`}>{set.name}</option>
+                      <option key={`custom-${set.id}`} value={`${CUSTOM_PREFIX}${set.id}`}>{`${INDENT}${INDENT}${set.name}`}</option>
+                    ))}
+                    {customSets.length > 0 && setPickerGroups.owned.length > 0 && <option disabled value="__standard-heading">{`${INDENT}${t('customSet.standardGroup')}`}</option>}
+                    {setPickerGroups.owned.map(set => (
+                      <option key={setKey(set)} value={setKey(set)}>{`${customSets.length > 0 ? INDENT + INDENT : ''}${set.name}`}</option>
                     ))}
                   </optgroup>
                 )}
-                <optgroup label={t('customSet.standardGroup')}>
-                  {availableSets.map(set => (
-                    <option key={setKey(set)} value={setKey(set)}>{set.name}</option>
-                  ))}
-                </optgroup>
+                {setPickerGroups.unowned.length > 0 && (
+                  <optgroup label={t('collection.unownedSetsGroup')}>
+                    {setPickerGroups.unowned.map(set => (
+                      <option key={setKey(set)} value={setKey(set)}>{set.name}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
               </Field>
               {selectedCustomSet && (
@@ -741,6 +782,23 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                 }) : standardCompletion ? t('collection.setProgressSummary', standardCompletion) : t('dash.setCompletionUnavailable')}
               </p>
             )}
+            {hasSetSelection && !setCardsLoading && !setCardsError && printingQuality && (
+              <p style={{ margin: '0.35rem 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }} title={t('collection.maxQualityHint')}>
+                {t('collection.maxQualitySummary', printingQuality)}
+              </p>
+            )}
+            {hasSetSelection && (
+              <div style={{ marginTop: '0.85rem' }}>
+                <Field label={t('collection.setCardFilter')}>
+                  <select className="select-control" value={activeSetCardFilter} onChange={event => setSetCardFilter(event.target.value)} aria-label={t('collection.setCardFilter')}>
+                    <option value="all">{t('collection.setCardFilterAll')}</option>
+                    <option value="owned">{t('collection.ownedOnly')}</option>
+                    <option value="unowned">{t('collection.unownedOnly')}</option>
+                    {!selectedCustomSet && <option value="upgrades">{t('collection.upgradeAvailable')}</option>}
+                  </select>
+                </Field>
+              </div>
+            )}
             {selectedCustomSet && customSetData?.truncated && (
               <p role="status" style={{ margin: '0.5rem 0 0', color: 'var(--accent-yellow)', fontSize: '0.8rem' }}>{t('customSet.truncated')}</p>
             )}
@@ -763,9 +821,13 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
             <div className="glass-panel" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
               {selectedCustomSet ? t('customSet.empty') : t('collection.noSetCards')}
             </div>
+          ) : visibleSetCards.length === 0 ? (
+            <div className="glass-panel" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
+              {t({ upgrades: 'collection.noUpgradesAvailable', owned: 'collection.noSetCardsOwned' }[activeSetCardFilter] || 'collection.allSetCardsOwned')}
+            </div>
           ) : (
             <div className="card-grid">
-              {orderedSetCards.map(card => (
+              {visibleSetCards.map(card => (
                 <div
                   key={slotKey(card)}
                   className="tcg-card"
@@ -824,6 +886,17 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                     }}>
                       {t(card.owned ? 'collection.setCardOwned' : card.wishlisted ? 'customSet.wishlisted' : 'collection.setCardMissing')}
                     </span>
+                    {setCardUpgrades.has(card.id) && (() => {
+                      const labels = setCardUpgrades.get(card.id).map(value => getPrintings(card.game).find(option => option.value === value)?.label || value);
+                      return (
+                        <span
+                          title={t('collection.upgradeTo', { printings: labels.join(', ') })}
+                          style={{ position: 'absolute', bottom: '6px', left: '6px', zIndex: 10, padding: '2px 5px', borderRadius: '3px', fontSize: '0.6rem', fontWeight: 800, color: 'var(--text-strong)', background: 'var(--accent-yellow)' }}
+                        >
+                          ↑ {labels[0]}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="tcg-card-info">
                     <div className="tcg-card-name">{getCardDisplayName(card.name, card.language, card.printed_name)}</div>
@@ -1360,6 +1433,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
 
       <QuickAddDrawer
         card={addCard}
+        allowWishlist={!addCard?.wishlisted}
         game={addCard?.game || setViewGame}
         defaults={{ printing: addCard?.slot_printing || undefined, language: addCard?.language || setViewLanguage }}
         onClose={() => setAddCard(null)}

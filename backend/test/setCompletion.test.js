@@ -30,7 +30,8 @@ test('unknown totals are explicit and Magic retains non-contiguous collector-num
   assert.deepEqual(completionCounts(['1', '85'], { printed_total: 84 }, 'pokemon'), {
     base: { ownedUnique: 1, totalCards: 84, percent: 1 }, full: null,
   });
-  assert.equal(completionCounts(['1'], { total: 120 }, 'pokemon').base, null);
+  // Promo sets (MEP) have no printed total; their full total is the base total.
+  assert.deepEqual(completionCounts(['001', '113'], { printed_total: 0, total: 112 }, 'pokemon').base, { ownedUnique: 1, totalCards: 112, percent: 1 });
   assert.deepEqual(completionCounts(['1', '500', '123a'], { printed_total: 3, total: 3 }, 'mtg').base, {
     ownedUnique: 3, totalCards: 3, percent: 100,
   });

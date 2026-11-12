@@ -29,6 +29,8 @@ function presentLot(row) {
     notes: row.notes || '',
     archived_at: row.archived_at,
     parent_opening_id: row.parent_opening_id || null,
+    source_product_name: row.source_product_name || null,
+    source_product_type: row.source_product_type || null,
     cost_pending: row.allocation_status === 'pending',
   };
 }
@@ -62,10 +64,13 @@ async function lotsFor(userId, productIds) {
   if (!productIds.length) return new Map();
   const marks = productIds.map(() => '?').join(', ');
   const rows = await db.all(
-    `SELECT l.*, loc.name AS location_name, pack.opening_id AS parent_opening_id, conversion.allocation_status
+    `SELECT l.*, loc.name AS location_name, pack.opening_id AS parent_opening_id, conversion.allocation_status,
+       source.name AS source_product_name, source.product_type AS source_product_type
        FROM sealed_lot l
        LEFT JOIN sealed_pack_lot pack ON pack.lot_id = l.id
        LEFT JOIN sealed_product_conversion conversion ON conversion.opening_id = pack.opening_id
+       LEFT JOIN sealed_opening parent ON parent.id = pack.opening_id AND parent.user_id = l.user_id
+       LEFT JOIN sealed_product source ON source.id = parent.product_id AND source.user_id = l.user_id
        LEFT JOIN locations loc ON loc.id = l.location_id AND loc.user_id = l.user_id
       WHERE l.user_id = ? AND l.product_id IN (${marks})
       ORDER BY l.id`,

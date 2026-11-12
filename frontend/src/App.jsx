@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { LayoutDashboard, Database, MapPin, Sparkles, Settings as SettingsIcon, LogOut, ShieldAlert, Plus, Swords, StickyNote, Package } from 'lucide-react';
+import { LayoutDashboard, Database, Layers, MapPin, Sparkles, Settings as SettingsIcon, LogOut, ShieldAlert, Plus, Swords, StickyNote, Package } from 'lucide-react';
 import Login from './components/Login';
 import Logo from './components/Logo';
 import SaleDialogHost from './components/SaleDialogHost';
@@ -18,6 +18,7 @@ const Settings = lazy(() => import('./components/Settings'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const SetupWizard = lazy(() => import('./components/SetupWizard'));
 const SharedCollection = lazy(() => import('./components/SharedCollection'));
+const TradePortal = lazy(() => import('./components/TradePortal'));
 const SharedContainer = lazy(() => import('./components/SharedContainer'));
 const DeckBuilder = lazy(() => import('./components/DeckBuilder'));
 const Notes = lazy(() => import('./components/Notes'));
@@ -59,7 +60,7 @@ function ChunkFallback() {
 const originalFetch = window.fetch;
 window.fetch = function (input, options = {}) {
   const url = typeof input === 'string' ? input : (input && input.url) || '';
-  const isPublicOrAuthRoute = url.includes('/api/shared/') || url.includes('/api/auth/login') || url.includes('/api/auth/register') || url.includes('/api/auth/bootstrap') || url.includes('/api/auth/oidc/exchange');
+  const isPublicOrAuthRoute = url.includes('/api/trade-public/') || url.includes('/api/shared/') || url.includes('/api/auth/login') || url.includes('/api/auth/register') || url.includes('/api/auth/bootstrap') || url.includes('/api/auth/oidc/exchange');
   const token = localStorage.getItem('bindarr_token');
   const finalOptions = { ...options };
   if (token && url.startsWith('/api/') && !isPublicOrAuthRoute) {
@@ -137,6 +138,7 @@ function App() {
     const match = window.location.pathname.match(/^\/share\/([a-zA-Z0-9_-]+)$/);
     return match ? match[1] : null;
   });
+  const [tradeToken] = useState(() => window.location.pathname.match(/^\/trade\/([a-zA-Z0-9_-]+)$/)?.[1] || null);
   const [sharedContainerId] = useState(() => {
     const id = new URLSearchParams(window.location.search).get('container');
     return /^\d+$/.test(id || '') ? id : null;
@@ -283,6 +285,7 @@ function App() {
   const handleUpdateUser = (updatedUser) => { setUser(updatedUser); localStorage.setItem('bindarr_user', JSON.stringify(updatedUser)); };
   const triggerRefresh = () => { setStatsTrigger(prev => prev + 1); };
 
+  if (tradeToken) return <Suspense fallback={<ChunkFallback />}><TradePortal tradeToken={tradeToken} /></Suspense>;
   if (shareToken) return <Suspense fallback={<ChunkFallback />}>{sharedContainerId ? <SharedContainer shareToken={shareToken} containerId={sharedContainerId} /> : <SharedCollection shareToken={shareToken} />}</Suspense>;
   if (!token || !user) return <Login onLoginSuccess={handleLoginSuccess} />;
 
@@ -310,7 +313,7 @@ function App() {
         <nav ref={navRef} className="nav-tabs" style={{ margin: 0 }}>
           <button className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => goTab('dashboard')} aria-label={t('nav.dashboard')} title={t('nav.dashboard')}><LayoutDashboard size={18} /><span className="nav-tab-label">{t('nav.dashboard')}</span></button>
           <button className={`nav-tab ${activeTab === 'add-cards' ? 'active' : ''}`} onClick={() => goTab('add-cards')} aria-label={t('nav.addCards')} title={t('nav.addCards')}><Plus size={18} /><span className="nav-tab-label">{t('nav.addCards')}</span></button>
-          <button className={`nav-tab ${activeTab === 'collection' ? 'active' : ''}`} onClick={() => goTab('collection')} aria-label={t('nav.collection')} title={t('nav.collection')}><Database size={18} /><span className="nav-tab-label">{t('nav.collection')}</span></button>
+          <button className={`nav-tab ${activeTab === 'collection' ? 'active' : ''}`} onClick={() => goTab('collection')} aria-label={t('nav.collection')} title={t('nav.collection')}><Layers size={18} /><span className="nav-tab-label">{t('nav.collection')}</span></button>
           {tabShown('sealed') && <button className={`nav-tab ${activeTab === 'sealed' ? 'active' : ''}`} onClick={() => goTab('sealed')} aria-label={t('nav.sealed')} title={t('nav.sealed')}><Package size={18} /><span className="nav-tab-label">{t('nav.sealed')}</span></button>}
           {tabShown('sales-history') && <button className={`nav-tab ${activeTab === 'sales-history' ? 'active' : ''}`} onClick={() => goTab('sales-history')} aria-label={t('nav.salesHistory')} title={t('nav.salesHistory')}><Database size={18} /><span className="nav-tab-label">{t('nav.salesHistory')}</span></button>}
           {tabShown('storage') && <button className={`nav-tab ${activeTab === 'storage' ? 'active' : ''}`} onClick={() => goTab('storage')} aria-label={t('nav.storage')} title={t('nav.storage')}><MapPin size={18} /><span className="nav-tab-label">{t('nav.storage')}</span></button>}

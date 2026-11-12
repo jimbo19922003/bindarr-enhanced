@@ -69,6 +69,23 @@ assert.equal(box.openings, 2);
 assert.equal(box.cost, 140);
 assert.equal(box.knownValue, 130);
 
+// Packs converted out of a UPC count under the UPC as their source, with the
+// UPC's own promo opening; a pack bought loose stays a booster pack source.
+const sourced = summarizePerformance([
+  { opening_id: 20, product_id: 30, units: 1, cost_cents: 6000, currency: 'USD', entry_complete: 1, set_name: '30th Celebration',
+    product_type: 'collection_box', source_type: null, pull_quantity: 1, current_unit_cents: 8500, current_line_cents: null, opened_unit_cents: null, opened_line_cents: null },
+  { opening_id: 21, product_id: 31, units: 1, cost_cents: 700, currency: 'USD', entry_complete: 1, set_name: '30th Celebration',
+    product_type: 'booster_pack', source_type: 'collection_box', pull_quantity: 1, current_unit_cents: 300, current_line_cents: null, opened_unit_cents: null, opened_line_cents: null },
+  { opening_id: 22, product_id: 31, units: 1, cost_cents: 1000, currency: 'USD', entry_complete: 1, set_name: '30th Celebration',
+    product_type: 'booster_pack', pull_quantity: 1, current_unit_cents: 200, current_line_cents: null, opened_unit_cents: null, opened_line_cents: null },
+]).reports[0];
+const upc = sourced.sources.find(item => item.name === 'collection_box');
+assert.deepEqual([upc.openings, upc.cost, upc.knownValue], [2, 67, 88]);
+const loose = sourced.sources.find(item => item.name === 'booster_pack');
+assert.deepEqual([loose.openings, loose.cost, loose.knownValue], [1, 10, 2]);
+assert.equal(sourced.productTypes.find(item => item.name === 'booster_pack').openings, 2, 'by type still counts every pack rip as a pack');
+assert.deepEqual(usd.sources.map(item => item.name).sort(), ['booster_box', 'etb']);
+
 const eur = report.reports.find(item => item.currency === 'EUR');
 assert.equal(eur.overall.cost, 20);
 assert.equal(eur.overall.knownValue, 25);

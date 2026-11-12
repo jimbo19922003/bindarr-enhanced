@@ -14,7 +14,7 @@ import { useT } from '../utils/i18n';
 
 // The single-card "Add to collection" sheet, shared by Search and the Sets view.
 // The form is keyed by card so every open starts from the given defaults.
-function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, showToast, onZoom }) {
+function QuickAddForm({ card: initialCard, game, defaults, allowWishlist, onClose, onAdded, showToast, onZoom }) {
   const { t } = useT();
   const [card, setCard] = useState(initialCard);
   const [quantity, setQuantity] = useState(defaults.quantity ?? 1);
@@ -69,6 +69,7 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (languageLoading || quoteLoading || saving) return;
+    const wishlist = allowWishlist && e.nativeEvent.submitter?.value === 'wishlist';
     setSaving(true);
     try {
       const response = await fetch('/api/collection', {
@@ -80,7 +81,8 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
           condition,
           printing,
           language,
-          purchase_price: purchasePrice === '' ? null : Number(purchasePrice),
+          purchase_price: wishlist || purchasePrice === '' ? null : Number(purchasePrice),
+          list_type: wishlist ? 'wishlist' : 'collection',
           location_id: null,
           grader,
           grade: grade === '' ? null : parseFloat(grade),
@@ -89,10 +91,10 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
       });
 
       if (response.ok) {
-        showToast(t('search.addedToCollection', { name: displayName(card) }));
+        showToast(wishlist ? t('customSet.wishlistAdded', { count: Number(quantity) }) : t('search.addedToCollection', { name: displayName(card) }));
         const rarity = (card.rarity || '').toLowerCase();
         const price = card.price_trend || 0;
-        if (rarity.includes('holo') || rarity.includes('secret') || rarity.includes('ultra') || price > 10) {
+        if (!wishlist && (rarity.includes('holo') || rarity.includes('secret') || rarity.includes('ultra') || price > 10)) {
           confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
         }
         onAdded?.(card);
@@ -172,6 +174,7 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
           <div className="quick-add-footer-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
             <button type="submit" className="btn btn-primary" disabled={languageLoading || quoteLoading || saving}>{t('search.addToCollection')}</button>
+            {allowWishlist && <button type="submit" value="wishlist" className="btn btn-secondary" disabled={languageLoading || quoteLoading || saving}>{t('customSet.wishlistOne')}</button>}
           </div>
         </div>
       </form>
@@ -181,7 +184,7 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
 
 // `defaults` seeds quantity/condition/language/printing; a printing the card
 // doesn't come in falls back to its preferred one.
-export default function QuickAddDrawer({ card, game, defaults = {}, onClose, onAdded, showToast }) {
+export default function QuickAddDrawer({ card, game, defaults = {}, allowWishlist = false, onClose, onAdded, showToast }) {
   const [zoomCard, setZoomCard] = useState(null);
   const open = Boolean(card);
   const close = () => { setZoomCard(null); onClose(); };
@@ -192,7 +195,7 @@ export default function QuickAddDrawer({ card, game, defaults = {}, onClose, onA
         {card && (
           <QuickAddForm
             key={`${card.id}|${defaults.printing || ''}`}
-            card={card} game={game} defaults={defaults}
+            card={card} game={game} defaults={defaults} allowWishlist={allowWishlist}
             onClose={close} onAdded={onAdded} showToast={showToast} onZoom={setZoomCard}
           />
         )}

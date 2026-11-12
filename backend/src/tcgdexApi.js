@@ -178,8 +178,11 @@ const fetchFullCard = (lang, id) => client.get(`/${lang}/cards/${encodeURICompon
 //
 // `paged` says whether TCGdex already applied our page window. A set browse gets
 // the whole set in one response and is sliced locally; a name search is paged
-// server-side so we never pull (or hydrate) more than one page.
-async function searchBriefs(lang, name, setList, page, limit) {
+// server-side so we never pull (or hydrate) more than one page — unless a number
+// narrows it: the number is filtered locally, so a server-side page would hide
+// every match past the first page ("Mewtwo" #151 is the 61st Mewtwo). Briefs are
+// tiny, and only the matched window is hydrated either way.
+async function searchBriefs(lang, name, setList, page, limit, number = '') {
   if (setList.length) {
     const perSet = await mapLimited(setList, async (set) => {
       const { data } = await client.get(`/${lang}/sets/${encodeURIComponent(set)}`);
@@ -188,6 +191,10 @@ async function searchBriefs(lang, name, setList, page, limit) {
     return { briefs: perSet.flat(), paged: false };
   }
   if (!name) return { briefs: [], paged: true };
+  if (number) {
+    const { data } = await client.get(`/${lang}/cards`, { params: { name: `like:${name}` } });
+    return { briefs: data || [], paged: false };
+  }
   const { data } = await client.get(`/${lang}/cards`, {
     params: { name: `like:${name}`, 'pagination:page': page, 'pagination:itemsPerPage': limit },
   });
@@ -263,14 +270,11 @@ async function runSearch(nameQuery = '', numberQuery = '', setQuery = '', scope 
 
   // 3. TCGdex.
   try {
-    const { briefs, paged } = await searchBriefs(code, name, setList, page, limit);
+    const { briefs, paged } = await searchBriefs(code, name, setList, page, limit, number);
     const lowerName = name.toLowerCase();
     // A number filter is applied here rather than upstream: TCGdex can only match
     // localId exactly, and collector numbers arrive zero-padded ("004") or not
     // ("4") depending on where they were typed.
-    // ponytail: on a name search the number filter only sees the page TCGdex
-    // returned. A number is only reliable alongside a set anyway (same reason the
-    // English path refuses a bare number search), and that path reads the whole set.
     const matched = briefs.filter(b =>
       numberMatches(b.localId, number) &&
       (!name || String(b.name || '').toLowerCase().includes(lowerName))

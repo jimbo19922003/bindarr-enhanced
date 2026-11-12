@@ -58,7 +58,7 @@ function createPokemonLocalSetSync({store, source}) {
           job.setIndex = index + 1;
           job.done = 0;
           job.total = 0;
-          job.message = `Fetching set ${setId} (${index + 1} of ${selectedSets.length}) from TCGdex.`;
+          job.message = `Fetching set ${setId} (${index + 1} of ${selectedSets.length}).`;
 
           let snapshot;
           try {

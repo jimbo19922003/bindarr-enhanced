@@ -432,6 +432,10 @@ app.use(compression());
 // card art that shared collection renders.
 app.use('/api/auth', authRoutes);
 app.use('/api/shared', sharedRoutes);
+const tradeRouters = require('./routes/tradePortal').createTradeRouters(
+  require('./utils/tradePortal').createTradePortal({ db })
+);
+app.use('/api/trade-public', (req, res, next) => dbReady ? next() : res.status(503).json({ error: 'Database initializing' }), tradeRouters.publicRouter);
 // Admin carries its own authenticateToken + requireAdmin, so it sits above the
 // gate rather than being authenticated twice.
 app.use('/api/admin', adminRoutes);
@@ -455,6 +459,7 @@ app.use('/api/card-art', cardArtRoutes);
 // on its way to notes, so it ran authenticateToken — and its sessions⋈users
 // SELECT — four times per request.
 app.use('/api', authenticateToken);
+app.use('/api/trade', (req, res, next) => dbReady ? next() : res.status(503).json({ error: 'Database initializing' }), tradeRouters.privateRouter);
 app.use(BIG_BODY_PATHS, express.json({ limit: '15mb' }));
 
 // --- AUTHENTICATED API ROUTES ---

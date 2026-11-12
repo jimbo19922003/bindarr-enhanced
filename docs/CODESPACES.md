@@ -82,6 +82,23 @@ restart, so you log in on the next resume instead of creating it again.
 
 ## Secrets
 
+### Previewing trade-only sharing
+
+In **Settings → Trade-only sharing**, check **Enable anonymous trade proposals**
+and press **Save** before using **Preview trade page** or **Copy trade link**.
+The page address is your Bindarr forwarded-port URL followed by
+`/trade/<token>`. A disabled or revoked link returns **Trade page not found**.
+The saved sharing status is shown beside the link controls.
+
+The optional Discord webhook URL is only for sending notifications; opening it
+in a browser returns Discord webhook metadata, not your trade binder. Never
+paste that URL or its token into chat or screenshots. If exposed, delete and
+recreate the webhook in Discord and replace it in Bindarr.
+
+Keep the Codespaces port private for development. Preview works for someone
+authorized to access that Codespace; anonymous Bindarr trade sharing does not
+bypass GitHub's private-port access control.
+
 CardDex price reads work without a key; put `CARDDEX_API_KEY` in a repository
 Codespaces secret for keyed access. Put `POKEWALLET_API_KEY` there to enable
 the fallback. The server reads these keys; the browser bundle does not. If

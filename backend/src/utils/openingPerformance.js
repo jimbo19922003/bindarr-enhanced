@@ -10,6 +10,11 @@ const { openingReport } = require('./openingAccounting');
 // when the pull was recorded. Since-open compares only pulls that have both, so a
 // missing snapshot cannot look like the cards moved. Nothing is converted: each
 // currency is its own report.
+//
+// Source is the product type the units were bought as: a pack converted out of
+// an ETB or UPC belongs to that ETB or UPC, together with the parent's promos,
+// so a converted product's whole result reads as one row. Packs bought loose
+// stay "booster_pack".
 
 function money(cents) {
   return parseFloat((cents / 100).toFixed(2));
@@ -121,6 +126,7 @@ function openingsFrom(rows) {
         productId: row.product_id,
         setName: String(row.set_name || '').trim(),
         productType: row.product_type || 'other',
+        sourceType: row.source_type || row.product_type || 'other',
         currency: row.currency,
         costCents: row.cost_cents,
         units: row.units,
@@ -146,7 +152,7 @@ function summarizePerformance(rows) {
   const byCurrency = new Map();
   for (const opening of openingsFrom(rows)) {
     if (!byCurrency.has(opening.currency)) {
-      byCurrency.set(opening.currency, { overall: emptyBucket(), sets: new Map(), types: new Map() });
+      byCurrency.set(opening.currency, { overall: emptyBucket(), sets: new Map(), types: new Map(), sources: new Map() });
     }
     const bag = byCurrency.get(opening.currency);
     addOpening(bag.overall, opening);
@@ -156,6 +162,8 @@ function summarizePerformance(rows) {
     const typeKey = opening.productType || 'other';
     if (!bag.types.has(typeKey)) bag.types.set(typeKey, emptyBucket());
     addOpening(bag.types.get(typeKey), opening);
+    if (!bag.sources.has(opening.sourceType)) bag.sources.set(opening.sourceType, emptyBucket());
+    addOpening(bag.sources.get(opening.sourceType), opening);
   }
   const currencies = [...byCurrency.keys()].sort();
   return {
@@ -166,10 +174,10 @@ function summarizePerformance(rows) {
       const sets = [...bag.sets.values()]
         .map(entry => ({ name: entry.name, ...present(entry.bucket) }))
         .sort(byDifference);
-      const productTypes = [...bag.types.entries()]
+      const grouped = map => [...map.entries()]
         .map(([name, bucket]) => ({ name, ...present(bucket) }))
         .sort(byDifference);
-      return { currency, overall: present(bag.overall), sets, productTypes };
+      return { currency, overall: present(bag.overall), sets, productTypes: grouped(bag.types), sources: grouped(bag.sources) };
     }),
   };
 }

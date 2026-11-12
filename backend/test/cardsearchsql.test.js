@@ -115,28 +115,40 @@ function testParamOrderMatchesClauseOrder() {
 
 function testNormalizeSearchParams() {
   const { normalizeSearchParams } = require('../src/routes/collection');
-  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan 5/64' }), { name: 'Kangaskhan', number: '5', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan', number: '5/64' }), { name: 'Kangaskhan', number: '5', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ name: '5/64' }), { name: '', number: '5', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ name: '#5' }), { name: '', number: '5', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan #5' }), { name: 'Kangaskhan', number: '5', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan 5' }), { name: 'Kangaskhan', number: '5', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan' }), { name: 'Kangaskhan', number: '', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ q: 'Kangaskhan 5/64' }), { name: 'Kangaskhan', number: '5', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ q: '5/64' }), { name: '', number: '5', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ name: 'Charizard VMAX SV107/SV122' }), { name: 'Charizard VMAX', number: 'SV107', set: '' });
-  assert.deepStrictEqual(normalizeSearchParams({ set: 'base2', number: '5/64' }), { name: '', number: '5', set: 'base2' });
+  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan 5/64' }), { name: 'Kangaskhan', number: '5', set: '', printedTotal: 64 });
+  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan', number: '5/64' }), { name: 'Kangaskhan', number: '5', set: '', printedTotal: 64 });
+  assert.deepStrictEqual(normalizeSearchParams({ name: '5/64' }), { name: '', number: '5', set: '', printedTotal: 64 });
+  assert.deepStrictEqual(normalizeSearchParams({ name: '#5' }), { name: '', number: '5', set: '', printedTotal: null });
+  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan #5' }), { name: 'Kangaskhan', number: '5', set: '', printedTotal: null });
+  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan 5' }), { name: 'Kangaskhan', number: '5', set: '', printedTotal: null });
+  assert.deepStrictEqual(normalizeSearchParams({ name: 'Kangaskhan' }), { name: 'Kangaskhan', number: '', set: '', printedTotal: null });
+  assert.deepStrictEqual(normalizeSearchParams({ q: 'Kangaskhan 5/64' }), { name: 'Kangaskhan', number: '5', set: '', printedTotal: 64 });
+  assert.deepStrictEqual(normalizeSearchParams({ q: '5/64' }), { name: '', number: '5', set: '', printedTotal: 64 });
+  assert.deepStrictEqual(normalizeSearchParams({ name: 'Charizard VMAX SV107/SV122' }), { name: 'Charizard VMAX', number: 'SV107', set: '', printedTotal: null });
+  assert.deepStrictEqual(normalizeSearchParams({ set: 'base2', number: '5/64' }), { name: '', number: '5', set: 'base2', printedTotal: 64 });
+  assert.deepStrictEqual(normalizeSearchParams({ name: 'Mewtwo', number: '151/128' }), { name: 'Mewtwo', number: '151', set: '', printedTotal: 128 });
 }
 
-function main() {
+async function testSetsForPrintedTotal() {
+  // "151/128" with no set narrows to the sets printed with 128 cards.
+  const { setsForPrintedTotal } = require('../src/routes/collection');
+  const sets = [{ id: '30th', printed_total: 128 }, { id: 'sv03.5', printed_total: 165 }, { id: 'xy1', printed_total: 146 }];
+  const api = { listSets: async () => sets };
+  assert.strictEqual(await setsForPrintedTotal(api, 'pokemon', 'en', 128), '30th');
+  assert.strictEqual(await setsForPrintedTotal(api, 'pokemon', 'en', 999), '', 'an unknown size does not narrow');
+  const crowded = { listSets: async () => Array.from({ length: 13 }, (_, i) => ({ id: `s${i}`, printed_total: 100 })) };
+  assert.strictEqual(await setsForPrintedTotal(crowded, 'pokemon', 'en', 100), '', 'a size shared by many sets does not narrow');
+}
+
+async function main() {
   testNumberMatching();
   testNameMatching();
   testCollectionScopeIgnoresLanguage();
   testLocalCacheKeepsLanguage();
   testParamOrderMatchesClauseOrder();
   testNormalizeSearchParams();
+  await testSetsForPrintedTotal();
   console.log('cardsearchsql.test.js: all assertions passed');
 }
 
-try { main(); process.exit(0); }
-catch (err) { console.error(err); process.exit(1); }
+main().then(() => process.exit(0), (err) => { console.error(err); process.exit(1); });

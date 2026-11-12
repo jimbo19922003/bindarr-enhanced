@@ -2,11 +2,16 @@
 const express = require('express');
 const {createPokemonLocalCatalog} = require('../utils/pokemonLocalCatalog');
 const {createPokemonLocalSetSync} = require('../utils/pokemonLocalSetSync');
+const {createReleaseFirstSetSource} = require('../utils/pokemonReleaseSetSource');
+const {createRepositoryCatalogueSource} = require('../utils/repositoryCatalogueSource');
 
-function createLocalCatalogSetsRouter({connect, service, source = {
-  listSets: language => require('../tcgdexApi').listPhysicalSets(language),
-  fetchSetSnapshot: (...args) => require('../tcgdexApi').fetchSetSnapshot(...args),
-}}) {
+function createLocalCatalogSetsRouter({connect, service, source = createReleaseFirstSetSource({
+  release: createRepositoryCatalogueSource(),
+  api: {
+    listSets: language => require('../tcgdexApi').listPhysicalSets(language),
+    fetchSetSnapshot: (...args) => require('../tcgdexApi').fetchSetSnapshot(...args),
+  },
+})}) {
   const store = createPokemonLocalCatalog({connect});
   const sync = service || createPokemonLocalSetSync({store, source});
   const router = express.Router();
