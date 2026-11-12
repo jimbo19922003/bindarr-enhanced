@@ -1,9 +1,29 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ownedEntriesForSetCard, inspectorCardForSetCard, standardSetCompletion } from './setCardEntries.js';
+import { ownedEntriesForSetCard, inspectorCardForSetCard, standardSetCompletion, standardSetCards } from './setCardEntries.js';
 
 const card = { id: 'sv1-007', game: 'pokemon', set_id: 'sv1', number: '7' };
 const entry = (over) => ({ entry_id: 1, game: 'pokemon', set_id: 'sv1', number: '007', quantity: 1, ...over });
+
+test('base grid hides secrets and special numbers; full mode restores them without changing the source', () => {
+  const set = { game: 'pokemon', printed_total: 84 };
+  const cards = ['001', ' 84 ', '85', '120', 'TG01', '1a', '0', '', null].map(number => ({ number, owned: false, wishlisted: false }));
+  const base = standardSetCards(cards, set);
+  assert.deepEqual(base.map(card => card.number), ['001', ' 84 ']);
+  assert.equal(base.filter(card => !card.owned && !card.wishlisted).length, 2);
+  assert.equal(standardSetCards(cards, set, true), cards);
+  assert.equal(cards.length, 9);
+  assert.deepEqual(standardSetCards(cards, { ...set, game: 'lorcana' }), base);
+});
+
+test('grid does not guess a base range for missing totals or non-contiguous Magic numbers', () => {
+  const cards = ['1', '500', '123a'].map(number => ({ number }));
+  assert.equal(standardSetCards(cards, { game: 'mtg', printed_total: 3 }), cards);
+  for (const printed_total of [null, 0, undefined]) {
+    assert.equal(standardSetCards(cards, { game: 'pokemon', printed_total }), cards);
+  }
+  assert.equal(standardSetCards(cards, null), cards);
+});
 
 test('standard set completion uses catalogue totals, not the loaded checklist or copy count', () => {
   const set = { id: 'sv1', game: 'pokemon', printed_total: 84, total: 120 };

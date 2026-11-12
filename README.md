@@ -397,6 +397,10 @@ from cached provider set metadata or an active imported Pokémon catalogue, not
 from the number of cards you happen to own or have cached. An unavailable total
 is shown explicitly rather than guessed. Magic retains its existing unique
 collector-number counting because its collector numbers need not be contiguous.
+In **Collection → Sets**, base mode also hides cards outside the base-set range;
+full mode shows them again. **Add missing to wishlist** uses the visible checklist.
+If the base total is unavailable, all cards remain visible with an explanatory
+message. Custom-set checklists and their completion rules are unchanged.
 
 ## Sealed inventory
 

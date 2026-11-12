@@ -7,7 +7,7 @@ import { getPrintingBadgeLabel, getPrintingBadgeStyle, getFoilOverlayClass } fro
 import { getCardRarityBorder, getRarityBadgeLabel, getRarityBadgeStyle } from '../utils/cardRarity';
 import { sortCardsByOrder } from '../utils/cardSort';
 import { sortCardsBySetNumber } from '../utils/setCardOrder';
-import { inspectorCardForSetCard, standardSetCompletion } from '../utils/setCardEntries';
+import { inspectorCardForSetCard, standardSetCompletion, standardSetCards } from '../utils/setCardEntries';
 import { useMultiSelect } from '../utils/useMultiSelect';
 import { defaultGameFilter, gameOptions, GAMES, isGameEnabled, showGamePicker } from '../utils/games';
 import { langCode } from '../utils/languages';
@@ -574,8 +574,8 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   );
   // Custom sets come back ordered (and split per printing) by the server.
   const orderedSetCards = useMemo(
-    () => (selectedCustomId ? customSetData?.cards || [] : sortCardsBySetNumber(setCards)),
-    [selectedCustomId, customSetData, setCards]
+    () => (selectedCustomId ? customSetData?.cards || [] : sortCardsBySetNumber(standardSetCards(setCards, selectedSet, fullSetCompletion))),
+    [selectedCustomId, customSetData, setCards, selectedSet, fullSetCompletion]
   );
   const hasSetSelection = Boolean(selectedSet || selectedCustomSet);
   const ownedSetCardCount = orderedSetCards.filter(card => card.owned).length;
@@ -729,6 +729,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                   {t('dash.fullSetCompletion')}
                 </label>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.5rem' }}>{t(fullSetCompletion ? 'dash.fullSetCompletionHint' : 'dash.baseSetCompletionHint')}</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.5rem' }}>{t(fullSetCompletion || selectedSet.game === 'mtg' ? 'collection.fullSetCardsHint' : standardCompletion ? 'collection.baseSetCardsHint' : 'collection.unfilteredSetCardsHint')}</p>
               </>
             )}
             {hasSetSelection && !setCardsLoading && !setCardsError && orderedSetCards.length > 0 && (

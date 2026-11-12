@@ -4,6 +4,12 @@
 // sets also match a card with no number by its exact card id, and a
 // per-printing slot only counts copies of that printing.
 const normalizeNumber = value => String(value ?? '').trim().replace(/^0+/, '').toLowerCase();
+const isBaseSetNumber = (number, total) => /^\d+$/.test(String(number ?? '').trim()) && Number(number) >= 1 && Number(number) <= total;
+
+export function standardSetCards(cards, set, fullSet = false) {
+  if (fullSet || !set || set.game === 'mtg' || !Number.isSafeInteger(set.printed_total) || set.printed_total <= 0) return cards;
+  return cards.filter(card => isBaseSetNumber(card.number, set.printed_total));
+}
 
 export function standardSetCompletion(set, collection, fullSet = false) {
   if (!set) return null;
@@ -15,7 +21,7 @@ export function standardSetCompletion(set, collection, fullSet = false) {
       const key = String(card.number ?? '').trim().toLowerCase();
       return /^\d+$/.test(key) ? key.replace(/^0+(?=\d)/, '') : key;
     })
-    .filter(key => key && (fullSet || set.game === 'mtg' || (/^\d+$/.test(key) && Number(key) >= 1 && Number(key) <= total))));
+    .filter(key => key && (fullSet || set.game === 'mtg' || isBaseSetNumber(key, total))));
   return { owned: numbers.size, total, percent: Math.min(Math.round(numbers.size / total * 100), 100) };
 }
 
