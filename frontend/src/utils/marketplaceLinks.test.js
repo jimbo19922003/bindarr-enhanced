@@ -14,7 +14,7 @@ test('PokéWallet prices name the marketplace and the quote currency', () => {
   });
 
   assert.equal(priceSource({ price_trend: 0, price_currency: 'USD', price_source: 'pokewallet-tcgplayer' }), null);
-  assert.equal(priceSource({ price_trend: 3, price_currency: 'USD', price_source: 'tcgcsv' }), null);
+  assert.deepEqual(priceSource({ price_trend: 3, price_currency: 'USD', price_source: 'tcgcsv' }), { name: 'TCGCSV · TCGplayer', currency: 'USD' });
 });
 
 test('CardDex prices identify the underlying marketplace', () => {

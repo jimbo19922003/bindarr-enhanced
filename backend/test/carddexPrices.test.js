@@ -33,10 +33,10 @@ test('refuses mismatched, stale, unpriced or unconfirmed quotes', () => {
   assert.equal(providerId({ ...card, language: 'Japanese' }), null);
 });
 
-test('prefers the existing quote currency when available, otherwise accepts another source currency', () => {
+test('prefers TCGplayer USD consistently, regardless of the previous quote currency', () => {
   const usd = { ...body.data.prices[0], source: 'tcgplayer', currency: 'USD', trend_price: 50 };
   const both = { data: { ...body.data, prices: [usd, body.data.prices[0]] } };
-  assert.equal(extractCarddexQuote({ ...card, price_trend: 3, price_currency: 'EUR' }, both, now).currency, 'EUR');
+  assert.equal(extractCarddexQuote({ ...card, price_trend: 3, price_currency: 'EUR' }, both, now).currency, 'USD');
   assert.equal(extractCarddexQuote({ ...card, price_trend: 3, price_currency: 'USD' }, both, now).currency, 'USD');
   assert.equal(extractCarddexQuote(card, both, now).currency, 'USD');
   assert.equal(extractCarddexQuote({ ...card, price_trend: 3, price_currency: 'EUR' },

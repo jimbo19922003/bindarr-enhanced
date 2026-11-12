@@ -178,6 +178,8 @@ async function main() {
 
   const portfolio = await send(port, 'GET', '/api/stats', admin.id);
   assert.strictEqual(portfolio.status, 200);
+  assert.strictEqual(portfolio.body.summary.cardValue, 10);
+  assert.strictEqual(portfolio.body.summary.totalValue, 86.02);
   const completion = portfolio.body.setProgress.find(row => row.setId === 'card-set-id');
   assert.deepStrictEqual(completion.base, { ownedUnique: 0, totalCards: 131, percent: 0 });
   assert.deepStrictEqual(completion.full, { ownedUnique: 1, totalCards: 180, percent: 1 });

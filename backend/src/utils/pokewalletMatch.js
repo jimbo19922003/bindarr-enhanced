@@ -72,13 +72,13 @@ function extractQuote(result, preferredCurrency = null) {
   const tcg = result && result.tcgplayer;
   const rows = tcg && Array.isArray(tcg.prices) ? tcg.prices : [];
   const bySubtype = {};
-  let updated = null;
+  const updated = [];
   for (const row of rows) {
     const amount = positive(row && row.market_price);
     const subtype = row && row.sub_type_name;
     if (!amount || !subtype || bySubtype[subtype]) continue;
     bySubtype[subtype] = amount;
-    updated = quoteTime(row.updated_at) || updated;
+    updated.push(quoteTime(row.updated_at));
   }
   const normal = bySubtype.Normal ?? bySubtype.Unlimited ?? null;
   const holofoil = bySubtype.Holofoil ?? null;
@@ -99,7 +99,7 @@ function extractQuote(result, preferredCurrency = null) {
       price_avg1: null,
       price_avg7: null,
       price_avg30: null,
-      updated_at: updated,
+      updated_at: updated.length && updated.every(value => value && Number.isFinite(Date.parse(value))) ? updated.sort((a, b) => Date.parse(a) - Date.parse(b))[0] : null,
       tcgplayer_url: url ? url.toString() : null,
       cardmarket_url: null,
       tcgplayer_product_id: productIdFromUrl(tcg.url),
@@ -110,6 +110,7 @@ function extractQuote(result, preferredCurrency = null) {
   if (bySubtype.Shadowless && !trend && preferredCurrency !== 'EUR') return { ok: false, reason: 'variant_unconfirmed' };
 
   const market = result && result.cardmarket;
+  updated.length = 0;
   const cmRows = market && Array.isArray(market.prices) ? market.prices : [];
   const cm = {};
   for (const row of cmRows) {
@@ -118,7 +119,7 @@ function extractQuote(result, preferredCurrency = null) {
     const amount = positive(row.trend) ?? positive(row.avg);
     if (!amount || cm[variant]) continue;
     cm[variant] = row;
-    updated = quoteTime(row.updated_at) || updated;
+    updated.push(quoteTime(row.updated_at));
   }
   const cmNormal = cm.normal ? (positive(cm.normal.trend) ?? positive(cm.normal.avg)) : null;
   const cmHolo = cm.holo ? (positive(cm.holo.trend) ?? positive(cm.holo.avg)) : null;
@@ -138,7 +139,7 @@ function extractQuote(result, preferredCurrency = null) {
     price_avg1: positive(representative.avg1),
     price_avg7: positive(representative.avg7),
     price_avg30: positive(representative.avg30),
-    updated_at: updated,
+    updated_at: updated.length && updated.every(value => value && Number.isFinite(Date.parse(value))) ? updated.sort((a, b) => Date.parse(a) - Date.parse(b))[0] : null,
     tcgplayer_url: null,
     cardmarket_url: url ? url.toString() : null,
     tcgplayer_product_id: null,

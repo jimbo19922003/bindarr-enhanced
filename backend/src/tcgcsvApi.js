@@ -28,6 +28,7 @@ const db = require('./db');
 const { recordPrice, shouldSweepPrices, markPricesSwept } = require('./utils/priceHelpers');
 const { normId, normName, fold } = require('./utils/setCatalogueMatch');
 const { slimResults } = require('./utils/tcgcsvSlim');
+const { isFreshQuote } = require('./utils/priceFreshness');
 
 const API_BASE_URL = (process.env.TCGCSV_BASE_URL || 'https://raw.githubusercontent.com/thenotoriousJeremy/bindarr/tcgcsv-mirror').replace(/\/+$/, '');
 const TCGCSV_403_COOLDOWN_HOURS = 24;
@@ -563,10 +564,8 @@ const SUBTYPE_PRIORITY = {
   '1st Edition Holofoil': 0, '1st Edition Normal': 1, '1st Edition': 2,
 };
 
-// marketPrice is the real signal — TCGplayer's computed market value from actual
-// sales. midPrice is the midpoint of current LISTINGS, which is a sellers' asking
-// price and runs high, so it is only a fallback.
-const priceOf = (row) => (row.marketPrice > 0 ? row.marketPrice : (row.midPrice > 0 ? row.midPrice : null));
+// Listing midpoints are not market values; a missing market quote stays missing.
+const priceOf = (row) => (Number.isFinite(row.marketPrice) && row.marketPrice > 0 ? row.marketPrice : null);
 
 // Collapse a group's price rows into one per product, in the column shape
 // card_cache uses.
@@ -601,6 +600,8 @@ function pricesByProduct(rows) {
 
 async function quoteForCard(card) {
   if (!mirrorAvailable) throw new Error('No successful mirror refresh is available');
+  const asOf = (await db.get('SELECT tcgcsv_data_version FROM app_settings WHERE id = 1'))?.tcgcsv_data_version;
+  if (!isFreshQuote(asOf)) return null;
   if (!card || card.game !== 'pokemon' || !card.set_id || isPocketSet(card.set_id)
       || String(card.set_id).startsWith('pokemontcgapi-')) return null;
   const categories = {};
@@ -615,7 +616,7 @@ async function quoteForCard(card) {
   const product = matches[0];
   const price = pricesByProduct(await getPrices(hit.categoryId, hit.group.groupId)).get(product.productId);
   if (!price || !(price.price_trend > 0)) return null;
-  return { ...price, productId: product.productId,
+  return { ...price, productId: product.productId, asOf,
     source: card.language === 'English' || card.language === 'Japanese' ? 'tcgcsv' : 'tcgcsv-en' };
 }
 
@@ -649,6 +650,8 @@ async function setsToPrice(scope = 'owned', excludeCarddex = false) {
 // Returns counts rather than throwing on a partial result — one set failing to
 // resolve must not abandon the other 200.
 async function priceSet({ set_id, set_name, language }, match, groupDataCache = new Map(), excludeCarddex = false) {
+  const asOf = (await db.get('SELECT tcgcsv_data_version FROM app_settings WHERE id = 1'))?.tcgcsv_data_version;
+  if (!isFreshQuote(asOf)) return { set_id, language, matched: false, priced: 0, stale: true };
   if (String(set_id).startsWith('pokemontcgapi-')) return { set_id, language, matched: false, priced: 0 };
   const hit = match(set_id, set_name, language);
   if (!hit) return { set_id, language, matched: false, priced: 0 };
@@ -704,10 +707,11 @@ async function priceSet({ set_id, set_name, language }, match, groupDataCache = 
     await db.run(
       `UPDATE card_cache
           SET price_trend = ?, price_normal = ?, price_holofoil = ?, price_reverse_holofoil = ?,
-              price_1st_edition = ?, tcgplayer_product_id = ?, price_source = ?, price_currency = 'USD'
+              price_1st_edition = ?, tcgplayer_product_id = ?, price_source = ?, price_currency = 'USD',
+              price_as_of = ?, price_fetched_at = CURRENT_TIMESTAMP, price_base_finish = NULL
         WHERE id = ?`,
       [p.price_trend, p.price_normal, p.price_holofoil, p.price_reverse_holofoil,
-       p.price_1st_edition, product.productId, source, row.id]
+       p.price_1st_edition, product.productId, source, asOf, row.id]
     );
     await recordPrice(row.id, p.price_trend);
     priced++;

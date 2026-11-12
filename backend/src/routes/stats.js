@@ -105,7 +105,7 @@ router.get('/stats', async (req, res) => {
       extraCopiesCount += group.quantity - 1;
       extraCopiesValueCents += group.valueCents - group.keeperCents;
     }
-    res.json({ summary: { totalCards: portfolio.totalCards, uniqueCards: uniqueCardCount, totalValue: portfolio.totalValue, totalSpent: portfolio.totalSpent,
+    res.json({ summary: { totalCards: portfolio.totalCards, uniqueCards: uniqueCardCount, cardValue: portfolio.cardValue, totalValue: portfolio.totalValue, totalSpent: portfolio.totalSpent,
       roi: { abs: gain, pct: portfolio.totalSpent > 0 ? round(gain / portfolio.totalSpent * 100) : null },
       avgCardValue: portfolio.totalCards ? round(portfolio.cardValue / portfolio.totalCards) : 0, unsortedCount,
       duplicateCopies: Math.max(portfolio.totalCards - uniqueCardCount, 0),
@@ -179,6 +179,43 @@ router.get('/cards/:id/price-history', async (req, res) => {
     const days = rangeKey === '30d' ? 30 : null;
     const now = Date.now();
     const card = await db.get('SELECT * FROM card_cache WHERE id = ?', [id]);
+    if (card?.game === 'pokemon') {
+      const finish = FINISH_COLUMNS[req.query.printing] ? String(req.query.printing) : null;
+      const currency = card.price_currency || 'USD';
+      const stored = finish
+        ? await db.all(`SELECT price, recorded_at FROM price_history_finish WHERE card_id = ? AND finish = ?
+            AND COALESCE(currency, ?) = ? ORDER BY recorded_at`, [id, finish, currency, currency])
+        : await db.all(`SELECT price, recorded_at FROM price_history WHERE card_id = ?
+            AND COALESCE(currency, ?) = ? ORDER BY recorded_at`, [id, currency, currency]);
+      const points = stored.map(row => ({ price: Number(row.price), time: parseSqliteUtc(row.recorded_at).getTime(), source: 'recorded' }));
+      const owned = await db.get(`SELECT 1 FROM collection WHERE user_id = ? AND card_id = ?
+        UNION SELECT 1 FROM deck_cards dc JOIN decks d ON d.id = dc.deck_id WHERE d.user_id = ? AND dc.card_id = ? LIMIT 1`,
+      [req.user.id, id, req.user.id, id]);
+      let history = { points: [], status: 'unavailable' };
+      if (owned && String(card.id).startsWith('tcgdex-en-')) {
+        history = await require('../pokemonPrices').getPokemonPrices().history(card, finish);
+      } else {
+        const cached = await require('../pokemonPrices').getPokemonPrices().cachedHistory(card);
+        history = { points: cached.filter(row => !finish || row.finish === finish), status: 'cached' };
+      }
+      const providerPoints = history.points.map(row => ({ price: Number(row.price), time: Date.parse(row.recorded_at), source: 'carddex' }));
+      points.push(...providerPoints);
+      // Only a real quote for the requested finish can extend that finish's chart.
+      const currentPrice = Number(finish ? card[FINISH_COLUMNS[finish]] : card.price_trend);
+      const quoteAt = card.price_as_of || null;
+      if (currentPrice > 0) points.push({ price: currentPrice, time: quoteAt ? parseSqliteUtc(quoteAt).getTime() : now, source: 'current' });
+      const ordered = points.filter(point => Number.isFinite(point.time) && point.time <= now && point.price > 0
+        && (!days || point.time >= now - days * 86400000)).sort((a, b) => a.time - b.time);
+      const unique = [...new Map(ordered.map(point => [point.time, point])).values()];
+      const spanDays = unique.length > 1 ? Math.round((unique.at(-1).time - unique[0].time) / 86400000) : 0;
+      return res.json({
+        data: unique.map(point => ({ price: point.price, recorded_at: new Date(point.time).toISOString(), source: point.source })),
+        spanDays, windowDays: days, marketCount: 0,
+        recordedCount: ordered.filter(point => point.source === 'recorded').length,
+        carddexCount: ordered.filter(point => point.source === 'carddex').length,
+        carddexHistoryStatus: history.status, quoteAt, finish, insufficientHistory: unique.length < 2,
+      });
+    }
     // The inspector's headline is the copy's own printing column when it has one
     // (resolveCardPrice). price_trend tracks a single finish, so when that column
     // differs from it the chart has to follow the printing's series instead, or

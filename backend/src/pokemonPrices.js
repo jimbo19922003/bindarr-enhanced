@@ -2,7 +2,8 @@
 
 const { parseSqliteUtc, priceRefreshDays } = require('./utils/priceHelpers');
 const { createCarddexArtworkClient } = require('./utils/carddexArtwork');
-const { providerId, extractCarddexQuote } = require('./utils/carddexPrices');
+const { providerId, extractCarddexQuote, carddexBaseFinish } = require('./utils/carddexPrices');
+const { isFreshQuote, quoteTime, MAX_QUOTE_AGE_MS } = require('./utils/priceFreshness');
 
 const HOUR = 3600000;
 const DAY = 24 * HOUR;
@@ -26,17 +27,18 @@ function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, rec
     const column = quote.finish;
     if (!['price_normal', 'price_holofoil'].includes(column)) throw new Error('Invalid CardDex finish');
     const result = await database.run(`UPDATE card_cache SET price_trend = ?,
-      price_normal = CASE WHEN ? = 'price_normal' THEN ? WHEN price_currency IS ? THEN price_normal ELSE NULL END,
-      price_holofoil = CASE WHEN ? = 'price_holofoil' THEN ? WHEN price_currency IS ? THEN price_holofoil ELSE NULL END,
-      price_reverse_holofoil = CASE WHEN price_currency IS ? THEN price_reverse_holofoil ELSE NULL END,
-      price_1st_edition = CASE WHEN price_currency IS ? THEN price_1st_edition ELSE NULL END,
+      price_normal = CASE WHEN ? = 'price_normal' THEN ? ELSE NULL END,
+      price_holofoil = CASE WHEN ? = 'price_holofoil' THEN ? ELSE NULL END,
+      price_reverse_holofoil = NULL, price_1st_edition = NULL,
       price_avg1 = ?, price_avg7 = ?, price_avg30 = ?, price_currency = ?, price_source = ?,
+      price_as_of = ?, price_fetched_at = CURRENT_TIMESTAMP, price_base_finish = ?,
       last_updated = CURRENT_TIMESTAMP
       WHERE id = ? AND price_source IS ? AND price_currency IS ? AND last_updated IS ?
         AND price_trend IS ? AND price_normal IS ? AND price_holofoil IS ?
         AND price_reverse_holofoil IS ? AND price_1st_edition IS ?`,
-    [quote.amount, column, quote.amount, quote.currency, column, quote.amount, quote.currency,
-      quote.currency, quote.currency, quote.avg1, quote.avg7, quote.avg30, quote.currency, quote.source,
+    [quote.amount, column, quote.amount, column, quote.amount,
+      quote.avg1, quote.avg7, quote.avg30, quote.currency, quote.source, quote.recordedAt,
+      column === 'price_normal' ? 'Normal' : 'Holofoil',
       card.id, card.price_source, card.price_currency, card.last_updated, card.price_trend,
       card.price_normal, card.price_holofoil, card.price_reverse_holofoil, card.price_1st_edition]);
     return result.changes === 1;
@@ -71,29 +73,35 @@ function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, rec
     }
     const result = await database.run(`UPDATE card_cache SET price_trend = ?, price_currency = ?,
       price_source = 'cached-history', last_updated = CURRENT_TIMESTAMP
+      , price_as_of = ?, price_fetched_at = CURRENT_TIMESTAMP, price_base_finish = NULL
       WHERE id = ? AND COALESCE(price_trend, 0) <= 0 AND COALESCE(price_normal, 0) <= 0
         AND COALESCE(price_holofoil, 0) <= 0 AND COALESCE(price_reverse_holofoil, 0) <= 0
         AND COALESCE(price_1st_edition, 0) <= 0 AND price_currency IS ?`,
-    [point.price, point.currency, card.id, card.price_currency]);
+    [point.price, point.currency, point.recorded_at, card.id, card.price_currency]);
     return result.changes === 1 ? parseSqliteUtc(point.recorded_at).toISOString() : null;
   }
 
-  async function runCard(card, days) {
+  async function runCard(card, days, { allowApi = true } = {}) {
     const id = providerId(card);
     if (!id) return { status: 'unsupported' };
     if (tcgcsv) {
       try {
         const quote = await tcgcsv.quoteForCard(card);
-        if (quote) {
+        if (quote && isFreshQuote(quote.asOf, now())) {
+          if (card.price_source === quote.source && card.price_as_of === quote.asOf && Number(card.price_trend) > 0) {
+            await noteFresh(card, 'tcgcsv', id, quote.asOf, days);
+            return { status: 'tcgcsv' };
+          }
           const result = await database.run(`UPDATE card_cache SET price_trend = ?, price_normal = ?,
             price_holofoil = ?, price_reverse_holofoil = ?, price_1st_edition = ?,
             price_avg1 = NULL, price_avg7 = NULL, price_avg30 = NULL,
             price_currency = 'USD', price_source = ?, tcgplayer_product_id = ?, last_updated = CURRENT_TIMESTAMP
+            , price_as_of = ?, price_fetched_at = CURRENT_TIMESTAMP, price_base_finish = NULL
             WHERE id = ? AND price_source IS ? AND price_currency IS ? AND last_updated IS ?
               AND price_trend IS ? AND price_normal IS ? AND price_holofoil IS ?
               AND price_reverse_holofoil IS ? AND price_1st_edition IS ?`,
           [quote.price_trend, quote.price_normal, quote.price_holofoil, quote.price_reverse_holofoil,
-            quote.price_1st_edition, quote.source, quote.productId, card.id, card.price_source,
+            quote.price_1st_edition, quote.source, quote.productId, quote.asOf, card.id, card.price_source,
             card.price_currency, card.last_updated, card.price_trend, card.price_normal, card.price_holofoil,
             card.price_reverse_holofoil, card.price_1st_edition]);
           if (result.changes !== 1) return { status: 'changed' };
@@ -101,13 +109,20 @@ function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, rec
           await database.run(`INSERT INTO carddex_price_attempt (card_id, attempted_at, next_attempt_at, status, provider_id, quote_at)
             VALUES (?, ?, ?, 'tcgcsv', ?, NULL) ON CONFLICT(card_id) DO UPDATE SET attempted_at=excluded.attempted_at,
             next_attempt_at=excluded.next_attempt_at, status=excluded.status, provider_id=excluded.provider_id, quote_at=NULL`,
-          [card.id, now(), now() + Math.max(days, 1) * DAY, id]);
+          [card.id, now(), Math.min(now() + Math.max(days, 1) * DAY, quoteTime(quote.asOf) + MAX_QUOTE_AGE_MS), id]);
           return { status: 'tcgcsv' };
         }
       } catch (error) {
         console.warn(`TCGCSV price lookup failed for ${card.id}: ${error.code || error.message}`);
       }
     }
+    if (Number(card.price_trend) > 0 && isFreshQuote(card.price_as_of, now())) {
+      await noteFresh(card, 'cached', id, card.price_as_of, days);
+      return { status: 'cached' };
+    }
+    if (!allowApi) return { status: 'cache_only' };
+    const previous = await database.get('SELECT status, next_attempt_at FROM carddex_price_attempt WHERE card_id = ?', [card.id]);
+    if (previous?.next_attempt_at > now() && !['tcgcsv', 'matched', 'cached'].includes(previous.status)) return { status: 'not_due', previous: previous.status };
     let quote = null, reason = 'unpriced';
     try {
       const body = await carddex.json(`/v1/cards/${encodeURIComponent(id)}`, { include: 'prices,variants' });
@@ -118,13 +133,14 @@ function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, rec
     }
     if (quote) {
       if (!await writeQuote(card, quote)) return { status: 'changed' };
+      await recordPrice(card.id, quote.amount);
       try { await recordFinishPrices(card.id); } catch (error) { console.warn(`Could not record printing prices for ${card.id}: ${error.message}`); }
       await database.run(`UPDATE pokewallet_map SET status = 'skipped_priced', reason = 'existing_quote'
         WHERE card_id = ? AND status = 'currency_conflict'`, [card.id]);
       await database.run(`INSERT INTO carddex_price_attempt (card_id, attempted_at, next_attempt_at, status, provider_id, quote_at)
         VALUES (?, ?, ?, 'matched', ?, ?) ON CONFLICT(card_id) DO UPDATE SET attempted_at=excluded.attempted_at,
         next_attempt_at=excluded.next_attempt_at, status=excluded.status, provider_id=excluded.provider_id, quote_at=excluded.quote_at`,
-      [card.id, now(), now() + Math.max(days, 1) * DAY, id, quote.recordedAt]);
+      [card.id, now(), Math.min(now() + Math.max(days, 1) * DAY, quoteTime(quote.recordedAt) + MAX_QUOTE_AGE_MS), id, quote.recordedAt]);
       return { status: 'matched', source: quote.source };
     }
     let fallback;
@@ -144,15 +160,22 @@ function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, rec
     return { status, fallback };
   }
 
-  async function refreshCard(card, days = null) {
+  async function noteFresh(card, status, id, asOf, days) {
+    await database.run(`INSERT INTO carddex_price_attempt (card_id, attempted_at, next_attempt_at, status, provider_id, quote_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(card_id) DO UPDATE SET attempted_at=excluded.attempted_at,
+      next_attempt_at=excluded.next_attempt_at, status=excluded.status, provider_id=excluded.provider_id, quote_at=excluded.quote_at`,
+    [card.id, now(), Math.min(now() + Math.max(days, 1) * DAY, quoteTime(asOf) + MAX_QUOTE_AGE_MS), status, id, asOf]);
+  }
+
+  async function refreshCard(card, days = null, options = {}) {
     await initialize();
-    if (pending.has(card.id)) return pending.get(card.id);
+    const key = `${card.id}:${options.allowApi !== false}`;
+    if (pending.has(key)) return pending.get(key);
     const work = (async () => {
-      const previous = await database.get(`SELECT status, next_attempt_at FROM carddex_price_attempt WHERE card_id = ?`, [card.id]);
-      if (previous && previous.next_attempt_at > now()) return { status: 'not_due', previous: previous.status };
-      return runCard(card, days == null ? await refreshDays() : days);
-    })().finally(() => pending.delete(card.id));
-    pending.set(card.id, work);
+      card = await database.get('SELECT * FROM card_cache WHERE id = ?', [card.id]) || card;
+      return runCard(card, days == null ? await refreshDays() : days, options);
+    })().finally(() => pending.delete(key));
+    pending.set(key, work);
     return work;
   }
 
@@ -179,24 +202,30 @@ function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, rec
     return { status: 'complete', examined: cards.length, counts };
   }
 
-  async function history(card) {
+  async function history(card, finish = null) {
     await initialize();
     const id = providerId(card);
-    const source = card.price_source === 'carddex-cardmarket' ? 'cardmarket'
-      : card.price_source === 'carddex-tcgplayer' ? 'tcgplayer' : null;
+    const source = card.price_currency === 'EUR' ? 'cardmarket'
+      : card.price_currency === 'USD' ? 'tcgplayer' : null;
     if (!id || !source) return { points: [], status: 'unavailable' };
     const cached = await database.get(`SELECT body, fetched_at FROM carddex_history_cache WHERE card_id = ? AND source = ?`, [card.id, source]);
     let rows = cached ? JSON.parse(cached.body) : null;
+    let baseFinish = card.price_base_finish || rows?.find(row => row.finish)?.finish || null;
     let status = 'cached';
     if (!cached || now() - cached.fetched_at >= DAY || now() < cached.fetched_at) {
       try {
+        if (!baseFinish) {
+          baseFinish = carddexBaseFinish(card, await carddex.json(`/v1/cards/${encodeURIComponent(id)}`, { include: 'prices' }));
+        }
+        if (!baseFinish) throw new Error('unconfirmed_history_finish');
         const body = await carddex.json(`/v1/cards/${encodeURIComponent(id)}/prices/history`, { days: 365, source });
         if (!Array.isArray(body?.data)) throw new Error('invalid_response');
         const points = body.data.filter(row => Number.isFinite(Number(row?.trend_price)) && Number(row.trend_price) > 0
-          && Number.isFinite(Date.parse(row.recorded_at))
+          && Number.isFinite(Date.parse(row.recorded_at)) && Date.parse(row.recorded_at) <= now()
           && (!row.source || row.source === source)
-          && (!row.currency || row.currency === card.price_currency))
-          .map(row => ({ price: Number(row.trend_price), recorded_at: row.recorded_at }));
+          && (!row.currency || row.currency === card.price_currency)
+          && row.variant_id == null)
+          .map(row => ({ price: Number(row.trend_price), recorded_at: row.recorded_at, finish: baseFinish }));
         if (points.length || !rows) {
           rows = points;
           await database.run(`INSERT INTO carddex_history_cache (card_id, source, body, fetched_at) VALUES (?, ?, ?, ?)
@@ -210,9 +239,10 @@ function createPokemonPrices({ database, carddex, pokewallet, tcgcsv = null, rec
       } catch (error) {
         status = rows ? 'stale' : 'unavailable';
         console.warn(`CardDex price history unavailable for ${card.id}: ${error.code || 'upstream'}`);
+        if (!cached) await database.run(`INSERT OR IGNORE INTO carddex_history_cache (card_id, source, body, fetched_at) VALUES (?, ?, '[]', ?)`, [card.id, source, now() - DAY + HOUR]);
       }
     }
-    return { points: rows || [], status };
+    return { points: finish && finish !== baseFinish ? [] : rows || [], status: finish && finish !== baseFinish ? 'unsupported_finish' : status, baseFinish };
   }
   // The cached CardDex series for a currency, without fetching. Used when the
   // card is now priced by another source (TCGCSV) so its chart keeps the

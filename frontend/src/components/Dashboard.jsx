@@ -367,6 +367,14 @@ function Dashboard({ statsTrigger, onNavigate, onNavigateToSet, setSelectedLocat
       )}
 
       {view === 'cards' && (<>
+      <div className="glass-panel metric-card accent-networth" style={{ marginBottom: '1.5rem' }}>
+        <div className="metric-header"><span>{t('dash.totalCardValue')}</span><span className="metric-icon"><TrendingUp size={18} /></span></div>
+        <div className="metric-value">{priceText(summary.cardValue, summary.currency || reportingCurrency)}</div>
+        <div className="metric-footer">
+          {t('dash.cardValueHint')}
+          {summary.unpricedCards > 0 && <div>{t('dash.unpricedCards', { count: summary.unpricedCards })}</div>}
+        </div>
+      </div>
       <div className="glass-panel" style={{ marginBottom: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))', gap: '0.8rem' }}>
         <div><div className="metric-header">{t('dash.uniqueCount', { count: summary.uniqueCards })}</div><div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{summary.totalCards > 0 ? t('dash.nearMint', { pct: summary.mintRate }) : '—'}</div></div>
         <div><div className="metric-header">{t('dash.vintageShare', { pct: summary.vintageRatio })}</div></div>

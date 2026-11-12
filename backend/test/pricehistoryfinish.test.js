@@ -22,8 +22,7 @@ async function main() {
   assert.strictEqual(await recordFinishPrices('tcgdex-en-fin-1'), 0, 'unchanged finishes are not re-recorded');
   await pause();
   await db.run(`UPDATE card_cache SET price_reverse_holofoil = 61.51 WHERE id = 'tcgdex-en-fin-1'`);
-  // recordPrice skips CardDex trend snapshots but still records finish movements.
-  assert.strictEqual(await recordPrice('tcgdex-en-fin-1', 38.19), false);
+  assert.strictEqual(await recordPrice('tcgdex-en-fin-1', 38.19), true);
   assert.strictEqual((await db.get(`SELECT COUNT(*) AS n FROM price_history_finish WHERE card_id = 'tcgdex-en-fin-1' AND finish = 'Reverse Holofoil'`)).n, 2);
 
   // Moved to TCGCSV (USD) with a cached CardDex tcgplayer series from before.
@@ -33,7 +32,7 @@ async function main() {
   await pokemonPrices.initialize();
   const day = 86400000;
   await db.run(`INSERT INTO carddex_history_cache (card_id, source, body, fetched_at) VALUES ('tcgdex-en-fin-2', 'tcgplayer', ?, ?)`,
-    [JSON.stringify([{ price: 45, recorded_at: new Date(Date.now() - 10 * day).toISOString() }, { price: 40, recorded_at: new Date(Date.now() - 5 * day).toISOString() }]), Date.now()]);
+    [JSON.stringify([{ price: 45, recorded_at: new Date(Date.now() - 10 * day).toISOString(), finish: 'Normal' }, { price: 40, recorded_at: new Date(Date.now() - 5 * day).toISOString(), finish: 'Normal' }]), Date.now()]);
   await recordPrice('tcgdex-en-fin-2', 35);
 
   const app = express();
@@ -49,10 +48,10 @@ async function main() {
     assert.strictEqual(reverse.insufficientHistory, false);
 
     const normal = await get('/api/cards/tcgdex-en-fin-1/price-history?range=30d&printing=Normal');
-    assert.strictEqual(normal.finish, null, 'the base finish keeps the card-level series');
+    assert.strictEqual(normal.finish, 'Normal', 'printing-specific history does not depend on price equality');
 
     const switched = await get('/api/cards/tcgdex-en-fin-2/price-history?range=30d&printing=Normal');
-    assert.strictEqual(switched.finish, null);
+    assert.strictEqual(switched.finish, 'Normal');
     assert.deepStrictEqual(switched.data.map(point => point.price), [45, 40, 35, 35], 'cached CardDex history survives the source switch');
     assert.strictEqual(switched.carddexCount, 2);
   } finally {

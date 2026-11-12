@@ -7,6 +7,7 @@ import { canSplitRipLine, splitRipLine, MAX_RIP_LINES } from '../utils/ripLines'
 import { resolveCardPrice } from '../utils/resolveCardPrice';
 import { availablePrintings, preferredPrinting, exactPrintingPrice } from '../utils/availablePrintings';
 import CardImage from './CardImage';
+import PriceQuoteDetails from './PriceQuoteDetails';
 let nextLine = 0;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const normalizedNumber = value => String(value || '').replace(/^#/, '').split('/')[0].trim().toLowerCase().replace(/^0+(?=\d)/, '');
@@ -76,8 +77,21 @@ export default function RipForm({ product, lot, existingOpening, convertToPacks 
   const selected = options.find(row => row.id === setId), searchSetLabel = setId ? selected?.name || setId : 'All Pokémon sets';
   const statuses = draftOwnership(pulls, owned, editing);
   const changeSet = value => { chosen.current = true; request.current++; setLooking(false); setSetId(value); setMatches([]); inputRef.current?.focus(); };
-  const addCard = card => {
+  const addCard = async card => {
+    const ticket = request.current;
     if (pulls.length >= MAX_RIP_LINES) { showToast(t('sealed.maxLines', { count: MAX_RIP_LINES })); return; }
+    if (String(card.id).startsWith('tcgdex-en-')) {
+      setLooking(true);
+      try {
+        const response = await fetch(`/api/cards/${encodeURIComponent(card.id)}/price-quote`);
+        if (!response.ok) throw new Error(t('pricing.refreshFailed'));
+        card = { ...card, ...await response.json() };
+        if (!live.current || ticket !== request.current) return;
+      } catch (error) {
+        if (live.current && ticket === request.current) showToast(error.message);
+        return;
+      } finally { if (live.current && ticket === request.current) setLooking(false); }
+    }
     const printing = preferredPrinting(card), sequence = ++nextLine;
     const incoming = { key: `new-${sequence}`, added_order: sequence, card_id: card.id, name: card.name, number: card.number || '', set_name: card.set_name || selected?.name || '',
       image_url: /^https?:\/\//.test(card.image_url || '') ? card.image_url : '', quantity: '1', current_value: '', value_at_opening: '', bulk: false, lineMode: false,
@@ -98,7 +112,7 @@ export default function RipForm({ product, lot, existingOpening, convertToPacks 
       const found = Array.isArray(data) ? data : [];
       await loadOwnership(found.map(card => card.id)); if (ticket !== request.current) return;
       const exact = found.filter(card => byNumber ? normalizedNumber(card.number) === normalizedNumber(typed) : String(card.name || '').toLowerCase() === typed.toLowerCase());
-      if (setId && exact.length === 1) addCard(exact[0]); else { setMatches(found); if (!found.length) showToast(t('sealed.ripNone', { query: typed, set: searchSetLabel })); }
+      if (setId && exact.length === 1) await addCard(exact[0]); else { setMatches(found); if (!found.length) showToast(t('sealed.ripNone', { query: typed, set: searchSetLabel })); }
     } catch (error) { if (ticket === request.current) showToast(error.message); } finally { if (ticket === request.current) { setLooking(false); inputRef.current?.focus(); } }
   };
   const editPull = (key, field, value) => setPulls(current => current.map(pull => pull.key === key ? { ...pull, [field]: value } : pull));
@@ -167,7 +181,7 @@ export default function RipForm({ product, lot, existingOpening, convertToPacks 
         <button className="btn btn-secondary" type="button" onClick={lookup} disabled={looking}>{t('sealed.addPull')}</button>
       </div>
       {ownershipError && <small role="status">Ownership check unavailable. Unknown cards are not marked as new.</small>}
-      {matches.map(card => <button className="btn btn-secondary" type="button" key={card.id} onClick={() => addCard(card)} style={{ justifyContent: 'flex-start', gap: '0.5rem' }}>
+      {matches.map(card => <button className="btn btn-secondary" type="button" key={card.id} disabled={looking} onClick={() => addCard(card)} style={{ justifyContent: 'flex-start', gap: '0.5rem' }}>
         <CardImage card={card} style={{ width: 30, height: 42, objectFit: 'contain' }} /><span>#{card.number} {card.name} — {card.set_name}<br /><OwnershipBadge info={candidateOwnership(card.id, pulls, owned, editing)} loading={ownershipPending > 0} /></span>
       </button>)}
       <div style={{ maxHeight: 320, overflowY: 'auto', display: 'grid', gap: '0.5rem' }}>
@@ -205,5 +219,5 @@ function QuoteLine({ card, printing, currency, t }) {
   const quote = lineQuote(card, printing), source = String(card?.price_currency || 'USD').toUpperCase();
   if (!quote) return <small style={{ display: 'block' }}>{t('card.printingUnpriced')}</small>;
   const price = `${source} ${quote.amount.toFixed(2)}`;
-  return <small style={{ display: 'block' }}>{quote.estimate ? t('sealed.printingEstimate', { printing, price, currency }) : t('sealed.printingQuote', { printing, price, currency })}</small>;
+  return <><small style={{ display: 'block' }}>{quote.estimate ? t('sealed.printingEstimate', { printing, price, currency }) : t('sealed.printingQuote', { printing, price, currency })}</small><PriceQuoteDetails card={card} printing={printing} /></>;
 }

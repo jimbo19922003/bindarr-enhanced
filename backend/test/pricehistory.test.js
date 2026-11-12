@@ -44,10 +44,10 @@ async function main() {
 
   await db.run(`INSERT INTO card_cache (id, name, game, price_currency, price_source)
     VALUES ('tcgdex-en-test-1', 'Test', 'pokemon', 'EUR', 'carddex-cardmarket')`);
-  assert.strictEqual(await recordPrice('tcgdex-en-test-1', 3), false, 'CardDex prices must not be archived as local snapshots');
+  assert.strictEqual(await recordPrice('tcgdex-en-test-1', 3), true, 'real CardDex quotes must start local history even without upstream history');
   await db.run(`UPDATE card_cache SET price_source = 'cached-history' WHERE id = 'tcgdex-en-test-1'`);
   assert.strictEqual(await recordPrice('tcgdex-en-test-1', 3), false, 'a restored history point must not be re-recorded');
-  assert.strictEqual((await db.get(`SELECT COUNT(*) AS n FROM price_history WHERE card_id = 'tcgdex-en-test-1'`)).n, 0);
+  assert.strictEqual((await db.get(`SELECT COUNT(*) AS n FROM price_history WHERE card_id = 'tcgdex-en-test-1'`)).n, 1);
 
   // --- Once-a-day sweep gate ---
   // Scryfall only moves prices once a day, so sweeping more often is pure load.

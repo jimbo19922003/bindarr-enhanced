@@ -356,17 +356,39 @@ API contract and coverage: [documentation](https://pokemontcgapi.com/docs),
 [OpenAPI](https://pokemontcgapi.com/openapi.json),
 [regional coverage](https://pokemontcgapi.com/coverage).
 
-For English `tcgdex-en-` Pokémon card IDs, owned and decked cards use CardDex
-first and then PokéWallet when CardDex cannot provide a confirmed, fresh base
-printing price. Existing positive quotes are retained when both fail. If the
+For English `tcgdex-en-` Pokémon card IDs, pricing prefers **TCGplayer Market**
+through the completed TCGCSV mirror, then CardDex, then PokéWallet. A dataset
+or API quote is fresh for **48 hours from its source timestamp**, not from the
+time it was downloaded or copied into a card row. TCGCSV listing midpoints are
+not substituted for missing Market prices. CardDex and PokéWallet prefer
+TCGplayer USD, with Cardmarket EUR as a labelled fallback.
+
+Search uses saved quotes and fresh TCGCSV data without spending a live API
+request per search result. Opening the add drawer or selecting a rip card
+checks the same saved quote and runs bounded API fallbacks when needed; saving
+uses the same pricing service and respects its retry cooldown. There is no
+search-only price overlay. Search, add previews, inspectors, and rips identify
+the quote source, source date, and any missing-finish estimate. Source dates
+that predate this bookkeeping remain explicitly unknown until refreshed.
+Collection and portfolio values still use exact-finish prices when available,
+then a labelled general estimate; copy-specific/manual valuations take precedence.
+These are raw-card references, not condition-specific or graded appraisals.
+Manual rip values and opening-time snapshots are not rewritten by price refreshes.
+
+Existing positive quotes and their original source dates are retained when
+fallbacks fail. If the
 current price is empty, the latest compatible positive recorded or cached
 history point is restored when available; otherwise the card remains unpriced.
 Current quotes keep their source and currency.
 Only confirmed base finishes are written; other editions and languages can
 remain unpriced or rely on their retained compatibility paths. CardDex history
-for an owned card is fetched on demand and cached as a replaceable provider
-response; existing local history is not deleted. CardDex publishes at most
-365 days of history through this endpoint.
+for an owned card is fetched on demand regardless of its current price source,
+and only merged with the matching currency and confirmed base finish. Every
+successful pricing source also records local quote movements, so optional
+provider history being unavailable does not stop future charts accumulating.
+Pokémon charts do not manufacture historical observations from rolling averages.
+A new or unsupported finish may honestly have insufficient history. Existing
+local history is not deleted. CardDex publishes at most 365 days through this endpoint.
 
 CardDex and artwork requests share a conservative budget of 25 requests per
 minute and 4,500 per rolling day, and respect cooldowns. Automatic pricing
@@ -488,6 +510,10 @@ prices on that result page when a key is saved. Magic and Lorcana are unchanged.
 The dashboard has four tabs. The game filter at the top applies to each of
 them, and amounts in different currencies stay in the currency they were
 quoted in.
+
+The **Cards** tab shows total card market value in the selected reporting
+currency, respecting the game filter and excluding sealed inventory, sold
+cards, and wishlists. Cards without a market price are flagged and excluded.
 
 **Executive** is the portfolio: net worth, recorded lifetime spending,
 estimated unrealized gain, realized gain, and the value timeline. Net worth

@@ -20,6 +20,12 @@ test('partial lookup refreshes preserve artwork while explicit new artwork repla
  assert.equal((await db.get('SELECT image_url FROM card_cache WHERE id=?',[base.id])).image_url,replacement);
  await cacheNormalizedCards([{...base,id:'tcgdex-en-base1-5',image_url:''}],'pokemon');
  assert.equal((await db.get('SELECT image_url FROM card_cache WHERE id=?',['tcgdex-en-base1-5'])).image_url,'');
+ await db.exec('ALTER TABLE card_cache ADD COLUMN price_as_of TEXT');
+ const asOf='2026-11-09T00:00:00Z';
+ await db.run("UPDATE card_cache SET price_trend=42,price_holofoil=42,price_currency='USD',price_source='tcgcsv',price_as_of=? WHERE id=?",[asOf,base.id]);
+ await cacheNormalizedCards([{...base,price_trend:999,price_holofoil:999,price_currency:'EUR',price_source:'tcgdex'}],'pokemon');
+ const saved=await db.get('SELECT price_trend,price_holofoil,price_currency,price_source,price_as_of FROM card_cache WHERE id=?',[base.id]);
+ assert.deepEqual(saved,{price_trend:'42',price_holofoil:'42',price_currency:'USD',price_source:'tcgcsv',price_as_of:asOf});
 });
 
 test('illustrator is captured, preserved across briefs without one, and replaced by a new value',async t=>{

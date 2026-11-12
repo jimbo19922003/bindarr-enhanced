@@ -12,8 +12,6 @@ const languages = require('../utils/languages');
 const psaApi = require('../psaApi');
 const gradedPrices = require('../gradedPrices');
 const cardApi = require('../utils/cardApi');
-const pokewallet = require('../pokewalletApi');
-const { matchSearchResults, extractQuote } = require('../utils/pokewalletMatch');
 const { searchLimiter } = require('../middleware/auth');
 const { pokemonApiFor, searchApiFor } = require('../utils/searchApi');
 const { resolveCardPrice, parseCardRow, recordPrice } = require('../utils/priceHelpers');
@@ -26,37 +24,21 @@ const { splitPrice } = require('../utils/splitPrice');
 const router = express.Router();
 const setCardCacheJobs = new Map();
 
-// Stamp each result with how many copies the user already owns, so browsing a
-// set shows what is already in the binder instead of inviting duplicate adds.
-// A collection-scope search already reports owned_qty from its own join.
-// One PokéWallet search for the words the person typed. Prices land on the
-// cards whose name, number, and set already agree. The search itself still
-// comes from the card catalog, so a PokéWallet miss still returns the cards.
-async function overlayPokewalletPrices(cards, query) {
-  if (!Array.isArray(cards) || cards.length === 0) return;
-  let fetched;
-  try {
-    fetched = await pokewallet.searchCatalog(query);
-  } catch {
-    return;
+const managedPrice = card => card?.game === 'pokemon' && card.language === 'English' && String(card.id).startsWith('tcgdex-en-');
+
+async function refreshPriceForCard(card) {
+  if (!managedPrice(card)) return card;
+  const refresh = require('../pokemonPrices').getPokemonPrices().refreshCard(card);
+  let timer;
+  const finished = await Promise.race([
+    refresh.then(() => true),
+    new Promise(resolve => { timer = setTimeout(() => resolve(false), ADD_PRICE_REFRESH_MS); }),
+  ]).finally(() => clearTimeout(timer));
+  if (!finished) {
+    refresh.catch(error => console.warn(`Background price refresh failed for ${card.id}: ${error.code || 'upstream'}`));
+    console.warn(`Pokémon price refresh timed out for ${card.id}; retaining the cached quote and its original date.`);
   }
-  const results = fetched && fetched.body && Array.isArray(fetched.body.results) ? fetched.body.results : [];
-  const cardsOnly = results.filter(result => result && result.card_info && result.card_info.product_type === 'card');
-  if (cardsOnly.length === 0) return;
-  for (const card of cards) {
-    if (card.price_source && String(card.price_source).startsWith('pokewallet') && Number(card.price_trend) > 0) continue;
-    const decision = matchSearchResults(card, cardsOnly, cardsOnly.length);
-    if (decision.status !== 'matched') continue;
-    const quote = extractQuote(decision.matches[0]);
-    if (!quote.ok || !(quote.price_trend > 0)) continue;
-    card.price_trend = quote.price_trend;
-    card.price_normal = quote.price_normal;
-    card.price_holofoil = quote.price_holofoil;
-    card.price_reverse_holofoil = quote.price_reverse_holofoil;
-    card.price_1st_edition = quote.price_1st_edition;
-    card.price_currency = quote.currency;
-    card.price_source = quote.source;
-  }
+  return await db.get('SELECT * FROM card_cache WHERE id = ?', [card.id]) || card;
 }
 
 async function attachOwnedQty(cards, userId) {
@@ -172,9 +154,13 @@ router.all('/search', searchLimiter, async (req, res) => {
     }
 
     await attachOwnedQty(cards, req.user.id);
-    if (game === 'pokemon' && !image && !api.localOnly) {
-      const overlayQuery = [name, set].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-      if (overlayQuery.length >= 2) await overlayPokewalletPrices(cards, overlayQuery);
+    if (game === 'pokemon') {
+      for (const card of cards) {
+        if (!managedPrice(card)) continue;
+        await require('../pokemonPrices').getPokemonPrices().refreshCard(card, null, { allowApi: false });
+        const stored = await db.get('SELECT * FROM card_cache WHERE id = ?', [card.id]);
+        if (stored) Object.assign(card, parseCardRow(stored));
+      }
     }
     // Header, not the body: every existing caller expects a bare array here.
     if (total != null) {
@@ -699,6 +685,9 @@ router.get('/collection', async (req, res) => {
         cc.price_1st_edition,
         cc.price_currency,
         cc.price_source,
+        cc.price_as_of,
+        cc.price_fetched_at,
+        cc.price_base_finish,
         cc.game,
         cc.tcgplayer_url,
         cc.cardmarket_url,
@@ -852,19 +841,7 @@ async function addCardToCollection(user, body, { openingPull = false, scanReques
     // cards can be wishlisted at once, and nothing is valued off a wishlist row.
     if (list_type === 'collection' && card.game === 'pokemon' && String(card.id || '').startsWith('tcgdex-en-')) {
       try {
-        const refresh = Promise.resolve(require('../pokemonPrices').getPokemonPrices().refreshCard(card));
-        let timer;
-        const finished = await Promise.race([
-          refresh.then(() => true),
-          new Promise(resolve => { timer = setTimeout(() => resolve(false), ADD_PRICE_REFRESH_MS); }),
-        ]).finally(() => clearTimeout(timer));
-        if (finished) {
-          const refreshed = await db.get(`SELECT * FROM card_cache WHERE id = ?`, [card.id]);
-          if (refreshed) card = refreshed;
-        } else {
-          refresh.catch(() => {});
-          console.warn(`Pokémon price on add timed out for ${card.id}; filing with the cached price.`);
-        }
+        card = await refreshPriceForCard(card);
       } catch (err) {
         console.warn(`Pokémon price on add skipped for ${card.id}: ${err.code || 'upstream'}`);
       }
@@ -962,6 +939,19 @@ async function addCardToCollection(user, body, { openingPull = false, scanReques
 }
 
 // 2b. Localize card to a specific language printing
+router.get('/cards/:id/price-quote', searchLimiter, async (req, res) => {
+  try {
+    const card = await db.get('SELECT * FROM card_cache WHERE id = ?', [req.params.id]);
+    if (!card) return res.status(404).json({ error: 'Card not found' });
+    const refreshed = await refreshPriceForCard(card);
+    res.set('Cache-Control', 'private, no-store');
+    res.json(parseCardRow(refreshed));
+  } catch (error) {
+    console.error('Card quote refresh failed:', error.code || error.message);
+    res.status(503).json({ error: 'Could not refresh the card quote. The saved quote has not been replaced.' });
+  }
+});
+
 router.get('/cards/:id/printing', async (req, res) => {
   try {
     const cardId = req.params.id;

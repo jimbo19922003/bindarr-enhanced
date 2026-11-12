@@ -733,6 +733,9 @@ async function initDb() {
     await run(`UPDATE card_cache SET price_source = 'tcgdex', price_currency = 'EUR' WHERE id LIKE 'tcgdex-%'`);
     await run(`UPDATE card_cache SET price_source = 'pokemontcg', price_currency = 'USD' WHERE price_source IS NULL AND game = 'pokemon'`);
   }
+  for (const column of ['price_as_of', 'price_fetched_at', 'price_base_finish']) {
+    if (!cardCacheCols.some(c => c.name === column)) await run(`ALTER TABLE card_cache ADD COLUMN ${column} TEXT`);
+  }
 
   // The currency each price point was recorded in. A card's currency can change
   // under it — an admin switching the MTG price source (#93), or a printing that

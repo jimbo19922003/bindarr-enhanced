@@ -9,6 +9,9 @@ import { langName, isEnglish, displayName, translatedName, setReference, getLang
 import { defaultGame, gameOptions, showGamePicker, gameLabel } from '../utils/games';
 import CardImage from './CardImage';
 import { useT } from '../utils/i18n';
+import { resolveCardPrice } from '../utils/resolveCardPrice';
+import { preferredPrinting } from '../utils/availablePrintings';
+import PriceQuoteDetails from './PriceQuoteDetails';
 
 // Search failures worth explaining in-page rather than only as a toast. `keyHint`
 // marks the ones a user API key actually fixes; an upstream 5xx does not. Title
@@ -807,8 +810,9 @@ function CardSearch({ onAddSuccess, showToast, setActiveTab }) {
                   ) : null}
                   <div className="tcg-card-meta">
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{card.set_name}</span>
-                    <span className="tcg-card-price">{priceText(card.price_trend, card.price_currency)}</span>
+                    <span className="tcg-card-price">{priceText(resolveCardPrice(card, preferredPrinting(card, printing)), card.price_currency)}</span>
                   </div>
+                  <PriceQuoteDetails card={card} printing={preferredPrinting(card, printing)} />
                 </div>
               </div>
             );

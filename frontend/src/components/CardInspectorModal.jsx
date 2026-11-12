@@ -5,7 +5,8 @@ import { getCardDisplayName } from '../utils/langHelper';
 import { translatedName, setCode, isEnglish, langCode } from '../utils/languages';
 import { formatPrice, priceText } from '../utils/formatPrice';
 import { resolveCardPrice } from '../utils/resolveCardPrice';
-import { tcgplayerUrl, cardmarketUrl, searchUrl, priceSource, noLinkReason } from '../utils/marketplaceLinks';
+import { tcgplayerUrl, cardmarketUrl, searchUrl, noLinkReason } from '../utils/marketplaceLinks';
+import PriceQuoteDetails from './PriceQuoteDetails';
 import CardImage from './CardImage';
 import { cardSaleTarget } from '../utils/saleTargets';
 import CardImageZoom from './CardImageZoom';
@@ -646,11 +647,7 @@ function CardInspectorModal({ card: incoming, onClose, onUpdate, onDeleted, show
                   </div>
                   {/* Say where a non-English price came from and in what currency —
                       it is Cardmarket's EUR figure rendered with the app's $. */}
-                  {priceSource(activeCard) && (
-                    <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-                      {t('inspector.priceVia', { source: priceSource(activeCard).name, currency: priceSource(activeCard).currency })}
-                    </div>
-                  )}
+                  <PriceQuoteDetails card={activeCard} printing={printing} />
                   {activeCard.price_source?.startsWith('carddex-') && (
                     <a href="https://carddex.dev" target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.62rem' }}>Data by CardDex</a>
                   )}

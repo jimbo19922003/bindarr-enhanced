@@ -21,6 +21,14 @@ const mewtwoSearch = fixture('search-mewtwo.json');
 const ambiguousSearch = fixture('search-ambiguous.json');
 const manualCard = fixture('card-manual.json');
 const sealedCard = fixture('card-sealed.json');
+function refreshFixtureDates(value) {
+  if (!value || typeof value !== 'object') return;
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === 'updated_at') value[key] = new Date(Date.now() - 3600000).toISOString();
+    else refreshFixtureDates(nested);
+  }
+}
+for (const value of [mewtwoSearch, ambiguousSearch, manualCard, sealedCard]) refreshFixtureDates(value);
 
 const hits = { n: 0, keys: [], queries: [] };
 let mode = 'search';
@@ -68,7 +76,7 @@ const server = http.createServer((req, res) => {
         },
         tcgplayer: {
           url: 'https://www.tcgplayer.com/product/555151',
-          prices: [{ sub_type_name: 'Holofoil', market_price: 40, updated_at: '2026-11-01T00:00:00Z' }],
+          prices: [{ sub_type_name: 'Holofoil', market_price: 40, updated_at: new Date().toISOString() }],
         },
         cardmarket: null,
       }],
@@ -298,7 +306,7 @@ async function main() {
     await db.run(`UPDATE card_cache SET price_normal = 3 WHERE id = ?`, ['tcgdex-en-30th-003']);
     const sameCurrency = await db.get(`SELECT * FROM card_cache WHERE id = ?`, ['tcgdex-en-30th-003']);
     assert.strictEqual((await api.priceFallback(sameCurrency)).updated, 1);
-    assert.strictEqual((await db.get(`SELECT price_normal FROM card_cache WHERE id = ?`, [sameCurrency.id])).price_normal, 3);
+    assert.strictEqual((await db.get(`SELECT price_normal FROM card_cache WHERE id = ?`, [sameCurrency.id])).price_normal, null, 'a new quote must not retain old finish prices under a new timestamp');
 
     await reset();
     await addCard({ id: 'tcgdex-en-30th-003', name: 'Mewtwo', setId: '30th', setName: 'Celebrations: Classic Collection', number: '003', price: 4, source: 'pokewallet-cardmarket', currency: 'EUR' });

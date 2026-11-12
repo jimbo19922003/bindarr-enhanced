@@ -52,7 +52,7 @@ const SET_CLAUSE = COLUMNS
     return `${c} = CASE
       WHEN card_cache.game = 'pokemon'
        AND (card_cache.price_source LIKE 'carddex-%' OR card_cache.price_source LIKE 'pokewallet%'
-         OR card_cache.price_source = 'cached-history')
+         OR card_cache.price_source LIKE 'tcgcsv%' OR card_cache.price_source = 'cached-history')
        AND COALESCE(card_cache.price_trend, 0) > 0
        AND excluded.price_source IS NOT card_cache.price_source
       THEN card_cache.${c}

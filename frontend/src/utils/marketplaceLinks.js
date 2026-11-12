@@ -89,7 +89,7 @@ const isForeignPokemon = (card) =>
 // pricing Japanese cards in TCGplayer USD — the label would have named the wrong
 // marketplace and the wrong currency for exactly the cards it was written for.
 const SOURCE_NAMES = {
-  tcgcsv: 'TCGplayer',
+  tcgcsv: 'TCGCSV · TCGplayer',
   // TCGplayer sells Pokémon in English and Japanese only, so a German, French, Korean
   // or Chinese card is priced off the English product for the same set and number.
   // The qualifier travels with the name because it changes what the number means: it
@@ -126,7 +126,7 @@ export function priceSource(card) {
   // and for a price that is a stand-in from another printing, where the currency is
   // right but the card is not.
   const proxy = card.price_source === 'tcgcsv-en';
-  const named = card.price_source?.startsWith('pokemontcgapi-') || card.price_source?.startsWith('pokewallet-') || card.price_source?.startsWith('carddex-') || card.price_source === 'cached-history';
+  const named = card.price_source?.startsWith('tcgcsv') || card.price_source?.startsWith('pokemontcgapi-') || card.price_source?.startsWith('pokewallet-') || card.price_source?.startsWith('carddex-') || card.price_source === 'cached-history';
   if (currency === 'USD' && card.price_source !== 'tcgdex' && !named && !proxy) return null;
   return { name, currency };
 }

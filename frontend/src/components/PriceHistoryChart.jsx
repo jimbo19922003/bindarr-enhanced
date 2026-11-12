@@ -3,13 +3,7 @@ import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianG
 import { priceText } from '../utils/formatPrice';
 import { useT } from '../utils/i18n';
 
-// Selectable chart windows. Default is 1 Year so price movement is visible; a
-// 30-day window is usually too short to show meaningful change.
-// Only two windows, because only two can be filled. 30 days comes from
-// Cardmarket's real rolling averages (Pokémon); "All" is whatever Bindarr has
-// recorded itself. No card API sells back-history — Scryfall returns current
-// prices only — so 1Y/5Y buttons could never show anything the 30-day one
-// didn't already.
+// Windows cover local observations and compatible optional provider history.
 const RANGE_KEYS = ['30d', 'all'];
 
 // Shared, properly-proportioned price-history chart. Fetches its own data for a
@@ -34,6 +28,7 @@ export default function PriceHistoryChart({
   const [coverage, setCoverage] = useState({ spanDays: 0, windowDays: null, marketCount: 0, recordedCount: 0, carddexCount: 0, quoteAt: null });
   const [loading, setLoading] = useState(false);
   const [finish, setFinish] = useState(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (!cardId) {
@@ -44,27 +39,31 @@ export default function PriceHistoryChart({
     (async () => {
       try {
         setLoading(true);
+        setError(false);
+        setData([]);
+        setFinish(null);
+        setCoverage({ spanDays: 0, windowDays: null, marketCount: 0, recordedCount: 0, carddexCount: 0, quoteAt: null });
         const params = new URLSearchParams({ range });
         if (printing) params.set('printing', printing);
         const response = await fetch(`/api/cards/${cardId}/price-history?${params}`);
-        if (response.ok) {
-          const json = await response.json();
-          if (!cancelled) {
-            setData(json.data ?? []);
-            setInsufficientHistory(!!json.insufficientHistory);
-            setFinish(json.finish || null);
-            setCoverage({
-              spanDays: json.spanDays ?? 0,
-              windowDays: json.windowDays ?? null,
-              marketCount: json.marketCount ?? 0,
-              recordedCount: json.recordedCount ?? 0,
-              carddexCount: json.carddexCount ?? 0,
-              quoteAt: json.quoteAt ?? null,
-            });
-          }
+        if (!response.ok) throw new Error(`Price history request failed: ${response.status}`);
+        const json = await response.json();
+        if (!cancelled) {
+          setData(json.data ?? []);
+          setInsufficientHistory(!!json.insufficientHistory);
+          setFinish(json.finish || null);
+          setCoverage({
+            spanDays: json.spanDays ?? 0,
+            windowDays: json.windowDays ?? null,
+            marketCount: json.marketCount ?? 0,
+            recordedCount: json.recordedCount ?? 0,
+            carddexCount: json.carddexCount ?? 0,
+            quoteAt: json.quoteAt ?? null,
+          });
         }
       } catch (err) {
         console.error('Error fetching price history:', err);
+        if (!cancelled) setError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -165,9 +164,11 @@ export default function PriceHistoryChart({
       <div style={{ width: '100%', height: `${height}px` }}>
         {loading ? (
           <div className="spinner" style={{ height: '30px', margin: `${Math.max(0, height / 2 - 15)}px auto` }} />
+        ) : error ? (
+          <div role="alert" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textAlign: 'center' }}>{t('pricing.historyFailed')}</div>
         ) : insufficientHistory ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-            {t('priceHistory.insufficient')}
+            {t('priceHistory.insufficient')} {t('pricing.historyStartsHere')}
           </div>
         ) : (!chartData || chartData.length === 0) ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '0.75rem', color: 'var(--text-muted)' }}>

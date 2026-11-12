@@ -203,7 +203,7 @@ assert.strictEqual(common.price_trend, 2.0, 'trend must not quote the 1st Editio
 const noMarket = tcgcsv.pricesByProduct([
   { productId: 4, subTypeName: 'Holofoil', marketPrice: 0, midPrice: 9.99 },
 ]).get(4);
-assert.strictEqual(noMarket.price_holofoil, 9.99, 'midPrice covers a product with no market price');
+assert.strictEqual(noMarket, undefined, 'listing midpoints must not masquerade as market prices');
 
 // An unrecognised finish is dropped, not guessed at. A wrong number presented as a
 // right one is worse than a blank.
@@ -360,7 +360,7 @@ const dbMod = require('../src/db');
     return { data: body, status: 200, headers: {}, config };
   };
   try {
-    remoteVersion = '2026-10-27T20:05:50+0000';
+    remoteVersion = new Date(Date.now() - 3600000).toISOString();
     await dbMod.run(`UPDATE app_settings SET tcgcsv_last_checked_at = datetime('now', '-25 hours') WHERE id = 1`);
 
     // A transient 503 aborts the run and leaves the version pending...

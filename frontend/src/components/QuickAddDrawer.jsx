@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { X, Maximize2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { priceText } from '../utils/formatPrice';
@@ -6,7 +6,9 @@ import CardEntryFields from './CardEntryFields';
 import CardImageZoom from './CardImageZoom';
 import CardImage from './CardImage';
 import { getCardDisplayName } from '../utils/langHelper';
-import { preferredPrinting, exactPrintingPrice } from '../utils/availablePrintings';
+import { preferredPrinting } from '../utils/availablePrintings';
+import { resolveCardPrice } from '../utils/resolveCardPrice';
+import PriceQuoteDetails from './PriceQuoteDetails';
 import { langName, isEnglish, displayName, translatedName, setCode } from '../utils/languages';
 import { useT } from '../utils/i18n';
 
@@ -25,8 +27,23 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
   const [certNumber, setCertNumber] = useState('');
   const [languageLoading, setLanguageLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [quoteLoading, setQuoteLoading] = useState(false);
   const languageRequest = useRef(0);
   const cardGame = card.game || game;
+  useEffect(() => {
+    if (card.game !== 'pokemon' || !card.id.startsWith('tcgdex-en-')) { setQuoteLoading(false); return; }
+    let active = true;
+    setQuoteLoading(true);
+    fetch(`/api/cards/${encodeURIComponent(card.id)}/price-quote`).then(async response => {
+      if (!response.ok) throw new Error(t('pricing.refreshFailed'));
+      const quote = await response.json();
+      if (active) setCard(previous => ({ ...previous, ...quote }));
+    }).catch(error => {
+      console.error('Card quote request failed:', error);
+      if (active) showToast(t('pricing.refreshFailed'));
+    }).finally(() => { if (active) setQuoteLoading(false); });
+    return () => { active = false; };
+  }, [card.id, card.game, showToast, t]);
 
   const handleLanguageChange = async (newLang) => {
     const ticket = ++languageRequest.current;
@@ -51,7 +68,7 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (languageLoading || saving) return;
+    if (languageLoading || quoteLoading || saving) return;
     setSaving(true);
     try {
       const response = await fetch('/api/collection', {
@@ -94,7 +111,7 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
     }
   };
 
-  const price = exactPrintingPrice(card, printing);
+  const price = resolveCardPrice(card, printing) || null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
@@ -134,8 +151,10 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
           </div>
         </div>
         <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('search.tcgMarketPrice', { printing })}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t('pricing.marketReference', { printing })}</div>
           <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-yellow)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{price == null ? t('card.printingUnpriced') : priceText(price, card.price_currency)}</div>
+          <PriceQuoteDetails card={card} printing={printing} />
+          {quoteLoading && <small>{t('pricing.refreshing')}</small>}
           <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{t('search.rarityLabel')} <span style={{ color: 'var(--text-strong)', fontWeight: 600 }}>{card.rarity}</span></div>
         </div>
       </div>
@@ -152,7 +171,7 @@ function QuickAddForm({ card: initialCard, game, defaults, onClose, onAdded, sho
         <div className="quick-add-footer" style={{ marginTop: '1.25rem', paddingTop: '1rem' }}>
           <div className="quick-add-footer-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
-            <button type="submit" className="btn btn-primary" disabled={languageLoading || saving}>{t('search.addToCollection')}</button>
+            <button type="submit" className="btn btn-primary" disabled={languageLoading || quoteLoading || saving}>{t('search.addToCollection')}</button>
           </div>
         </div>
       </form>

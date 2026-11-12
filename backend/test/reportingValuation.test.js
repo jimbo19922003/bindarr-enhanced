@@ -38,6 +38,7 @@ async function main() {
     const dashboard = await (await fetch(`${base}/api/stats`)).json();
     const worth = await (await fetch(`${base}/api/stats/networth`)).json();
     assert.strictEqual(dashboard.summary.totalValue, 78.56);
+    assert.strictEqual(dashboard.summary.cardValue, 78.56);
     assert.strictEqual(worth.totalValue, 78.56);
     assert.strictEqual(dashboard.cardSets[0].value, 78.56);
     assert.strictEqual(dashboard.cardSets.length, 1);
@@ -60,6 +61,7 @@ async function main() {
     [admin.id, admin.id, admin.id, admin.id]);
     const duplicates = await (await fetch(`${base}/api/stats?game=pokemon`)).json();
     assert.strictEqual(duplicates.summary.totalCards, 7);
+    assert.strictEqual(duplicates.summary.cardValue, 113.56);
     assert.strictEqual(duplicates.summary.uniqueCards, 3);
     assert.strictEqual(duplicates.summary.duplicateCopies, 4);
     assert.strictEqual(duplicates.summary.extraCopiesCount, 4);
@@ -71,6 +73,7 @@ async function main() {
     assert.strictEqual(allGames.summary.extraCopiesValue, 40);
     const otherGame = await (await fetch(`${base}/api/stats?game=mtg`)).json();
     assert.strictEqual(otherGame.summary.extraCopiesCount, 1);
+    assert.strictEqual(otherGame.summary.cardValue, 10);
     assert.strictEqual(otherGame.summary.extraCopiesValue, 5);
 
     await db.run("UPDATE collection SET purchase_price=3 WHERE card_id='mtg-extra' AND user_id=?", [admin.id]);

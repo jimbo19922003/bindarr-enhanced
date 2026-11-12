@@ -26,7 +26,8 @@ async function fixture(t, client, fallback, tcgcsv = null) {
     id TEXT PRIMARY KEY, game TEXT, language TEXT, name TEXT, number TEXT, set_id TEXT, set_name TEXT,
     price_trend REAL, price_normal REAL, price_holofoil REAL, price_reverse_holofoil REAL,
     price_1st_edition REAL, price_avg1 REAL, price_avg7 REAL, price_avg30 REAL,
-    price_currency TEXT, price_source TEXT, last_updated TEXT, tcgplayer_product_id INTEGER);
+    price_currency TEXT, price_source TEXT, last_updated TEXT, tcgplayer_product_id INTEGER,
+    price_as_of TEXT, price_fetched_at TEXT, price_base_finish TEXT);
     CREATE TABLE collection (card_id TEXT, list_type TEXT DEFAULT 'collection'); CREATE TABLE deck_cards (card_id TEXT);
     CREATE TABLE pokewallet_map (card_id TEXT PRIMARY KEY, status TEXT, reason TEXT);
     CREATE TABLE price_history (card_id TEXT, price REAL, currency TEXT, recorded_at TEXT);`);
@@ -41,7 +42,7 @@ test('TCGCSV is preferred over CardDex and PokéWallet', async t => {
   const { database, service } = await fixture(t, { json: async () => { throw new Error('CardDex must not run'); } },
     async () => { throw new Error('PokéWallet must not run'); },
     { quoteForCard: async () => ({ price_trend: 42, price_normal: 20, price_holofoil: 42,
-      price_reverse_holofoil: null, price_1st_edition: null, productId: 123, source: 'tcgcsv' }) });
+      price_reverse_holofoil: null, price_1st_edition: null, productId: 123, source: 'tcgcsv', asOf: '2026-11-09T07:00:00Z' }) });
   assert.equal((await service.refreshCard(card)).status, 'tcgcsv');
   const updated = await database.get('SELECT price_trend, price_normal, price_holofoil, price_currency, price_source, tcgplayer_product_id FROM card_cache WHERE id = ?', [card.id]);
   assert.deepEqual(updated, { price_trend: 42, price_normal: 20, price_holofoil: 42, price_currency: 'USD', price_source: 'tcgcsv', tcgplayer_product_id: 123 });
@@ -69,14 +70,14 @@ test('TCGCSV cannot overwrite a concurrently updated price', async t => {
     { quoteForCard: async () => {
       await database.run("UPDATE card_cache SET price_trend=99, price_source='pokewallet-tcgplayer' WHERE id=?", [card.id]);
       return { price_trend:42, price_normal:42, price_holofoil:null, price_reverse_holofoil:null,
-        price_1st_edition:null, productId:123, source:'tcgcsv' };
+        price_1st_edition:null, productId:123, source:'tcgcsv', asOf:'2026-11-09T07:00:00Z' };
     } });
   database = setup.database;
   assert.equal((await setup.service.refreshCard(card)).status, 'changed');
   assert.equal((await database.get('SELECT price_trend FROM card_cache WHERE id = ?', [card.id])).price_trend, 99);
 });
 
-test('CardDex wins, respects cadence, and does not append price history', async t => {
+test('CardDex wins and fresh source data prevents repeated API lookups', async t => {
   let requests = 0, fallbacks = 0;
   const { database, service } = await fixture(t, { json: async () => { requests++; return quote; } },
     async () => { fallbacks++; return { updated: 1 }; });
@@ -90,6 +91,82 @@ test('CardDex wins, respects cadence, and does not append price history', async 
   assert.equal((await database.get('SELECT COUNT(*) AS n FROM price_history')).n, 0);
   assert.equal(requests, 1);
   assert.equal(fallbacks, 0);
+});
+
+test('source freshness is 48 hours, not the time the quote was copied locally', async t => {
+  let requests = 0;
+  const { database, service } = await fixture(t, { json: async () => { requests++; return quote; } },
+    async () => { throw new Error('must not run'); },
+    { quoteForCard: async () => ({ price_trend: 99, asOf: '2026-11-07T11:59:59Z', source: 'tcgcsv' }) });
+  await database.run("UPDATE card_cache SET last_updated = '2026-11-09 12:00:00', price_as_of = '2026-11-07T11:59:59Z' WHERE id = ?", [card.id]);
+  assert.equal((await service.refreshCard(card)).status, 'matched');
+  const updated = await database.get('SELECT price_trend, price_as_of, price_base_finish FROM card_cache WHERE id = ?', [card.id]);
+  assert.deepEqual(updated, { price_trend: 12, price_as_of: '2026-11-09T07:00:00Z', price_base_finish: 'Holofoil' });
+  assert.equal(requests, 1);
+});
+
+test('failed fallbacks preserve a stale quote without falsely making its source date current', async t => {
+  const { database, service } = await fixture(t, { json: async () => ({ data: null }) }, async () => ({ updated: 0 }));
+  const asOf = '2026-11-01T00:00:00Z';
+  await database.run('UPDATE card_cache SET price_as_of = ? WHERE id = ?', [asOf, card.id]);
+  await service.refreshCard(card);
+  assert.deepEqual(await database.get('SELECT price_trend, price_as_of FROM card_cache WHERE id = ?', [card.id]), { price_trend: 10, price_as_of: asOf });
+});
+
+test('cache-only previews never spend API calls and do not block later live fallback', async t => {
+  let calls = 0;
+  let unavailable = false;
+  const { database, service } = await fixture(t, { json: async () => { calls++; return quote; } },
+    async () => { throw new Error('must not run'); }, { quoteForCard: async () => { if (unavailable) throw new Error('mirror unavailable'); return null; } });
+  assert.equal((await service.refreshCard(card, null, { allowApi: false })).status, 'cache_only');
+  assert.equal(calls, 0);
+  assert.equal((await database.get('SELECT COUNT(*) AS n FROM carddex_price_attempt')).n, 0);
+  unavailable = true;
+  assert.equal((await service.refreshCard(card, null, { allowApi: false })).status, 'cache_only');
+  assert.equal(calls, 0);
+  assert.equal((await service.refreshCard(card)).status, 'matched');
+  assert.equal(calls, 1);
+});
+
+test('a newly fresh mirror is usable even during a failed API retry cooldown', async t => {
+  let mirror = null;
+  let calls = 0;
+  const { database, service } = await fixture(t, { json: async () => { calls++; return { data: null }; } },
+    async () => ({ updated: 0 }), { quoteForCard: async () => mirror });
+  await service.refreshCard(card);
+  assert.equal((await service.refreshCard(card)).status, 'not_due');
+  assert.equal(calls, 1);
+  mirror = { price_trend: 42, asOf: '2026-11-09T10:00:00Z', source: 'tcgcsv' };
+  assert.equal((await service.refreshCard(card)).status, 'tcgcsv');
+  assert.equal((await database.get('SELECT price_trend FROM card_cache WHERE id = ?', [card.id])).price_trend, 42);
+  assert.equal(calls, 1);
+});
+
+test('freshness boundaries reject unknown or future dates without inventing timestamps', () => {
+  const { isFreshQuote } = require('../src/utils/priceFreshness');
+  const now = Date.parse('2026-11-09T12:00:00Z');
+  assert.equal(isFreshQuote('2026-11-07 12:00:00', now), true);
+  assert.equal(isFreshQuote('2026-11-07T11:59:59Z', now), false);
+  assert.equal(isFreshQuote('2026-11-09T12:05:01Z', now), false);
+  for (const date of [null, '', 'not-a-date']) assert.equal(isFreshQuote(date, now), false);
+});
+
+test('TCGCSV history fetches independently of current price source and refuses a different finish', async t => {
+  const paths = [];
+  const { service } = await fixture(t, { json: async endpoint => {
+    paths.push(endpoint);
+    if (endpoint.endsWith('/prices/history')) return { data: [
+      { trend_price: 8, recorded_at: '2026-11-08T07:00:00Z', source: 'tcgplayer', currency: 'USD' },
+      { trend_price: 500, recorded_at: '2026-11-08T08:00:00Z', variant_id: 'reverse' },
+      { trend_price: 999, recorded_at: '2026-11-10T07:00:00Z' },
+    ] };
+    return quote;
+  } }, async () => ({ updated: 0 }));
+  const sourceCard = { ...card, price_source: 'tcgcsv', price_currency: 'USD' };
+  const history = await service.history(sourceCard, 'Holofoil');
+  assert.deepEqual(history.points, [{ price: 8, recorded_at: '2026-11-08T07:00:00Z', finish: 'Holofoil' }]);
+  assert.equal((await service.history(sourceCard, 'Reverse Holofoil')).points.length, 0);
+  assert.equal(paths.length, 2, 'base finish and historical series are cached');
 });
 
 test('CardDex replaces a different-currency quote without retaining old finish prices', async t => {
@@ -217,7 +294,7 @@ test('history replaces the provider cache and reuses it without collecting snaps
     assert.equal(params.source, 'cardmarket');
     return { data: [{ trend_price: 11, recorded_at: '2026-11-08T07:00:00Z' }] };
   } }, async () => ({ updated: 0 }));
-  const sourceCard = { ...card, price_source: 'carddex-cardmarket' };
+  const sourceCard = { ...card, price_source: 'carddex-cardmarket', price_base_finish: 'Holofoil' };
   assert.equal((await service.history(sourceCard)).status, 'fresh');
   assert.equal((await service.history(sourceCard)).status, 'cached');
   assert.equal(requests, 1);

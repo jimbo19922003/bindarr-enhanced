@@ -2,6 +2,7 @@
 
 const { collectorNumber, foldName } = require('./pokewalletMatch');
 const { carddexSetId, matchesCarddexSet } = require('./carddexSets');
+const { isFreshQuote } = require('./priceFreshness');
 
 const positive = value => {
   const number = Number(value);
@@ -19,13 +20,18 @@ function providerId(card) {
   return id;
 }
 
-function extractCarddexQuote(card, body, now = Date.now()) {
+function carddexBaseFinish(card, body) {
   const id = providerId(card);
   const row = body?.data;
   if (!id || !row || row.id !== id || !matchesCarddexSet(card, row)
       || !foldName(card.name) || foldName(row.name) !== foldName(card.name)
-      || !collectorNumber(card.number) || collectorNumber(row.number) !== collectorNumber(card.number)
-      || !Array.isArray(row.prices)) return null;
+      || !collectorNumber(card.number) || collectorNumber(row.number) !== collectorNumber(card.number)) return null;
+  return row.base_finish === 'holo' ? 'Holofoil' : row.base_finish === 'normal' ? 'Normal' : null;
+}
+
+function extractCarddexQuote(card, body, now = Date.now()) {
+  const baseFinish = carddexBaseFinish(card, body), id = providerId(card), row = body?.data;
+  if (!baseFinish || !Array.isArray(row.prices)) return null;
 
   const prices = row.prices.filter(price => {
     const time = Date.parse(price?.recorded_at);
@@ -33,12 +39,9 @@ function extractCarddexQuote(card, body, now = Date.now()) {
       && ((price.source === 'tcgplayer' && price.currency === 'USD')
         || (price.source === 'cardmarket' && price.currency === 'EUR'))
       && positive(price.trend_price)
-      && Number.isFinite(time) && time <= now + 300000 && now - time <= 7 * 86400000;
+      && Number.isFinite(time) && isFreshQuote(price.recorded_at, now);
   });
-  const hasPrice = ['price_trend', 'price_normal', 'price_holofoil', 'price_reverse_holofoil', 'price_1st_edition']
-    .some(field => positive(card[field]));
-  const preferredCurrency = hasPrice && ['USD', 'EUR'].includes(card.price_currency) ? card.price_currency : null;
-  const rank = price => price.currency === preferredCurrency ? 0 : price.currency === 'USD' ? 1 : 2;
+  const rank = price => price.currency === 'USD' ? 0 : 1;
   prices.sort((a, b) => rank(a) - rank(b)
     || Date.parse(b.recorded_at) - Date.parse(a.recorded_at));
   const price = prices[0];
@@ -58,4 +61,4 @@ function extractCarddexQuote(card, body, now = Date.now()) {
   };
 }
 
-module.exports = { providerId, extractCarddexQuote };
+module.exports = { providerId, extractCarddexQuote, carddexBaseFinish };

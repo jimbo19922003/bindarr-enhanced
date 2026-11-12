@@ -28,6 +28,7 @@ const { createHash } = require('crypto');
 const db = require('./db');
 const { parseSqliteUtc, recordPrice, shouldSweepPrices, markPricesSwept, priceRefreshDays } = require('./utils/priceHelpers');
 const match = require('./utils/pokewalletMatch');
+const { isFreshQuote } = require('./utils/priceFreshness');
 
 const BASE = 'https://api.pokewallet.io';
 const HOUR_MS = 60 * 60 * 1000;
@@ -295,12 +296,10 @@ async function applyQuote(card, quote, fallback = false) {
   const result = await db.run(
     `UPDATE card_cache
         SET price_trend = ?,
-            price_normal = CASE WHEN ? AND price_currency IS ? THEN COALESCE(?, price_normal) ELSE ? END,
-            price_holofoil = CASE WHEN ? AND price_currency IS ? THEN COALESCE(?, price_holofoil) ELSE ? END,
-            price_reverse_holofoil = CASE WHEN ? AND price_currency IS ? THEN COALESCE(?, price_reverse_holofoil) ELSE ? END,
-            price_1st_edition = CASE WHEN ? AND price_currency IS ? THEN COALESCE(?, price_1st_edition) ELSE ? END,
+            price_normal = ?, price_holofoil = ?, price_reverse_holofoil = ?, price_1st_edition = ?,
             price_avg1 = ?, price_avg7 = ?, price_avg30 = ?,
             price_currency = ?, price_source = ?,
+            price_as_of = ?, price_fetched_at = CURRENT_TIMESTAMP, price_base_finish = NULL,
             tcgplayer_url = COALESCE(tcgplayer_url, ?),
             cardmarket_url = COALESCE(cardmarket_url, ?),
             tcgplayer_product_id = COALESCE(tcgplayer_product_id, ?),
@@ -324,12 +323,9 @@ async function applyQuote(card, quote, fallback = false) {
         )`,
     [
       quote.price_trend,
-      fallback ? 1 : 0, quote.currency, quote.price_normal, quote.price_normal,
-      fallback ? 1 : 0, quote.currency, quote.price_holofoil, quote.price_holofoil,
-      fallback ? 1 : 0, quote.currency, quote.price_reverse_holofoil, quote.price_reverse_holofoil,
-      fallback ? 1 : 0, quote.currency, quote.price_1st_edition, quote.price_1st_edition,
+      quote.price_normal, quote.price_holofoil, quote.price_reverse_holofoil, quote.price_1st_edition,
       quote.price_avg1, quote.price_avg7, quote.price_avg30,
-      quote.currency, quote.source, quote.tcgplayer_url, quote.cardmarket_url, quote.tcgplayer_product_id,
+      quote.currency, quote.source, quote.updated_at, quote.tcgplayer_url, quote.cardmarket_url, quote.tcgplayer_product_id,
       card.id, fallback ? 1 : 0, card.price_source, card.price_currency, card.last_updated,
       card.price_trend, card.price_normal, card.price_holofoil, card.price_reverse_holofoil, card.price_1st_edition,
       fallback ? 1 : 0, card.price_source, card.price_currency, card.last_updated,
@@ -496,11 +492,7 @@ async function settle(card, report, body, manual, providerCardId, fallback = fal
     pushIssue(report, card, decision.status, decision.reason, decision.candidates);
     return 'ok';
   }
-  let quote = match.extractQuote(decision.matches[0],
-    fallback && hasPositivePrice(card) ? card.price_currency : null);
-  if (!quote.ok && fallback && hasPositivePrice(card) && quote.reason === 'unpriced') {
-    quote = match.extractQuote(decision.matches[0]);
-  }
+  const quote = match.extractQuote(decision.matches[0]);
   if (!quote.ok) {
     const status = quote.reason === 'variant_unconfirmed' ? 'variant_unconfirmed'
       : quote.reason === 'not_a_card' ? 'failed' : 'unpriced';
@@ -511,6 +503,11 @@ async function settle(card, report, body, manual, providerCardId, fallback = fal
       manual,
     });
     pushIssue(report, card, status, quote.reason, decision.candidates);
+    return 'ok';
+  }
+  if (!isFreshQuote(quote.updated_at)) {
+    report.unpriced += 1;
+    await note(card, 'unpriced', 'stale_quote', { provider_card_id: decision.matches[0].id, quote_updated_at: quote.updated_at, manual });
     return 'ok';
   }
   const applied = await applyQuote(card, quote, fallback);
