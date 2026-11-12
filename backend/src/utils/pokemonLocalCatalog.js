@@ -17,17 +17,18 @@ function normalize(input){
  if(!/^[a-f0-9]{40}$/.test(input.commit||''))throw new TypeError('A pinned upstream commit SHA is required');
  if(!Array.isArray(input.sets)||!input.sets.length||!Array.isArray(input.cards)||!input.cards.length)throw new TypeError('Refusing an empty catalog snapshot');
  const seenSets=new Set(),digital=new Set(),sets=[];
- for(const raw of input.sets){const id=text(raw.id,'set ID');if(seenSets.has(id))throw new TypeError('Duplicate set ID');seenSets.add(id);if(raw.serie?.id==='tcgp'){digital.add(id);continue;}sets.push({id,name:text(raw.name,'localized set name'),series:raw.serie?.name||'',release_date:raw.releaseDate||'',printed_total:Number.isSafeInteger(raw.cardCount?.official)&&raw.cardCount.official>=0?raw.cardCount.official:null});}
+ for(const raw of input.sets){const id=text(raw.id,'set ID');if(seenSets.has(id))throw new TypeError('Duplicate set ID');seenSets.add(id);if(raw.serie?.id==='tcgp'){digital.add(id);continue;}sets.push({id,name:text(raw.name,'localized set name'),series:raw.serie?.name||'',release_date:raw.releaseDate||'',printed_total:Number.isSafeInteger(raw.cardCount?.official)&&raw.cardCount.official>=0?raw.cardCount.official:null,total:Number.isSafeInteger(raw.cardCount?.total)&&raw.cardCount.total>0?raw.cardCount.total:null});}
  const bySet=new Map(sets.map(s=>[s.id,s])),seen=new Set(),cards=[];
  for(const raw of input.cards){const providerId=text(raw.id,'provider card ID'),setId=text(raw.set?.id,'card set ID');if(digital.has(setId))continue;if(!bySet.has(setId))throw new TypeError('Card refers to an absent set');const id=`tcgdex-${lang.code}-${providerId}`;if(seen.has(id))throw new TypeError('Duplicate card ID');seen.add(id);if(raw.localId==null||String(raw.localId).trim()==='')throw new TypeError('Missing printed collector number');let image='';if(raw.image){const u=new URL(raw.image);if(u.protocol!=='https:'||u.hostname!=='assets.tcgdex.net'||u.username||u.password||u.port||u.search||u.hash)throw new TypeError('Untrusted catalog image reference');image=raw.image.replace(/\/$/,'')+'/low.png';}
   const name=text(raw.name,'localized card name');cards.push({id,name,printed_name:name,supertype:({Pokemon:'Pokémon',Trainer:'Trainer',Energy:'Energy'})[raw.category]||raw.category||'',subtypes:raw.stage?[String(raw.stage).replace(/(Stage)(\d)/,'$1 $2')]:[],types:Array.isArray(raw.types)?raw.types:[],rarity:raw.rarity||'',set_id:setId,set_name:bySet.get(setId).name,number:String(raw.localId),image_url:image,game:'pokemon',language:lang.name,available_printings:tcgdexPrintings(raw.variants),illustrator:typeof raw.illustrator==='string'&&raw.illustrator.trim()?raw.illustrator.trim().slice(0,200):null});
  }
  if(!sets.length||!cards.length)throw new TypeError('No physical Pokémon records in snapshot');
  sets.sort((a,b)=>a.id.localeCompare(b.id));cards.sort((a,b)=>a.id.localeCompare(b.id));
- // Printings and illustrator are enrichment, not identity: adding them must not
+ // Full set totals, printings and illustrator are enrichment, not identity: adding them must not
  // force a new snapshot or a scan rebuild.
  const identityCards=cards.map(({available_printings,illustrator,...card})=>card);
- return {language:lang.code,commit:input.commit,sets,cards,contentHash:hash({sets,cards:identityCards}),scanHash:hash(cards.map(c=>[c.id,c.image_url]))};
+ const identitySets=sets.map(({total,...set})=>set);
+ return {language:lang.code,commit:input.commit,sets,cards,contentHash:hash({sets:identitySets,cards:identityCards}),scanHash:hash(cards.map(c=>[c.id,c.image_url]))};
 }
 const parse=row=>{if(!row)return null;const out={...row};for(const k of ['subtypes','types','color_identity'])if(typeof out[k]==='string')out[k]=JSON.parse(out[k]);return out;};
 async function upsertCard(db,card){
@@ -43,7 +44,7 @@ function createPokemonLocalCatalog({connect}){
  return {
   importSnapshot(input){const data=normalize(input);return transaction(true,async db=>{
    await db.exec(schema);const previous=await db.get('SELECT s.*,a.scan_refresh_required FROM pokemon_catalog_active a JOIN pokemon_catalog_snapshot s ON s.id=a.snapshot_id WHERE a.language=?',[data.language]);
-   if(previous?.source_commit===data.commit){if(previous.content_hash!==data.contentHash)throw new Error('Same upstream commit produced different normalized content');for(const card of data.cards){if(card.available_printings)await db.run('UPDATE card_cache SET available_printings=? WHERE id=?',[JSON.stringify(card.available_printings),card.id]);if(card.illustrator)await db.run('UPDATE card_cache SET illustrator=? WHERE id=?',[card.illustrator,card.id]);}return {...previous,unchanged:true};}
+   if(previous?.source_commit===data.commit){if(previous.content_hash!==data.contentHash)throw new Error('Same upstream commit produced different normalized content');for(const set of data.sets){if(set.total)await db.run('UPDATE pokemon_catalog_set SET payload_json=? WHERE snapshot_id=? AND id=?',[JSON.stringify(set),previous.id,set.id]);}for(const card of data.cards){if(card.available_printings)await db.run('UPDATE card_cache SET available_printings=? WHERE id=?',[JSON.stringify(card.available_printings),card.id]);if(card.illustrator)await db.run('UPDATE card_cache SET illustrator=? WHERE id=?',[card.illustrator,card.id]);}return {...previous,unchanged:true};}
    const inserted=await db.run('INSERT INTO pokemon_catalog_snapshot(language,source_commit,content_hash,scan_hash,card_count,set_count) VALUES(?,?,?,?,?,?)',[data.language,data.commit,data.contentHash,data.scanHash,data.cards.length,data.sets.length]);
    const id=inserted.lastID;
    for(const set of data.sets)await db.run('INSERT INTO pokemon_catalog_set VALUES(?,?,?)',[id,set.id,JSON.stringify(set)]);

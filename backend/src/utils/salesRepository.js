@@ -65,6 +65,7 @@ function createSalesRepository({ connect }) {
       return transaction(userId, async db => {
         const entry = await db.get("SELECT * FROM collection WHERE id = ? AND user_id = ? AND list_type = 'collection'", [collectionId, userId]);
         if (!entry) throw problem(404, 'Owned collection copy not found');
+        if (await require('./sealedConversion').pendingCopy(db,userId,entry.id)) throw problem(409, 'Finalize the parent product market-value allocation before creating acquisition lots for its pulls');
         positive(entry.quantity, 'owned quantity');
         await openingIntegration.rejectFrozenCopy(db, collectionId);
         if (await db.get('SELECT id FROM card_acquisition_lot WHERE collection_id = ?', [collectionId])) throw problem(409, 'Acquisition lot already exists');
@@ -86,6 +87,7 @@ function createSalesRepository({ connect }) {
         if (prior) { if (prior.request_json !== request) throw problem(409, 'Idempotency key reused with different sale details'); return { ...JSON.parse(prior.result_json), saleId: prior.id }; }
         const lot = await db.get('SELECT * FROM card_acquisition_lot WHERE id = ? AND user_id = ?', [lotId, userId]);
         if (!lot) throw problem(404, 'Acquisition lot not found');
+        if (await require('./sealedConversion').pendingCopy(db,userId,lot.collection_id)) throw problem(409, 'Finalize the parent product market-value allocation before selling its pulls');
         const entry = await db.get("SELECT * FROM collection WHERE id = ? AND user_id = ? AND list_type = 'collection'", [lot.collection_id, userId]);
         if (!entry || entry.quantity !== lot.remaining_quantity || quantity > lot.remaining_quantity) throw problem(409, 'Inventory changed or insufficient copies remain');
         const result = calculateSale({ proceedsCents, feesCents, remainingBasisCents: lot.remaining_basis_cents, remainingQuantity: lot.remaining_quantity, quantity });

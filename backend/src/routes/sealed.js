@@ -28,6 +28,8 @@ function presentLot(row) {
     location_name: row.location_name || null,
     notes: row.notes || '',
     archived_at: row.archived_at,
+    parent_opening_id: row.parent_opening_id || null,
+    cost_pending: row.allocation_status === 'pending',
   };
 }
 
@@ -60,8 +62,10 @@ async function lotsFor(userId, productIds) {
   if (!productIds.length) return new Map();
   const marks = productIds.map(() => '?').join(', ');
   const rows = await db.all(
-    `SELECT l.*, loc.name AS location_name
+    `SELECT l.*, loc.name AS location_name, pack.opening_id AS parent_opening_id, conversion.allocation_status
        FROM sealed_lot l
+       LEFT JOIN sealed_pack_lot pack ON pack.lot_id = l.id
+       LEFT JOIN sealed_product_conversion conversion ON conversion.opening_id = pack.opening_id
        LEFT JOIN locations loc ON loc.id = l.location_id AND loc.user_id = l.user_id
       WHERE l.user_id = ? AND l.product_id IN (${marks})
       ORDER BY l.id`,
@@ -153,7 +157,8 @@ router.get('/sealed/products', async (req, res) => {
     );
     const lots = await lotsFor(req.user.id, products.map(product => product.id));
     res.json({
-      products: products.map(product => presentProduct(product, lots.get(product.id) || [])),
+      products: products.map(product => presentProduct(product, lots.get(product.id) || []))
+        .filter(product => req.query.in_stock !== '1' || product.remaining_quantity > 0),
     });
   } catch (err) {
     console.error('Failed to list sealed products', err);
@@ -431,6 +436,13 @@ router.put('/sealed/lots/:id', async (req, res) => {
     );
     if (!existing) return fail(res, 404, 'Sealed lot not found');
     const body = req.body || {};
+    if (await db.get('SELECT lot_id FROM sealed_pack_lot WHERE lot_id = ?', [existing.id])) {
+      const unchanged = (body.quantity == null || Number(body.quantity) === existing.quantity)
+        && (body.remaining_quantity == null || Number(body.remaining_quantity) === existing.remaining_quantity)
+        && (body.total_cost == null || sealed.moneyToCents(body.total_cost, 'Total cost') === existing.total_cost_cents)
+        && (body.currency == null || String(body.currency).trim().toUpperCase() === existing.currency);
+      if (!unchanged) return fail(res, 409, 'Converted pack quantity and cost are fixed. Open the pack or undo its parent conversion instead.');
+    }
     const salesProtection = require('../utils/salesInventoryProtection');
     const hasSales = await salesProtection.hasSealedSales(db, existing.id, req.user.id);
     if (hasSales) salesProtection.validateSealedLotEdit(existing, body, sealed.moneyToCents);

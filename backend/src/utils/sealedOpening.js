@@ -129,6 +129,7 @@ function presentOpening(row, pulls) {
     quantity: row.quantity,
     cost_cents: row.cost_cents,
     cost: sealed.centsToMoney(row.cost_cents),
+    cost_pending: row.cost_pending === 1,
     currency: row.currency,
     opened_at: row.opened_at,
     notes: row.notes || '',

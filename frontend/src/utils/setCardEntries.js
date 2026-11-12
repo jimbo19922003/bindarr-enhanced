@@ -5,6 +5,20 @@
 // per-printing slot only counts copies of that printing.
 const normalizeNumber = value => String(value ?? '').trim().replace(/^0+/, '').toLowerCase();
 
+export function standardSetCompletion(set, collection, fullSet = false) {
+  if (!set) return null;
+  const total = fullSet ? set.total : set.printed_total;
+  if (!Number.isSafeInteger(total) || total <= 0) return null;
+  const numbers = new Set(collection
+    .filter(card => card.game === set.game && card.set_id === set.id)
+    .map(card => {
+      const key = String(card.number ?? '').trim().toLowerCase();
+      return /^\d+$/.test(key) ? key.replace(/^0+(?=\d)/, '') : key;
+    })
+    .filter(key => key && (fullSet || set.game === 'mtg' || (/^\d+$/.test(key) && Number(key) >= 1 && Number(key) <= total))));
+  return { owned: numbers.size, total, percent: Math.min(Math.round(numbers.size / total * 100), 100) };
+}
+
 export function ownedEntriesForSetCard(card, collection) {
   if (!card || !Array.isArray(collection)) return [];
   const number = normalizeNumber(card.number);

@@ -18,6 +18,7 @@ async function state(db,user,v) {
  if(v.kind==='sealed') {
   const lot=await db.get('SELECT l.*,p.name FROM sealed_lot l JOIN sealed_product p ON p.id=l.product_id AND p.user_id=l.user_id WHERE l.id=? AND l.user_id=? AND l.archived_at IS NULL AND p.archived_at IS NULL',[v.id,user]);
   if(!lot)throw fail(404,'Active owned sealed lot not found');
+  if(await require('./sealedConversion').pendingLot(db,user,lot.id))throw fail(409,'Finalize the parent product market-value allocation before selling its packs');
   if(lot.currency!==v.currency)throw fail(400,'Use the purchase lot currency for proceeds and fees');
   if(v.quantity>lot.remaining_quantity)throw fail(409,'Not enough sealed units remain');
   return {name:lot.name,source:'sealed',remainingQuantity:lot.remaining_quantity,remainingBasisCents:lot.remaining_cost_cents,productId:lot.product_id};
@@ -25,6 +26,7 @@ async function state(db,user,v) {
  const copy=await db.get("SELECT c.*,cc.name FROM collection c JOIN card_cache cc ON cc.id=c.card_id WHERE c.id=? AND c.user_id=? AND c.list_type='collection'",[v.id,user]);
  if(!copy)throw fail(404,'Owned card copy not found');
  if(copy.quantity!==1)throw fail(409,'This entry must be split into physical copies before selling');
+ if(await require('./sealedConversion').pendingCopy(db,user,copy.id))throw fail(409,'Finalize the parent product market-value allocation before selling its pulls');
  let lot=null,mapping=null;
  if(await has(db,'card_acquisition_lot'))lot=await db.get('SELECT * FROM card_acquisition_lot WHERE collection_id=? AND user_id=?',[v.id,user]);
  if(await has(db,'opening_basis_copy'))mapping=await db.get('SELECT b.cost_cents,s.snapshot_json FROM opening_basis_copy b JOIN opening_basis_snapshot s ON s.opening_id=b.opening_id WHERE b.collection_id=? AND s.user_id=?',[v.id,user]);

@@ -7,6 +7,8 @@ const pokemonProvider = require('../utils/pokemonProvider');
 const collection = require('./collection');
 const { cardForPull, applyPullPrice, repairUnpricedPulls } = require('../utils/ripValuation');
 const { validatePrinting } = require('../utils/cardPrintings');
+const conversion = require('../utils/sealedConversion');
+const { createHash } = require('crypto');
 const router = express.Router();
 const MAX_PULLS = 100;
 const fail = (res, status, error) => res.status(status).json({ error });
@@ -95,9 +97,13 @@ router.get('/sealed/products/:id/openings', async (req, res) => {
   try {
     const product = await db.get('SELECT id FROM sealed_product WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!product) return fail(res, 404, 'Sealed product not found');
-    const rows = await db.all('SELECT * FROM sealed_opening WHERE user_id = ? AND product_id = ? ORDER BY id', [req.user.id, product.id]);
+    const conversions = await conversion.listConversions(req.user.id, product.id);
+    const rows = await db.all(`SELECT o.* FROM sealed_opening o WHERE o.user_id = ? AND (o.product_id = ?
+      OR o.lot_id IN (SELECT p.lot_id FROM sealed_pack_lot p JOIN sealed_opening parent ON parent.id = p.opening_id WHERE parent.product_id = ? AND parent.user_id = ?)) ORDER BY o.id`, [req.user.id, product.id, product.id, req.user.id]);
     const grouped = await pullsFor(req.user.id, rows.map(row => row.id));
-    res.json({ openings: rows.map(row => openings.presentOpening(row, grouped.get(row.id) || [])) });
+    const presented = rows.map(row => openings.presentOpening(row, grouped.get(row.id) || []));
+    for (const item of conversions) for (const pack of item.packs) pack.openings = presented.filter(row => row.lot_id === pack.id);
+    res.json({ openings: presented.filter(row => row.product_id === product.id && !conversions.some(item => item.packs.some(pack => pack.id === row.lot_id))), conversions });
   } catch (error) { respondError(res, error, 'Could not list openings.'); }
 });
 router.get('/sealed/openings/:id', async (req, res) => {
@@ -106,23 +112,78 @@ router.get('/sealed/openings/:id', async (req, res) => {
 router.post('/sealed/lots/:id/openings', async (req, res) => {
   try {
     const body = req.body || {}; if (body.quantity != null && Number(body.quantity) !== 1) return fail(res, 400, 'Open one unit at a time so each box stays its own opening.');
+    const packs = body.packs === undefined ? null : conversion.normalizePacks(body.packs);
+    let hash;
+    if (packs) {
+      if (!/^[A-Za-z0-9-]{8,128}$/.test(body.request_id || '')) return fail(res, 400, 'A valid conversion request ID is required');
+      hash = createHash('sha256').update(JSON.stringify({ lot_id: String(req.params.id), body })).digest('hex');
+      const prior = await conversion.conversionFor(req.user.id, body.request_id, hash);
+      if (prior) return res.status(200).json({ opening: await presentOwned(req.user.id, prior.opening_id) });
+    }
     const raw = body.pulls == null ? [] : body.pulls; if (!Array.isArray(raw) || raw.length > MAX_PULLS) return fail(res, 400, 'An opening can record at most 100 pulls.');
     const preview = await db.get('SELECT currency FROM sealed_lot WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]); if (!preview) return fail(res, 404, 'Sealed lot not found');
     const prepared = [];
     try { for (const pull of raw) prepared.push(await resolvePull(req.user, pull, preview.currency, true)); } catch (error) { await forgetFiled(req.user.id, prepared.flatMap(pull => pull.filedIds)); throw error; }
-    let openingId;
-    try { openingId = await db.withTransaction(async () => {
+    let result;
+    try { result = await db.withTransaction(async () => {
+      if (packs) {
+        const prior = await conversion.conversionFor(req.user.id, body.request_id, hash);
+        if (prior) return { id: prior.opening_id, replayed: true };
+      }
       const lot = await db.get('SELECT * FROM sealed_lot WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
       if (!lot || lot.archived_at) { const error = new Error('Sealed lot not found'); error.status = 404; throw error; }
       const product = await db.get('SELECT id, archived_at FROM sealed_product WHERE id = ? AND user_id = ?', [lot.product_id, req.user.id]);
       if (!product || product.archived_at) { const error = new Error('Sealed product not found'); error.status = 404; throw error; }
+      if (packs && await db.get('SELECT lot_id FROM sealed_pack_lot WHERE lot_id = ?', [lot.id])) throw new TypeError('A converted pack must be opened directly, not converted again.');
+      if (lot.remaining_quantity < 1) throw new RangeError('Insufficient sealed quantity');
       const allocated = accounting.allocateOpening({ remainingQuantity: lot.remaining_quantity, remainingCostCents: lot.remaining_cost_cents, quantity: 1 });
       await db.run(`UPDATE sealed_lot SET remaining_quantity = ?, remaining_cost_cents = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`, [allocated.remainingQuantity, allocated.remainingCostCents, lot.id, req.user.id]);
-      const inserted = await db.run(`INSERT INTO sealed_opening (user_id, product_id, lot_id, quantity, cost_cents, currency, opened_at, notes, entry_complete) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)`, [req.user.id, lot.product_id, lot.id, allocated.costCents, lot.currency, openings.openedOn(body.opened_at, lot.currency), openings.notesOf(body.notes), body.entry_complete === true ? 1 : 0]);
-      for (const pull of prepared) await insertPull(req.user.id, inserted.lastID, pull); return inserted.lastID;
+      const costPending = packs || await conversion.pendingLot(db, req.user.id, lot.id);
+      const inserted = await db.run(`INSERT INTO sealed_opening (user_id, product_id, lot_id, quantity, cost_cents, currency, opened_at, notes, entry_complete, cost_pending) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`, [req.user.id, lot.product_id, lot.id, allocated.costCents, lot.currency, openings.openedOn(body.opened_at, lot.currency), openings.notesOf(body.notes), body.entry_complete === true ? 1 : 0, costPending ? 1 : 0]);
+      if (packs) {
+        await db.run('INSERT INTO sealed_product_conversion (opening_id, user_id, source_cost_cents, request_id, payload_hash) VALUES (?, ?, ?, ?, ?)', [inserted.lastID, req.user.id, allocated.costCents, body.request_id, hash]);
+        await conversion.createPacks(req.user.id, inserted.lastID, lot, packs);
+      }
+      for (const pull of prepared) await insertPull(req.user.id, inserted.lastID, pull);
+      if (packs) await conversion.finalizeAllocation(req.user.id, inserted.lastID);
+      return { id: inserted.lastID, replayed: false };
     }); } catch (error) { await forgetFiled(req.user.id, prepared.flatMap(pull => pull.filedIds)); throw error; }
-    res.status(201).json({ opening: await presentOwned(req.user.id, openingId) });
+    if (result.replayed) await forgetFiled(req.user.id, prepared.flatMap(pull => pull.filedIds));
+    res.status(result.replayed ? 200 : 201).json({ opening: await presentOwned(req.user.id, result.id) });
   } catch (error) { if (error.message === 'Insufficient sealed quantity') error.message = 'Not enough sealed units left in that lot.'; respondError(res, error, 'Could not open that product.'); }
+});
+router.put('/sealed/openings/:id/conversion-values', async (req, res) => {
+  try {
+    const status = await db.withTransaction(async () => {
+      const row = await db.get('SELECT * FROM sealed_product_conversion WHERE opening_id = ? AND user_id = ?', [req.params.id, req.user.id]);
+      if (!row) { const error = new Error('Conversion not found'); error.status = 404; throw error; }
+      if (row.allocation_status === 'finalized') { const error = new Error('Market-value allocation is already finalized. Its opening-time values are frozen.'); error.status = 409; throw error; }
+      const body = req.body || {};
+      if (!Array.isArray(body.packs) || body.packs.length > 500 || !Array.isArray(body.promos) || body.promos.length > MAX_PULLS) throw new TypeError('Provide pack and promo market values');
+      const sealed = require('../utils/sealedInventory');
+      const seen = new Set();
+      for (const pack of body.packs) {
+        const id = Number(pack.lot_id);
+        if (!Number.isSafeInteger(id) || seen.has(id)) throw new TypeError('Pack IDs must be unique integers');
+        seen.add(id);
+        const value = pack.market_value == null || pack.market_value === '' ? null : sealed.moneyToCents(pack.market_value, 'Pack market value');
+        const result = await db.run('UPDATE sealed_pack_lot SET market_unit_cents = ? WHERE lot_id = ? AND opening_id = ?', [value, id, row.opening_id]);
+        if (!result.changes) throw new TypeError('Pack does not belong to this conversion');
+      }
+      seen.clear();
+      for (const promo of body.promos) {
+        const id = Number(promo.pull_id);
+        if (!Number.isSafeInteger(id) || seen.has(id)) throw new TypeError('Promo IDs must be unique integers');
+        seen.add(id);
+        const value = promo.market_value == null || promo.market_value === '' ? null : sealed.moneyToCents(promo.market_value, 'Promo line market value');
+        const result = await db.run(`UPDATE sealed_pull SET opened_line_cents = ?, opened_unit_cents = NULL, updated_at = datetime('now')
+          WHERE id = ? AND opening_id = ? AND user_id = ?`, [value, id, row.opening_id, req.user.id]);
+        if (!result.changes) throw new TypeError('Promo does not belong to this conversion');
+      }
+      return conversion.finalizeAllocation(req.user.id, row.opening_id);
+    });
+    res.json({ allocation_status: status });
+  } catch (error) { respondError(res, error, 'Could not save conversion market values.'); }
 });
 router.put('/sealed/openings/:id', async (req, res) => {
   try {
@@ -137,7 +198,8 @@ router.delete('/sealed/openings/:id', async (req, res) => {
     await db.withTransaction(async () => {
       const opening = await db.get('SELECT * FROM sealed_opening WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]); if (!opening) { const error = new Error('Opening not found'); error.status = 404; throw error; }
       const lot = await db.get('SELECT * FROM sealed_lot WHERE id = ? AND user_id = ?', [opening.lot_id, req.user.id]); if (!lot) { const error = new Error('Sealed lot not found'); error.status = 404; throw error; }
-      const quantity = lot.remaining_quantity + opening.quantity, cost = lot.remaining_cost_cents + opening.cost_cents;
+      const convertedCost = await conversion.removePacks(req.user.id, opening.id);
+      const quantity = lot.remaining_quantity + opening.quantity, cost = lot.remaining_cost_cents + (convertedCost ?? opening.cost_cents);
       if (quantity > lot.quantity || cost > lot.total_cost_cents) { const error = new Error('This opening cannot be removed because the lot was changed after it was opened.'); error.status = 409; throw error; }
       await releaseFiled(req.user.id, await db.all('SELECT filed_ids FROM sealed_pull WHERE opening_id = ? AND user_id = ?', [opening.id, req.user.id]));
       await db.run(`UPDATE sealed_lot SET remaining_quantity = ?, remaining_cost_cents = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`, [quantity, cost, lot.id, req.user.id]);

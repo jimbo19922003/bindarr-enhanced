@@ -54,6 +54,7 @@ function Dashboard({ statsTrigger, onNavigate, onNavigateToSet, setSelectedLocat
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [view, setView] = useState('executive');
+  const [fullSetCompletion, setFullSetCompletion] = useState(false);
   const [reportingCurrency, setReportingCurrency] = useState(() => getCurrency());
   useEffect(() => {
     const changed = () => setReportingCurrency(getCurrency());
@@ -379,24 +380,32 @@ function Dashboard({ statsTrigger, onNavigate, onNavigateToSet, setSelectedLocat
           {setProgress.length > 0 && (
             <div className="glass-panel">
               <h3 className="chart-title">{t('dash.setProgress')}</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                <input type="checkbox" checked={fullSetCompletion} onChange={event => setFullSetCompletion(event.target.checked)} />
+                {t('dash.fullSetCompletion')}
+              </label>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.5rem' }}>{t(fullSetCompletion ? 'dash.fullSetCompletionHint' : 'dash.baseSetCompletionHint')}</p>
               <div className="set-progress-grid" style={{ marginTop: '1rem' }}>
-                {setProgress.map((set, idx) => (
-                  <div key={idx} className="set-progress-item">
-                    <div className="set-progress-header">
-                      <button
-                        type="button"
-                        onClick={() => onNavigateToSet?.({ setId: set.setId, game: set.setGame })}
-                        style={{ border: 0, padding: 0, background: 'none', color: 'var(--text-strong)', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}
-                      >
-                        {set.setName}
-                      </button>
-                      <span style={{ color: 'var(--text-secondary)' }}>{set.ownedUnique} / {set.totalCards} ({set.percent}%)</span>
+                {setProgress.map((set, idx) => {
+                  const completion = fullSetCompletion ? set.full : set.base;
+                  return (
+                    <div key={idx} className="set-progress-item">
+                      <div className="set-progress-header">
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToSet?.({ setId: set.setId, game: set.setGame, fullSetCompletion })}
+                          style={{ border: 0, padding: 0, background: 'none', color: 'var(--text-strong)', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+                        >
+                          {set.setName}
+                        </button>
+                        <span style={{ color: 'var(--text-secondary)' }}>{completion ? `${completion.ownedUnique} / ${completion.totalCards} (${completion.percent}%)` : t('dash.setCompletionUnavailable')}</span>
+                      </div>
+                      <div className="set-progress-bar-bg">
+                        <div className="set-progress-bar-fill" style={{ width: `${completion?.percent || 0}%` }}></div>
+                      </div>
                     </div>
-                    <div className="set-progress-bar-bg">
-                      <div className="set-progress-bar-fill" style={{ width: `${set.percent}%` }}></div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

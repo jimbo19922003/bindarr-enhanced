@@ -15,8 +15,8 @@ function createLocalPokemonSetsHandler({connect,enabled=require('../utils/pokemo
    const installed=await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='pokemon_catalog_active'");
    const active=installed?await db.get('SELECT snapshot_id FROM pokemon_catalog_active WHERE language=?',[language]):null;
    if(!active){await db.run('COMMIT');began=false;return next();}
-   const rows=await db.all('SELECT s.id,s.payload_json,COUNT(c.id) AS total FROM pokemon_catalog_set s LEFT JOIN pokemon_catalog_card c ON c.snapshot_id=s.snapshot_id AND c.set_id=s.id WHERE s.snapshot_id=? GROUP BY s.id,s.payload_json',[active.snapshot_id]);
-   const sets=rows.map(row=>({...JSON.parse(row.payload_json),total:row.total,ptcgo_code:'',symbol_url:'',logo_url:'',game:'pokemon'}));
+   const rows=await db.all("SELECT s.id,s.payload_json,COUNT(DISTINCT NULLIF(c.number_key, '')) AS total FROM pokemon_catalog_set s LEFT JOIN pokemon_catalog_card c ON c.snapshot_id=s.snapshot_id AND c.set_id=s.id WHERE s.snapshot_id=? GROUP BY s.id,s.payload_json",[active.snapshot_id]);
+   const sets=rows.map(row=>{const metadata=JSON.parse(row.payload_json);return {...metadata,total:metadata.total||(row.total>=metadata.printed_total?row.total:null),ptcgo_code:'',symbol_url:'',logo_url:'',game:'pokemon'};});
    sets.sort((a,b)=>String(a.release_date||'').localeCompare(String(b.release_date||''))||a.id.localeCompare(b.id));
    await db.run('COMMIT');began=false;res.set('X-Pokemon-Catalog-Source','local');return res.json(sets);
   }catch(error){if(began)await db.run('ROLLBACK').catch(()=>{});console.error('Local Pokemon set listing failed:',error.message);return res.status(503).json({error:'Local Pokemon catalog is unavailable',code:'LOCAL_CATALOG_UNAVAILABLE',language});}

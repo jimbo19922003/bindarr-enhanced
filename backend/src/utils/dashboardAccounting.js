@@ -17,7 +17,8 @@ async function readRecordedSpending(db,user,game,valuation){
   else if(typeof card.purchase_price==='number'&&card.purchase_price>0&&Number.isSafeInteger(card.quantity)&&card.quantity>0)cost=Math.round(card.purchase_price*100)*card.quantity;
   if(!valid(cost))unknownCount++;else knownCents=add(knownCents,cost);
  }
- if((!game||game==='pokemon')&&await has('sealed_lot'))for(const lot of await db.all('SELECT total_cost_cents,currency FROM sealed_lot WHERE user_id=?',[user])){
+ const packFilter=await has('sealed_pack_lot')?' AND NOT EXISTS (SELECT 1 FROM sealed_pack_lot p WHERE p.lot_id=sealed_lot.id)':'';
+ if((!game||game==='pokemon')&&await has('sealed_lot'))for(const lot of await db.all(`SELECT total_cost_cents,currency FROM sealed_lot WHERE user_id=?${packFilter}`,[user])){
   if(!valid(lot.total_cost_cents)){unknownCount++;continue;}const cost=await valuation.cents(lot.total_cost_cents,lot.currency);if(!valid(cost))unknownCount++;else knownCents=add(knownCents,cost);
  }
  return {knownCents,unknownCount,historyComplete:false,basis:'retained-acquisition-records',note:'Includes retained owned/sold card purchases and sealed lots, including archived lots. Rip contents are not a second purchase. Deleted purchases, missing costs, and unrecorded purchases may be absent; this is not a certified lifetime or net-contribution total.'};

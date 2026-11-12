@@ -386,6 +386,18 @@ Requests stay inside the key's hourly and daily allowance, and one pass
 asks for at most 25 cards. An admin can save the key in Admin or Settings;
 a saved key is used instead of `POKEWALLET_API_KEY`.
 
+## Set completion
+
+Dashboard **Cards → Set Progress** and **Collection → Sets** default to base-set completion: only unique
+collector numbers from 1 through the printed set total count for Pokémon and
+Lorcana. Enable **Include secret/special rares (full set)** to include the rest
+against the catalogue's full count. Duplicate copies, languages, and finishes
+with the same number count once; this is not master-set completion. Counts come
+from cached provider set metadata or an active imported Pokémon catalogue, not
+from the number of cards you happen to own or have cached. An unavailable total
+is shown explicitly rather than guessed. Magic retains its existing unique
+collector-number counting because its collector numbers need not be contiguous.
+
 ## Sealed inventory
 
 Sealed products are a catalog, separate from the purchase lots that record
@@ -394,6 +406,11 @@ its own quantity, purchase date, currency, and total cost in integer cents.
 The current market quote is stored on the product and does not overwrite the
 cost. A missing quote is unknown, not zero. Archive hides a product or a lot
 from the portfolio without deleting it.
+
+The Collection list shows only products with sealed units on hand by default.
+Enable **Show opened / out of stock** to include products with none remaining,
+including converted products whose packs are tracked separately. **Show archived**
+is a separate filter; enable both to see archived products with no active stock.
 
 Remaining cost is the share of the original total still sealed. Integer
 division leaves the leftover cent on the units that are still there, so the
@@ -432,6 +449,30 @@ pull, and it is not copied onto every pull or onto a collection purchase
 price. Removing an opening puts that unit and its cost back on the lot and
 removes the collection copies that opening added. A card you already owned,
 and only linked to the pull, stays.
+
+Use **Convert to packs** on a non-pack purchase lot to open one product without
+opening all its packs. Specify each pack group (name, set, count, and optional
+market value per pack), then record its promo cards in the same form. Each pack
+stays in sealed inventory with its own identity, nested beneath the converted
+product's opening. **Open this pack** records that pack's pulls whenever you
+choose; the other packs remain unopened.
+
+Purchase cost is split proportionally between packs and promos using their
+market values at product opening, in the purchase currency. Promo quantities
+are included. Integer-cent allocation preserves the exact original purchase
+cost, and the saved market-value weights and cost shares do not change with
+later price updates. This is a transfer of cost, not a second purchase.
+
+Missing values (including an all-zero market total) leave allocation pending.
+You can still open packs and record their pulls. The original cost is held on
+the parent, and child costs are explicitly pending, not free. Expand the parent
+opening to supply market values later; finish recording any missing promos
+using **Edit promos / add promo cards**. Finalizing updates both unopened packs
+and packs already opened. Sales and per-card acquisition-cost finalization are
+blocked until the market-value split is finalized. Removing the conversion
+requires removing its child openings first, then restores the original unit
+and its exact cost. Retained pack sale history prevents removal, even after a
+sale correction, so that acquisition provenance is not deleted.
 
 Adding a Pokémon card prices it from PokéWallet when the catalog has no
 market price, so the copy is not stored as zero. The card list, pictures, and

@@ -19,11 +19,14 @@ async function sealedData(userId, game, valuation, database = db) {
     p.market_price_cents, p.market_currency FROM sealed_lot l
     JOIN sealed_product p ON p.id = l.product_id AND p.user_id = l.user_id
     WHERE l.user_id = ? AND l.archived_at IS NULL AND p.archived_at IS NULL`, [userId]);
+  const derivedLots = new Set((await database.all(`SELECT pack.lot_id FROM sealed_pack_lot pack
+    JOIN sealed_product_conversion conversion ON conversion.opening_id = pack.opening_id
+    WHERE conversion.user_id = ?`, [userId])).map(row => row.lot_id));
   let spent = 0;
   const holdingsRows = [];
   const byProduct = new Map();
   for (const lot of lots) {
-    spent += (await valuation.cents(lot.total_cost_cents, lot.currency)) / 100;
+    if (!derivedLots.has(lot.id)) spent += (await valuation.cents(lot.total_cost_cents, lot.currency)) / 100;
     const price = await valuation.cents(lot.market_price_cents, lot.market_currency || 'USD');
     holdingsRows.push({ remainingQuantity: lot.remaining_quantity,
       remainingCostCents: await valuation.cents(lot.remaining_cost_cents, lot.currency),

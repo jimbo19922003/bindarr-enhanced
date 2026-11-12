@@ -73,9 +73,10 @@ async function main() {
     `INSERT INTO users (username, password_hash, role, share_token, api_key) VALUES ('member', 'x', 'member', 'member-sealed', 'member-sealed-key')`
   );
   await db.run(
-    `INSERT INTO card_cache (id, name, game, set_id, set_name, price_trend, price_currency, price_source)
-     VALUES ('tcgdex-en-sealed-test', 'Pikachu', 'pokemon', 'card-set-id', 'PRISMATIC EVOLUTIONS', 10, 'USD', 'tcgdex')`
+    `INSERT INTO card_cache (id, name, game, set_id, set_name, number, price_trend, price_currency, price_source)
+     VALUES ('tcgdex-en-sealed-test', 'Pikachu', 'pokemon', 'card-set-id', 'PRISMATIC EVOLUTIONS', '132', 10, 'USD', 'tcgdex')`
   );
+  await db.run("INSERT INTO sets (id, name, game, printed_total, total) VALUES ('card-set-id', 'Prismatic Evolutions', 'pokemon', 131, 180)");
   await db.run(
     `INSERT INTO collection (user_id, card_id, quantity, purchase_price, game, list_type) VALUES (?, 'tcgdex-en-sealed-test', 1, 4, 'pokemon', 'collection')`,
     [admin.id]
@@ -177,6 +178,9 @@ async function main() {
 
   const portfolio = await send(port, 'GET', '/api/stats', admin.id);
   assert.strictEqual(portfolio.status, 200);
+  const completion = portfolio.body.setProgress.find(row => row.setId === 'card-set-id');
+  assert.deepStrictEqual(completion.base, { ownedUnique: 0, totalCards: 131, percent: 0 });
+  assert.deepStrictEqual(completion.full, { ownedUnique: 1, totalCards: 180, percent: 1 });
   const prismatic = portfolio.body.sets.find(row => row.name === 'Prismatic Evolutions');
   assert.ok(prismatic, JSON.stringify(portfolio.body.sets));
   assert.strictEqual(prismatic.value, 86.02);
@@ -243,6 +247,28 @@ async function main() {
   assert.strictEqual(exported.status, 200);
   assert.ok(exported.text.includes('52.00'));
   assert.ok(!exported.text.includes('45.00'));
+
+  const stockList = await send(port, 'GET', '/api/sealed/products?in_stock=1', admin.id);
+  assert.ok(stockList.body.products.some(product => product.id === box.body.product.id), 'Partially opened products stay visible');
+  assert.ok(!stockList.body.products.some(product => product.id === productId), 'Archived products remain hidden independently');
+  const archivedStock = await send(port, 'GET', '/api/sealed/products?in_stock=1&archived=1', admin.id);
+  assert.ok(archivedStock.body.products.some(product => product.id === productId), 'Show archived can include products with active stock');
+  const boxLotId = box.body.product.lots[0].id;
+  assert.strictEqual((await send(port, 'PUT', `/api/sealed/lots/${boxLotId}`, admin.id, { remaining_quantity: 0 })).status, 200);
+  const noStock = await send(port, 'GET', '/api/sealed/products?in_stock=1', admin.id);
+  assert.ok(!noStock.body.products.some(product => product.id === box.body.product.id), 'Fully depleted products are hidden');
+  const showOpened = await send(port, 'GET', '/api/sealed/products', admin.id);
+  assert.ok(showOpened.body.products.some(product => product.id === box.body.product.id), 'Showing opened preserves access to depleted products');
+  const archivedLotsProduct = batch.body.products[0];
+  await send(port, 'POST', `/api/sealed/lots/${archivedLotsProduct.lots[0].id}/archive`, admin.id);
+  const onlyArchivedLots = await send(port, 'GET', '/api/sealed/products?in_stock=1&archived=1', admin.id);
+  assert.ok(!onlyArchivedLots.body.products.some(product => product.id === archivedLotsProduct.id), 'Archived lot quantities do not count as stock');
+  const noLots = await send(port, 'POST', '/api/sealed/products', admin.id, { name: 'Catalog only', product_type: 'other' });
+  assert.strictEqual(noLots.status, 201);
+  assert.ok(!(await send(port, 'GET', '/api/sealed/products?in_stock=1', admin.id)).body.products.some(product => product.id === noLots.body.product.id));
+  const memberStock = await send(port, 'GET', '/api/sealed/products?in_stock=1&q=Prismatic&type=etb', member.lastID);
+  assert.strictEqual(memberStock.body.products.length, 1, 'Stock filtering composes with search, type and ownership');
+  assert.strictEqual(memberStock.body.products[0].id, memberList.body.products[0].id);
 
   await new Promise(resolve => server.close(resolve));
   for (const suffix of ['', '-wal', '-shm']) {

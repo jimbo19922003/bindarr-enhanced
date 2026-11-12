@@ -35,6 +35,7 @@ function createOpeningBasisRepository({ connect }) {
       const prior = await db.get('SELECT snapshot_json FROM opening_basis_snapshot WHERE opening_id=? AND user_id=?', [openingId, userId]);
       if (prior) { await db.run('COMMIT'); began = false; return JSON.parse(prior.snapshot_json); }
       const pending = async reason => { await db.run('COMMIT'); began = false; return { status: 'pending', reason, openingId }; };
+      if (opening.cost_pending === 1) return await pending('Parent product market-value allocation is pending');
       if (opening.currency !== 'USD') return await pending('Historical non-USD basis requires an explicit conversion policy');
       if (opening.entry_complete !== 1) return await pending('All opening contents must be marked complete');
       if (!valid(opening.cost_cents)) throw fail(409, 'Invalid opening cost');

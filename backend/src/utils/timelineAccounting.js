@@ -9,6 +9,7 @@ async function readAccounting(db,user,game,valuation,portfolio,day){
  const owned=portfolio.cards||[],ownedById=new Map(owned.map(c=>[c.entry_id,c]));
  const lots=await has('card_acquisition_lot')?await db.all('SELECT * FROM card_acquisition_lot WHERE user_id=?',[user]):[];
  const byLot=new Map(lots.map(l=>[l.collection_id,l]));
+ const pendingPackLots=new Set(await has('sealed_pack_lot')?(await db.all("SELECT p.lot_id FROM sealed_pack_lot p JOIN sealed_product_conversion c ON c.opening_id=p.opening_id WHERE c.user_id=? AND c.allocation_status='pending'",[user])).map(row=>row.lot_id):[]);
  const pulls=await has('sealed_pull')?await db.all('SELECT * FROM sealed_pull WHERE user_id=? ORDER BY id',[user]):[];
  const pullCopies=new Set();for(const p of pulls){if(p.collection_id)pullCopies.add(p.collection_id);for(const id of String(p.filed_ids||'').split(',').map(Number))if(id>0)pullCopies.add(id);}
  const snapshots=new Map();
@@ -51,7 +52,7 @@ async function readAccounting(db,user,game,valuation,portfolio,day){
   if(basis==null)unknownBasisCount+=quantity;else remainingBasisCents=sum(remainingBasisCents,basis);
  }
  if((!game||game==='pokemon')&&await has('sealed_lot'))for(const lot of await db.all('SELECT l.* FROM sealed_lot l JOIN sealed_product p ON p.id=l.product_id AND p.user_id=l.user_id WHERE l.user_id=? AND l.archived_at IS NULL AND p.archived_at IS NULL AND l.remaining_quantity>0',[user])){
-  if(!valid(lot.remaining_cost_cents)){unknownBasisCount+=lot.remaining_quantity;continue;}const cost=await valuation.cents(lot.remaining_cost_cents,lot.currency);if(!valid(cost))unknownBasisCount+=lot.remaining_quantity;else remainingBasisCents=sum(remainingBasisCents,cost);
+  if(pendingPackLots.has(lot.id)||!valid(lot.remaining_cost_cents)){unknownBasisCount+=lot.remaining_quantity;continue;}const cost=await valuation.cents(lot.remaining_cost_cents,lot.currency);if(!valid(cost))unknownBasisCount+=lot.remaining_quantity;else remainingBasisCents=sum(remainingBasisCents,cost);
  }
  async function sales(table,card){
   if(!await has(table))return;

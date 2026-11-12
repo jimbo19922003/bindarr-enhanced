@@ -51,6 +51,7 @@ function SealedInventory({ showToast }) {
   const [query, setQuery] = useState('');
   const [type, setType] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [showOpened, setShowOpened] = useState(false);
   const [form, setForm] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [csv, setCsv] = useState('');
@@ -77,6 +78,7 @@ function SealedInventory({ showToast }) {
     if (q.trim()) params.set('q', q.trim());
     if (productType) params.set('type', productType);
     if (archived) params.set('archived', '1');
+    if (!(next.showOpened ?? showOpened)) params.set('in_stock', '1');
     const response = await fetch(`/api/sealed/products?${params.toString()}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || t('sealed.errLoad'));
@@ -88,7 +90,7 @@ function SealedInventory({ showToast }) {
     (async () => {
       try {
         const [productRes, locationRes] = await Promise.all([
-          fetch('/api/sealed/products'),
+          fetch('/api/sealed/products?in_stock=1'),
           fetch('/api/locations'),
         ]);
         const productData = await productRes.json();
@@ -605,13 +607,17 @@ function SealedInventory({ showToast }) {
           {TYPES.map(value => <option key={value} value={value}>{typeLabel(value)}</option>)}
         </select>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-secondary)' }}>
+          <input type="checkbox" checked={showOpened} onChange={e => { setShowOpened(e.target.checked); refresh({ showOpened: e.target.checked }); }} />
+          {t('sealed.showOpened')}
+        </label>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-secondary)' }}>
           <input type="checkbox" checked={showArchived} onChange={e => { setShowArchived(e.target.checked); refresh({ showArchived: e.target.checked }); }} />
           {t('sealed.showArchived')}
         </label>
       </div>
 
       {products.length === 0 && (
-        <div className="glass-panel" style={{ padding: '1.5rem', color: 'var(--text-secondary)' }}>{t('sealed.empty')}</div>
+        <div className="glass-panel" style={{ padding: '1.5rem', color: 'var(--text-secondary)' }}>{t(showOpened ? 'sealed.empty' : 'sealed.emptyOnHand')}</div>
       )}
 
       <div style={{ display: 'grid', gap: '0.75rem' }}>
@@ -833,7 +839,9 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
           </thead>
           <tbody>
             {lots.map(item => (
-              <LotRow key={item.id} lot={item} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot} onRip={() => setRipLot(item)} onSell={!product.archived_at ? () => { const target = sealedSaleTarget(item, product); if (target) window.dispatchEvent(new CustomEvent("bindarr_sell_item", { detail: { ...target, onSold: onChanged } })); } : null} />
+              <LotRow key={item.id} lot={item} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot} onRip={() => setRipLot(item)}
+                onConvert={!product.archived_at && !item.parent_opening_id && product.product_type !== 'booster_pack' ? () => setRipLot({ ...item, convert: true }) : null}
+                onSell={!product.archived_at && !item.cost_pending ? () => { const target = sealedSaleTarget(item, product); if (target) window.dispatchEvent(new CustomEvent("bindarr_sell_item", { detail: { ...target, onSold: onChanged } })); } : null} />
             ))}
           </tbody>
         </table>
@@ -872,7 +880,7 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
   );
 }
 
-function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip, onSell }) {
+function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip, onConvert, onSell }) {
   const [remaining, setRemaining] = useState(String(lot.remaining_quantity));
   const [cost, setCost] = useState(lot.total_cost);
   const canRip = !lot.archived_at && lot.remaining_quantity > 0;
@@ -885,18 +893,19 @@ function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip, onSell }) {
       <td>{lot.purchased_at || '—'}</td>
       <td>{lot.quantity}</td>
       <td>
-        <input className="input-control" value={cost} onChange={e => setCost(e.target.value)} aria-label={t('sealed.cost')} style={{ width: '6rem' }} />
+        {lot.cost_pending ? t('sealed.allocationPending') : <input className="input-control" value={cost} onChange={e => setCost(e.target.value)} disabled={!!lot.parent_opening_id} aria-label={t('sealed.cost')} style={{ width: '6rem' }} />}
       </td>
       <td>
-        <input className="input-control" value={remaining} onChange={e => setRemaining(e.target.value)} aria-label={t('sealed.remaining')} style={{ width: '4.2rem' }} />
+        <input className="input-control" value={remaining} onChange={e => setRemaining(e.target.value)} disabled={!!lot.parent_opening_id} aria-label={t('sealed.remaining')} style={{ width: '4.2rem' }} />
       </td>
-      <td className="hide-mobile">{lot.currency} {lot.remaining_cost}</td>
+      <td className="hide-mobile">{lot.cost_pending ? t('sealed.allocationPending') : `${lot.currency} ${lot.remaining_cost}`}</td>
       <td className="hide-mobile">{lot.location_name || '—'}</td>
       <td>
         <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {canRip && <button className="btn btn-primary" type="button" onClick={onRip}>{t('sealed.letItRip')}</button>}
+          {canRip && onConvert && <button className="btn btn-secondary" type="button" onClick={onConvert}>{t('sealed.convertToPacks')}</button>}
           {canRip && onSell && <button className="btn btn-secondary" type="button" onClick={onSell} title={`Sell from lot #${lot.id}`}>Sell</button>}
-          <button className="btn btn-secondary" type="button" onClick={() => onUpdateLot(lot, { remaining_quantity: Number(remaining), total_cost: cost })}>{t('sealed.save')}</button>
+          {!lot.parent_opening_id && <button className="btn btn-secondary" type="button" onClick={() => onUpdateLot(lot, { remaining_quantity: Number(remaining), total_cost: cost })}>{t('sealed.save')}</button>}
           <button className="btn btn-secondary" type="button" onClick={() => onArchiveLot(lot, !lot.archived_at)}>
             {lot.archived_at ? t('sealed.restore') : t('sealed.archive')}
           </button>

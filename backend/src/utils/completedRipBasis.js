@@ -9,6 +9,7 @@ async function forCopy(db,user,copy,openingId) {
  if(new Set(links.map(r=>r.opening_id)).size!==1)throw fail('Copy has ambiguous opening links; acquisition reconciliation is required');
  const opening=await db.get('SELECT * FROM sealed_opening WHERE id=? AND user_id=?',[openingId,user]);
  if(!opening)return {reason:'The linked opening is unavailable'};
+ if(opening.cost_pending===1)return {reason:'Parent product market-value allocation is pending'};
  if(opening.entry_complete!==1)return {reason:'The opening is not marked Pull Complete'};
  if(opening.currency!=='USD')return {reason:'Historical non-USD opening basis requires an explicit conversion policy'};
  if(!valid(opening.cost_cents))throw fail('Invalid opening cost');

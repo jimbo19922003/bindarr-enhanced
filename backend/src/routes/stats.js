@@ -6,6 +6,7 @@ const { summarizePerformance } = require('../utils/openingPerformance');
 const { createReportingValuation } = require('../utils/reportingValuation');
 const { currentPortfolio } = require('../utils/currentPortfolio');
 const { createDashboardSetTotals, setKey } = require('../utils/dashboardSetTotals');
+const { readSetCompletion } = require('../utils/setCompletion');
 const router = express.Router();
 const round = n => Number(n.toFixed(2));
 
@@ -84,18 +85,7 @@ router.get('/stats', async (req, res) => {
       if (line.line_value == null) continue;
       sets.add({ game: 'pokemon', id: line.set_id, name: line.set_name, value: line.line_value });
     }
-    const setProgress = [];
-    const progress = await db.all(`SELECT cc.game, cc.set_id, MAX(cc.set_name) AS set_name,
-        COUNT(DISTINCT CASE WHEN trim(cc.number) != '' THEN lower(ltrim(trim(cc.number), '0')) END) AS owned,
-        (SELECT COALESCE(NULLIF(s.printed_total, 0), NULLIF(s.total, 0)) FROM sets s WHERE s.id = cc.set_id AND s.game = cc.game) AS size
-        FROM collection c JOIN card_cache cc ON cc.id = c.card_id
-        WHERE c.user_id = ? AND c.list_type = 'collection'${game ? ' AND cc.game = ?' : ''}
-        GROUP BY cc.game, cc.set_id`, game ? [req.user.id, game] : [req.user.id]);
-    for (const row of progress) if (row.size) setProgress.push({
-      setId: row.set_id, setGame: row.game, setName: row.set_name || 'Unknown set',
-      ownedUnique: row.owned, totalCards: row.size,
-      percent: Math.min(Math.round(row.owned / row.size * 100), 100),
-    });
+    const setProgress = await readSetCompletion(db, req.user.id, game);
     const change = (before, after) => before > 0 ? { available: true, abs: round(after - before), pct: round((after - before) / before * 100) } : { available: false, abs: null, pct: null };
     const unavailable = () => ({ available: false, abs: null, pct: null });
     const gain = round(portfolio.totalValue - portfolio.totalSpent);

@@ -10,7 +10,7 @@ import CardImage from './CardImage';
 let nextLine = 0;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const normalizedNumber = value => String(value || '').replace(/^#/, '').split('/')[0].trim().toLowerCase().replace(/^0+(?=\d)/, '');
-const initialPull = pull => ({ ...pull, key: `saved-${pull.id}`, quantity: String(pull.quantity), bulk: !pull.card_id, lineMode: pull.line_value != null || pull.opened_line_value != null, current_value: String(pull.current_value ?? ''), line_value: String(pull.line_value ?? ''), value_at_opening: String(pull.value_at_opening ?? '') });
+const initialPull = pull => ({ ...pull, key: `saved-${pull.id}`, quantity: String(pull.quantity), bulk: !pull.card_id, lineMode: pull.line_value != null, current_value: String(pull.current_value ?? ''), line_value: String(pull.line_value ?? ''), value_at_opening: String(pull.value_at_opening ?? '') });
 function OwnershipBadge({ info, loading }) {
   if (!info) return null;
   const fresh = info.kind === 'new' || info.kind === 'first';
@@ -24,11 +24,15 @@ function lineQuote(card, printing) {
   const general = Number(resolveCardPrice(card));
   return general > 0 && Number.isFinite(general) ? { amount: general, estimate: true } : null;
 }
-export default function RipForm({ product, lot, existingOpening, busy, saveStatus, onStopWaiting, t, showToast, onClose, onSubmit }) {
+export default function RipForm({ product, lot, existingOpening, convertToPacks = false, busy, saveStatus, onStopWaiting, t, showToast, onClose, onSubmit }) {
   const editing = !!existingOpening, currency = existingOpening?.currency || lot.currency;
+  const conversionCents = convertToPacks ? BigInt(lot.remaining_cost_cents) / BigInt(lot.remaining_quantity) : null;
+  const conversionCost = conversionCents == null ? null : `${conversionCents / 100n}.${String(conversionCents % 100n).padStart(2, '0')}`;
   const inputRef = useRef(null), chosen = useRef(false), request = useRef(0), mutation = useRef(null), live = useRef(true);
   const [openedAt, setOpenedAt] = useState(() => existingOpening?.opened_at || today());
   const [notes, setNotes] = useState(() => existingOpening?.notes || '');
+  const [packGroups, setPackGroups] = useState(() => [{ key: ++nextLine, name: t('sealed.defaultPackName', { name: product.set_name || product.name }), set_name: product.set_name || '', set_id: product.set_id || '', quantity: '1', market_value: '' }]);
+  const [promosComplete, setPromosComplete] = useState(true);
   const [sets, setSets] = useState([]), [setId, setSetId] = useState(''), [resolved, setResolved] = useState(null), [setError, setSetError] = useState(false);
   const [query, setQuery] = useState(''), [pulls, setPulls] = useState(() => (existingOpening?.pulls || []).map(initialPull));
   const [removed, setRemoved] = useState([]), [matches, setMatches] = useState([]), [looking, setLooking] = useState(false);
@@ -106,15 +110,17 @@ export default function RipForm({ product, lot, existingOpening, busy, saveStatu
   const remove = pull => { setRemoved(current => [pull, ...current]); setPulls(current => current.filter(row => row.key !== pull.key)); };
   const submit = event => {
     event.preventDefault(); if (busy || looking) return;
-    const payload = { opened_at: openedAt, notes, entry_complete: true, pulls: pulls.map(pull => {
+    const payload = { opened_at: openedAt, notes, entry_complete: convertToPacks ? promosComplete : true, pulls: pulls.map(pull => {
       const row = { name: pull.name.trim() || t('sealed.otherCards'), quantity: Number(pull.quantity), card_id: pull.card_id || '', set_name: pull.set_name || '', number: pull.number || '', ...(pull.image_url ? { image_url: pull.image_url } : {}) };
       if (pull.id) { row.id = pull.id; if (pull.lineMode) { if (pull.line_value !== '') row.line_value = pull.line_value; } else if (pull.current_value !== '') row.current_value = pull.current_value; }
       else if (pull.bulk) { if (pull.line_value.trim()) row.line_value = pull.line_value.trim(); if (pull.value_at_opening.trim()) row.opened_line_value = pull.value_at_opening.trim(); }
       else { row.printing = pull.printing; if (String(pull.current_value || '').trim()) row.current_value = String(pull.current_value).trim(); }
       return row;
     }) };
-    if (editing) {
-      payload.base = existingOpening; const signature = JSON.stringify(payload);
+    if (convertToPacks) payload.packs = packGroups.map(({ name, set_name, set_id, quantity, market_value }) => ({ name, set_name, set_id, quantity: Number(quantity), market_value, language: product.language || 'English' }));
+    if (editing || convertToPacks) {
+      if (editing) payload.base = existingOpening;
+      const signature = JSON.stringify(payload);
       if (mutation.current?.signature !== signature) mutation.current = { signature, id: crypto.randomUUID() };
       payload.request_id = mutation.current.id;
     }
@@ -122,8 +128,8 @@ export default function RipForm({ product, lot, existingOpening, busy, saveStatu
   };
   return <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', width: '100%' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
-      <div><h3 style={{ margin: 0 }}>{editing ? 'Edit rip' : t('sealed.letItRip')}</h3><p>{product.name || product.set_name}</p>
-        <p>{editing ? `Original opening cost: ${currency} ${existingOpening.cost} — unchanged by editing` : t('sealed.ripLot', { cost: `${currency} ${lot.total_cost}`, date: lot.purchased_at ? ` on ${lot.purchased_at}` : '' })}</p></div>
+      <div><h3 style={{ margin: 0 }}>{convertToPacks ? t('sealed.convertToPacks') : editing ? 'Edit rip' : t('sealed.letItRip')}</h3><p>{product.name || product.set_name}</p>
+        <p>{existingOpening?.cost_pending || lot.cost_pending ? t('sealed.pendingCostHelp') : editing ? `Original opening cost: ${currency} ${existingOpening.cost} — unchanged by editing` : convertToPacks ? t('sealed.conversionSourceCost', { cost: `${currency} ${conversionCost}` }) : t('sealed.ripLot', { cost: `${currency} ${lot.total_cost}`, date: lot.purchased_at ? ` on ${lot.purchased_at}` : '' })}</p></div>
       <button className="btn btn-secondary" type="button" onClick={onClose} disabled={busy} aria-label={t('common.cancel')}><X size={18} /></button>
     </div>
     {editing && <OpeningBasisPanel openingId={existingOpening.id} />}
@@ -140,6 +146,21 @@ export default function RipForm({ product, lot, existingOpening, busy, saveStatu
       {setError && <p role="status">Could not load the set list. Use all-set name search or a set ID override.</p>}
       <details><summary>Set ID override</summary><input className="input-control" aria-label="Card search set ID override" value={setId} onChange={e => changeSet(e.target.value)} /></details>
       <label>{t('sealed.notes')}<input className="input-control" value={notes} onChange={e => setNotes(e.target.value)} /></label>
+      {convertToPacks && <section style={{ display: 'grid', gap: '0.6rem' }}>
+        <h4>{t('sealed.packContents')}</h4>
+        <p>{t('sealed.conversionHelp', { currency })}</p>
+        {packGroups.map(group => <div key={group.key} style={{ border: '1px solid var(--border-glass)', padding: '0.6rem', display: 'grid', gap: '0.4rem' }}>
+          {['name', 'set_name', 'quantity', 'market_value'].map(field => <label key={field}>{t(`sealed.packField.${field}`, { currency })}
+            <input className="input-control" type={field === 'quantity' ? 'number' : 'text'} min={field === 'quantity' ? 1 : undefined} max={field === 'quantity' ? 500 : undefined}
+              required={field === 'name' || field === 'quantity'} inputMode={field === 'market_value' ? 'decimal' : undefined} value={group[field]}
+              onChange={e => setPackGroups(current => current.map(row => row.key === group.key ? { ...row, [field]: e.target.value, ...(field === 'set_name' ? { set_id: '' } : {}) } : row))} />
+          </label>)}
+          {packGroups.length > 1 && <button className="btn btn-secondary" type="button" onClick={() => setPackGroups(current => current.filter(row => row.key !== group.key))}>{t('sealed.removePackGroup')}</button>}
+        </div>)}
+        <button className="btn btn-secondary" type="button" disabled={packGroups.length >= 20} onClick={() => setPackGroups(current => [...current, { key: ++nextLine, name: '', set_name: '', set_id: '', quantity: '1', market_value: '' }])}>{t('sealed.addPackGroup')}</button>
+        <h4>{t('sealed.promos')}</h4>
+        <label><input type="checkbox" checked={promosComplete} onChange={e => setPromosComplete(e.target.checked)} /> {t('sealed.promosComplete')}</label>
+      </section>}
       <h4 style={{ margin: 0 }}>Searching: {searchSetLabel}</h4>
       <div style={{ display: 'flex', gap: '0.5rem' }}>
         <input ref={inputRef} className="input-control" placeholder={t('sealed.ripQuery')} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookup(); } }} />
@@ -168,7 +189,7 @@ export default function RipForm({ product, lot, existingOpening, busy, saveStatu
       </div>
       {removed.length > 0 && <button className="btn btn-secondary" type="button" onClick={() => { if (atLineLimit()) return; const [last, ...rest] = removed; setPulls(current => [last, ...current]); setRemoved(rest); }}>Undo last removal</button>}
       <button className="btn btn-secondary" type="button" onClick={() => !atLineLimit() && setPulls(current => [{ key: `new-${++nextLine}`, bulk: true, lineMode: true, card_id: '', name: t('sealed.otherCards'), quantity: '1', line_value: '', current_value: '', value_at_opening: '', set_name: product.set_name || '' }, ...current])}>{t('sealed.addBulk')}</button>
-      <small>Saving records this rip as complete. You can edit its contents later unless a sale has frozen the opening&apos;s acquisition basis.</small>
+      <small>{convertToPacks ? t('sealed.conversionSaveHint') : 'Saving records this rip as complete. You can edit its contents later unless a sale has frozen the opening\'s acquisition basis.'}</small>
     </fieldset>
     {saveStatus && <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', color: saveStatus.error ? 'var(--accent-red)' : 'var(--text-secondary)' }}>
       <span style={{ flex: 1 }}>{saveStatus.error || t('sealed.savingRip', { seconds: saveStatus.seconds })}</span>
@@ -176,7 +197,7 @@ export default function RipForm({ product, lot, existingOpening, busy, saveStatu
     </div>}
     <div className="quick-add-footer"><div className="quick-add-footer-actions">
       <button className="btn btn-secondary" type="button" onClick={onClose} disabled={busy}>{t('common.cancel')}</button>
-      <button className="btn btn-primary" type="submit" disabled={busy || looking}>{busy ? t('sealed.saving') : editing ? 'Save changes' : t('sealed.addToCollection')}</button>
+      <button className="btn btn-primary" type="submit" disabled={busy || looking}>{busy ? t('sealed.saving') : convertToPacks ? t('sealed.convertToPacks') : editing ? 'Save changes' : t('sealed.addToCollection')}</button>
     </div></div>
   </form>;
 }

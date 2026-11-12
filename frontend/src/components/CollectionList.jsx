@@ -7,7 +7,7 @@ import { getPrintingBadgeLabel, getPrintingBadgeStyle, getFoilOverlayClass } fro
 import { getCardRarityBorder, getRarityBadgeLabel, getRarityBadgeStyle } from '../utils/cardRarity';
 import { sortCardsByOrder } from '../utils/cardSort';
 import { sortCardsBySetNumber } from '../utils/setCardOrder';
-import { inspectorCardForSetCard } from '../utils/setCardEntries';
+import { inspectorCardForSetCard, standardSetCompletion } from '../utils/setCardEntries';
 import { useMultiSelect } from '../utils/useMultiSelect';
 import { defaultGameFilter, gameOptions, GAMES, isGameEnabled, showGamePicker } from '../utils/games';
 import { langCode } from '../utils/languages';
@@ -74,6 +74,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   const [selectedSetKey, setSelectedSetKey] = useState('');
   const [setViewGame, setSetViewGame] = useState('pokemon');
   const [setViewLanguage, setSetViewLanguage] = useState('English');
+  const [fullSetCompletion, setFullSetCompletion] = useState(false);
   const [setCards, setSetCards] = useState([]);
   const [setCardsLoading, setSetCardsLoading] = useState(false);
   const [setCardsError, setSetCardsError] = useState('');
@@ -157,6 +158,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
     if (!collectionSetNavigation) return;
     setSetViewGame(collectionSetNavigation.game || 'pokemon');
     setSetViewLanguage('English');
+    setFullSetCompletion(Boolean(collectionSetNavigation.fullSetCompletion));
     setSelectedSetKey(`${collectionSetNavigation.game || 'pokemon'}:${collectionSetNavigation.setId}`);
     setSubTab('sets');
     onSetNavigationHandled?.();
@@ -581,6 +583,7 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
   const setProgressPercent = orderedSetCards.length
     ? Math.round(ownedSetCardCount / orderedSetCards.length * 100)
     : 0;
+  const standardCompletion = standardSetCompletion(selectedSet, collection, fullSetCompletion);
 
   return (
     <div>
@@ -719,13 +722,22 @@ function CollectionList({ statsTrigger, onUpdate, showToast, selectedCardFilter,
                 </button>
               )}
             </div>
+            {selectedSet && (
+              <>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.85rem', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                  <input type="checkbox" checked={fullSetCompletion} onChange={event => setFullSetCompletion(event.target.checked)} />
+                  {t('dash.fullSetCompletion')}
+                </label>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.5rem' }}>{t(fullSetCompletion ? 'dash.fullSetCompletionHint' : 'dash.baseSetCompletionHint')}</p>
+              </>
+            )}
             {hasSetSelection && !setCardsLoading && !setCardsError && orderedSetCards.length > 0 && (
               <p style={{ margin: '0.85rem 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                {t(selectedCustomSet?.completion_mode === 'printing' ? 'customSet.printingProgressSummary' : 'collection.setProgressSummary', {
+                {selectedCustomSet ? t(selectedCustomSet.completion_mode === 'printing' ? 'customSet.printingProgressSummary' : 'collection.setProgressSummary', {
                   owned: ownedSetCardCount,
                   total: orderedSetCards.length,
                   percent: setProgressPercent,
-                })}
+                }) : standardCompletion ? t('collection.setProgressSummary', standardCompletion) : t('dash.setCompletionUnavailable')}
               </p>
             )}
             {selectedCustomSet && customSetData?.truncated && (

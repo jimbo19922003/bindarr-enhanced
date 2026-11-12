@@ -37,6 +37,7 @@ function createSealedSalesRepository({connect}) {
         }
         const lot=await db.get('SELECT l.*,p.name AS product_name FROM sealed_lot l JOIN sealed_product p ON p.id=l.product_id AND p.user_id=l.user_id WHERE l.id=? AND l.user_id=? AND l.archived_at IS NULL AND p.archived_at IS NULL',[lotId,userId]);
         if (!lot) throw fail(404,'Active owned sealed lot not found');
+        if (await require('./sealedConversion').pendingLot(db,userId,lot.id)) throw fail(409,'Finalize the parent product market-value allocation before selling its packs');
         if (lot.currency!==currency) throw fail(400,'Sale proceeds and fees must use the acquisition lot currency; no implicit FX conversion');
         if (quantity>lot.remaining_quantity||lot.remaining_quantity<1) throw fail(409,'Insufficient sealed quantity');
         const calculated=calculateSale({proceedsCents,feesCents,remainingBasisCents:lot.remaining_cost_cents,remainingQuantity:lot.remaining_quantity,quantity});

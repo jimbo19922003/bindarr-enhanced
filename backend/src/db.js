@@ -1072,6 +1072,27 @@ async function initDb() {
     )
   `);
   await run(`CREATE INDEX IF NOT EXISTS idx_sealed_opening_user ON sealed_opening(user_id, product_id, id)`);
+  const openingCols = await all('PRAGMA table_info(sealed_opening)');
+  if (!openingCols.some(column => column.name === 'cost_pending')) {
+    await run('ALTER TABLE sealed_opening ADD COLUMN cost_pending INTEGER NOT NULL DEFAULT 0');
+  }
+  await run(`CREATE TABLE IF NOT EXISTS sealed_product_conversion (
+    opening_id INTEGER PRIMARY KEY REFERENCES sealed_opening(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source_cost_cents INTEGER NOT NULL CHECK(source_cost_cents >= 0),
+    allocation_status TEXT NOT NULL DEFAULT 'pending' CHECK(allocation_status IN ('pending', 'finalized')),
+    allocation_json TEXT,
+    request_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    UNIQUE(user_id, request_id)
+  )`);
+  await run(`CREATE TABLE IF NOT EXISTS sealed_pack_lot (
+    lot_id INTEGER PRIMARY KEY REFERENCES sealed_lot(id) ON DELETE CASCADE,
+    opening_id INTEGER NOT NULL REFERENCES sealed_product_conversion(opening_id),
+    market_unit_cents INTEGER CHECK(market_unit_cents >= 0),
+    allocated_cost_cents INTEGER CHECK(allocated_cost_cents >= 0)
+  )`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_sealed_pack_parent ON sealed_pack_lot(opening_id)`);
   await run(`
     CREATE TABLE IF NOT EXISTS sealed_pull (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
