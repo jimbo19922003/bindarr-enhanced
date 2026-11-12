@@ -5,6 +5,7 @@ const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const sealed = require('../utils/sealedInventory');
 const catalog = require('../utils/sealedCatalog');
+const tradeSealed = require('../utils/tradeSealed');
 
 const router = express.Router();
 
@@ -134,6 +135,36 @@ router.post('/sealed/catalog/sync', requireAdmin, (req, res) => {
 
 router.get('/sealed/catalog/status', requireAdmin, (_req, res) => {
   res.json(catalog.status());
+});
+
+router.get('/sealed/trade-listings', async (req, res) => {
+  try {
+    const listings = await db.all(`SELECT s.id AS listing_id, 'sealed:' || s.id AS entry_id,
+        s.product_id, s.lot_id, s.list_type,
+        CASE WHEN s.list_type = 'wishlist' THEN s.quantity ELSE l.remaining_quantity END AS quantity,
+        CASE WHEN p.archived_at IS NULL AND (s.list_type = 'wishlist'
+          OR (l.id IS NOT NULL AND l.archived_at IS NULL AND l.remaining_quantity > 0))
+          THEN 1 ELSE 0 END AS active
+      FROM trade_sealed_listing s
+      JOIN sealed_product p ON p.id = s.product_id AND p.user_id = s.user_id
+      LEFT JOIN sealed_lot l ON l.id = s.lot_id AND l.user_id = s.user_id AND l.product_id = s.product_id
+      WHERE s.user_id = ? ORDER BY s.id`, [req.user.id]);
+    res.json({ listings });
+  } catch (err) {
+    console.error('Failed to list sealed trade listings', err);
+    fail(res, 500, 'Failed to list sealed trade listings');
+  }
+});
+
+router.put('/sealed/trade-listings', async (req, res) => {
+  try {
+    const result = await db.withTransaction(() => tradeSealed.setListing(db, req.user.id, req.body || {}));
+    res.json(result);
+  } catch (err) {
+    if (err.status) return fail(res, err.status, err.message);
+    console.error('Failed to save sealed trade listing', err);
+    fail(res, 500, 'Failed to save sealed trade listing');
+  }
 });
 
 router.get('/sealed/products', async (req, res) => {

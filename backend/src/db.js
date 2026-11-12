@@ -1273,7 +1273,7 @@ async function initDb() {
     )
   `);
 
-  for (const statement of require('./utils/tradePortal').schema) await run(statement);
+  await require('./utils/tradePortal').prepare({ run, all });
 
   // --- PERFORMANCE INDEXES ---
   // `user_id` first, because it is the predicate on essentially every read in the

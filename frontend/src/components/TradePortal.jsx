@@ -1,92 +1,80 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useT } from '../utils/i18n';
-import { CURRENCIES } from '../utils/formatPrice';
+import { tradeApi as api, tradeEntryId, tradeItemDetails } from '../utils/tradeApi';
+import { Balance, Money } from './TradeShared';
+import { TRADE_SORTS, filterTradeCards, tradeGames } from '../utils/tradeSort';
 import './TradePortal.css';
 
-async function api(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-  return result;
-}
+const MAX_STACKS = 50;
+const MAX_CASH = 100000;
 
-function Money({ cents, currency }) {
-  const { t, locale } = useT();
-  return cents == null ? t('trade.unknown') : new Intl.NumberFormat(locale, {
-    style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2,
-  }).format(cents / 100);
-}
-
-function Balance({ quote, ownerView = false }) {
+function TradeTile({ card, quantity, onChange, currency, disabled, full }) {
   const { t } = useT();
-  const summary = quote.summary;
-  return <div className="trade-balance" aria-live="polite">
-    <div className="trade-columns">
-      {['requested', 'offered'].map(side => <div key={side}>
-        <strong>{t(ownerView ? `trade.owner.${side}` : `trade.visitor.${side}`)}</strong>
-        <p><Money cents={summary[side].known_cents} currency={summary.currency} />
-          {summary[side].unknown_quantity > 0 && <> + {t('trade.unpriced', { count: summary[side].unknown_quantity })}</>}
-        </p>
-      </div>)}
-    </div>
-    <strong>{t('trade.balance')}: {summary.difference_percent == null ? t('trade.unknown')
-      : `${summary.difference_percent > 0 ? '+' : ''}${summary.difference_percent}%`}</strong>
-    {summary.difference_cents != null && <> (<Money cents={summary.difference_cents} currency={summary.currency} />)</>}
-    <p className="trade-muted">{t('trade.formula')}</p>
-    <p className="trade-muted">{t('trade.estimateHint')}</p>
-    {quote.staleRates && <p role="status">{t('trade.staleRates')}</p>}
-  </div>;
+  const name = card.printed_name || card.name;
+  const select = () => onChange(card.entry_id, quantity ? 0 : 1);
+  return <article className={`trade-card ${quantity ? 'trade-selected' : ''}`}>
+    <button type="button" className="trade-card-select" aria-pressed={quantity > 0}
+      disabled={disabled || (!quantity && full)} onClick={select}
+      title={quantity ? t('trade.clickToRemove') : t('trade.clickToSelect')}>
+      {card.image_url ? <img src={card.image_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
+        : <span className="trade-card-placeholder" aria-hidden="true" />}
+      <span className="trade-card-body">
+        <strong className="trade-card-name">{name}</strong>
+        <span className="trade-muted">{card.kind === 'sealed' && `${t('trade.kind.sealed')} · ${t(`sealed.type.${card.product_type}`)} · `}
+          {tradeItemDetails(card).filter(Boolean).join(' / ')}</span>
+        <span><Money cents={card.unit_cents} currency={currency} /> {t(`trade.price.${card.price_state}`)}</span>
+        {card.price_varies && <span className="trade-muted">{t('trade.priceVaries')}</span>}
+      </span>
+    </button>
+    {quantity > 0 ? <div className="trade-stepper" role="group" aria-label={t('trade.quantityFor', { name })}>
+      <button type="button" className="btn btn-secondary" disabled={disabled}
+        aria-label={t('trade.decrease', { name })} onClick={() => onChange(card.entry_id, quantity - 1)}>−</button>
+      <span aria-live="polite">{t('trade.ofAvailable', { count: quantity, max: card.quantity })}</span>
+      <button type="button" className="btn btn-secondary" disabled={disabled || quantity >= Math.min(card.quantity, 10000)}
+        aria-label={t('trade.increase', { name })} onClick={() => onChange(card.entry_id, quantity + 1)}>+</button>
+    </div> : <p className="trade-muted trade-stepper">{t('trade.available.count', { count: card.quantity })}</p>}
+  </article>;
 }
 
-function CardPicker({ title, cards, selected, onChange, currency, disabled }) {
+function CardPicker({ title, cards, selected, onChange, currency, disabled, sort, game, kind, children }) {
   const { t } = useT();
   const [search, setSearch] = useState('');
-  const shown = cards.filter(card => `${card.name} ${card.printed_name} ${card.set_name} ${card.number} ${card.game}`.toLowerCase().includes(search.toLowerCase()));
+  const shown = filterTradeCards(cards, { search, game, sort, facets: { kind } });
+  const copies = Object.values(selected).reduce((sum, quantity) => sum + quantity, 0);
+  const full = Object.keys(selected).length >= MAX_STACKS;
   return <section className="glass-panel trade-picker">
     <h2>{title}</h2>
+    {children}
     <label>{t('trade.search')}
       <input type="search" value={search} onChange={event => setSearch(event.target.value)} />
     </label>
-    <p className="trade-muted">{t('trade.selected', { count: Object.keys(selected).length })}</p>
+    <p className="trade-muted">{t('trade.selected', { count: copies, stacks: Object.keys(selected).length })}</p>
     {!shown.length && <p>{t('trade.noCards')}</p>}
     <div className="trade-card-list">
-      {shown.map(card => <article key={card.entry_id} className={`trade-card ${selected[card.entry_id] ? 'trade-selected' : ''}`}>
-        {card.image_url && <img src={card.image_url} alt="" loading="lazy" referrerPolicy="no-referrer" />}
-        <div>
-          <label className="trade-card-name">
-            <input type="checkbox" checked={!!selected[card.entry_id]} disabled={disabled || (!selected[card.entry_id] && Object.keys(selected).length >= 50)}
-              onChange={event => onChange(card.entry_id, event.target.checked ? 1 : 0)} />
-            {card.printed_name || card.name}
-          </label>
-          <p>{card.set_name} #{card.number}</p>
-          <p className="trade-muted">{card.game} / {card.printing} / {card.language} / {card.condition}
-            {card.grader && card.grader !== 'Raw' ? ` / ${card.grader} ${card.grade ?? ''}` : ''}</p>
-          <p><Money cents={card.unit_cents} currency={currency} /> {t(`trade.price.${card.price_state}`)}</p>
-          <label>{t('trade.quantity', { max: card.quantity })}
-            <input type="number" min="0" max={Math.min(card.quantity, 10000)} step="1"
-              value={selected[card.entry_id] || 0} disabled={disabled || (!selected[card.entry_id] && Object.keys(selected).length >= 50)}
-              onChange={event => {
-                const quantity = Number(event.target.value);
-                if (Number.isInteger(quantity) && quantity >= 0 && quantity <= Math.min(card.quantity, 10000)) onChange(card.entry_id, quantity);
-              }} />
-          </label>
-        </div>
-      </article>)}
+      {shown.map(card => <TradeTile key={card.entry_id} card={card} quantity={selected[card.entry_id] || 0}
+        onChange={onChange} currency={currency} disabled={disabled} full={full} />)}
     </div>
   </section>;
 }
 
-const selectionPayload = selected => Object.entries(selected).map(([id, quantity]) => ({ entry_id: Number(id), quantity }));
+const selectionPayload = selected => Object.entries(selected).map(([id, quantity]) => ({ entry_id: tradeEntryId(id), quantity }));
+
+function parseCash(value) {
+  if (!value.trim()) return { cents: 0, valid: true };
+  const amount = Number(value);
+  const valid = Number.isFinite(amount) && amount >= 0 && amount <= MAX_CASH;
+  return { cents: valid ? Math.round(amount * 100) : 0, valid };
+}
 
 export default function TradePortal({ tradeToken }) {
   const { t } = useT();
   const [page, setPage] = useState(null);
   const [requested, setRequested] = useState({});
   const [offered, setOffered] = useState({});
+  const [cash, setCash] = useState('');
+  const [sort, setSort] = useState('name');
+  const [game, setGame] = useState('');
+  const [kind, setKind] = useState('');
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState('');
   const [error, setError] = useState('');
@@ -97,12 +85,17 @@ export default function TradePortal({ tradeToken }) {
   const [refresh, setRefresh] = useState(0);
   const submission = useRef(null);
   const base = `/api/trade-public/${encodeURIComponent(tradeToken)}`;
-  const payload = JSON.stringify({ requested: selectionPayload(requested), offered: selectionPayload(offered) });
-  const bothSides = Object.keys(requested).length > 0 && Object.keys(offered).length > 0;
+  const cashValue = parseCash(cash);
+  const payload = JSON.stringify({
+    requested: selectionPayload(requested), offered: selectionPayload(offered),
+    ...(cashValue.cents ? { cash_cents: cashValue.cents } : {}),
+  });
+  const bothSides = Object.keys(requested).length > 0 && (Object.keys(offered).length > 0 || cashValue.cents > 0) && cashValue.valid;
+  const games = page ? tradeGames(page.available, page.wanted) : [];
 
   useEffect(() => {
     const controller = new AbortController();
-    setPage(null); setError(''); setQuote(null); setRequested({}); setOffered({});
+    setPage(null); setError(''); setQuote(null); setRequested({}); setOffered({}); setCash('');
     api(base, { signal: controller.signal }).then(setPage).catch(err => {
       if (err.name !== 'AbortError') setError(err.message);
     });
@@ -156,11 +149,41 @@ export default function TradePortal({ tradeToken }) {
     {error && <p role="alert">{error}</p>}
     {!page && !error && <p role="status">{t('common.loading')}</p>}
     {page && <>
+      <section className="glass-panel trade-toolbar" aria-label={t('trade.sortLabel')}>
+        <label>{t('trades.binders.facet.kind')}
+          <select value={kind} onChange={event => setKind(event.target.value)}>
+            <option value="">{t('trades.binders.any')}</option>
+            {['card', 'sealed'].map(option => <option key={option} value={option}>{t(`trade.kind.${option}`)}</option>)}
+          </select>
+        </label>
+        <label>{t('trade.sortLabel')}
+          <select value={sort} onChange={event => setSort(event.target.value)}>
+            {TRADE_SORTS.map(option => <option key={option} value={option}>{t(`trade.sort.${option}`)}</option>)}
+          </select>
+        </label>
+        {games.length > 1 && <label>{t('trade.game')}
+          <select value={game} onChange={event => setGame(event.target.value)}>
+            <option value="">{t('trade.allGames')}</option>
+            {games.map(option => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </label>}
+        <p className="trade-muted">{t('trade.selectHint')}</p>
+      </section>
       <div className="trade-columns">
         <CardPicker title={t('trade.available')} cards={page.available} selected={requested}
-          onChange={change(setRequested)} currency={page.currency} disabled={busy} />
+          onChange={change(setRequested)} currency={page.currency} disabled={busy} sort={sort} game={game} kind={kind} />
         <CardPicker title={t('trade.wanted')} cards={page.wanted} selected={offered}
-          onChange={change(setOffered)} currency={page.currency} disabled={busy} />
+          onChange={change(setOffered)} currency={page.currency} disabled={busy} sort={sort} game={game} kind={kind}>
+          <div className="trade-cash">
+            <label>{t('trade.cash', { currency: page.currency })}
+              <input type="number" min="0" max={MAX_CASH} step="0.01" inputMode="decimal" value={cash}
+                disabled={busy || !!receipt} aria-invalid={!cashValue.valid}
+                onChange={event => { setCash(event.target.value); setReceipt(null); }} />
+            </label>
+            <p className="trade-muted">{t('trade.cashHint')}</p>
+            {!cashValue.valid && <p role="alert">{t('trade.cashInvalid', { max: MAX_CASH })}</p>}
+          </div>
+        </CardPicker>
       </div>
       <form className="glass-panel trade-proposal" onSubmit={submit}>
         <h2>{t('trade.proposal')}</h2>
@@ -186,133 +209,4 @@ export default function TradePortal({ tradeToken }) {
       </form>
     </>}
   </main>;
-}
-
-function ProposalCards({ title, cards, currency }) {
-  return <section>
-    <h4>{title}</h4>
-    <ul className="trade-snapshot">{cards.map(card => <li key={card.entry_id}>
-      <strong>{card.quantity}x {card.printed_name || card.name}</strong>
-      <p>{card.set_name} #{card.number} / {card.game} / {card.printing} / {card.language} / {card.condition}
-        {card.grader && card.grader !== 'Raw' ? ` / ${card.grader} ${card.grade ?? ''}` : ''}</p>
-      <Money cents={card.unit_cents} currency={currency} />
-    </li>)}</ul>
-  </section>;
-}
-
-export function TradeSharing({ origin }) {
-  const { t } = useT();
-  const [settings, setSettings] = useState(null);
-  const [savedEnabled, setSavedEnabled] = useState(false);
-  const [requests, setRequests] = useState([]);
-  const [nextBefore, setNextBefore] = useState(null);
-  const [webhook, setWebhook] = useState('');
-  const [removeWebhook, setRemoveWebhook] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const load = useCallback(async (signal) => {
-    const [config, inbox] = await Promise.all([api('/api/trade/settings', { signal }), api('/api/trade/requests', { signal })]);
-    setSettings(config); setSavedEnabled(config.enabled);
-    setRequests(inbox.requests); setNextBefore(inbox.next_before);
-  }, []);
-  useEffect(() => {
-    const controller = new AbortController();
-    load(controller.signal).catch(err => { if (err.name !== 'AbortError') setError(err.message); });
-    return () => controller.abort();
-  }, [load]);
-
-  const act = async work => {
-    setBusy(true); setError(''); setNotice('');
-    try { await work(); }
-    catch (err) { setError(err.message); }
-    finally { setBusy(false); }
-  };
-  const save = event => {
-    event.preventDefault();
-    act(async () => {
-      const config = await api('/api/trade/settings', { method: 'PUT', body: {
-        enabled: settings.enabled, currency: settings.currency,
-        ...(removeWebhook ? { discord_webhook: '' } : webhook.trim() ? { discord_webhook: webhook.trim() } : {}),
-      } });
-      setSettings(config); setSavedEnabled(config.enabled);
-      setWebhook(''); setRemoveWebhook(false); setNotice(t('trade.saved'));
-    });
-  };
-  const url = settings ? `${origin.replace(/\/$/, '')}/trade/${settings.token}` : '';
-  return <section className="glass-panel trade-settings">
-    <h3>{t('trade.settingsTitle')}</h3>
-    <p>{t('trade.setupHint')}</p>
-    <p className="trade-muted">{t('trade.separateHint')}</p>
-    {error && <p role="alert">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
-    {!settings ? <button className="btn btn-secondary" disabled={busy} onClick={() => act(() => load())}>{t('trade.refresh')}</button> : <>
-      <form onSubmit={save} className="trade-config">
-        <label><input type="checkbox" checked={settings.enabled} disabled={busy}
-          onChange={event => setSettings(previous => ({ ...previous, enabled: event.target.checked }))} /> {t('trade.enable')}</label>
-        <label>{t('trade.currency')}
-          <select value={settings.currency} disabled={busy} onChange={event => setSettings(previous => ({ ...previous, currency: event.target.value }))}>
-            {CURRENCIES.map(currency => <option key={currency.code} value={currency.code}>{currency.label}</option>)}
-          </select>
-        </label>
-        <label>{t('trade.webhook')}
-          <input type="password" autoComplete="new-password" value={webhook} maxLength={400} disabled={busy || removeWebhook}
-            onChange={event => setWebhook(event.target.value)} />
-        </label>
-        <p className="trade-muted">{t(settings.webhook_configured ? 'trade.webhookConfigured' : 'trade.webhookHint')}</p>
-        {settings.webhook_configured && <label><input type="checkbox" checked={removeWebhook} disabled={busy}
-          onChange={event => setRemoveWebhook(event.target.checked)} /> {t('trade.removeWebhook')}</label>}
-        <button className="btn btn-primary" disabled={busy}>{t('common.save')}</button>
-      </form>
-      <p role="status">{t(savedEnabled ? 'trade.sharingActive' : 'trade.sharingInactive')}</p>
-      {settings.enabled !== savedEnabled && <p role="status">{t('trade.saveEnableChange')}</p>}
-      {savedEnabled && <label>{t('trade.link')}<input readOnly value={url} onFocus={event => event.target.select()} /></label>}
-      <div className="trade-actions">
-        <button className="btn btn-secondary" disabled={busy || !savedEnabled} onClick={() => act(async () => {
-          await navigator.clipboard.writeText(url); setNotice(t('trade.copied'));
-        })}>{t('trade.copy')}</button>
-        {savedEnabled && <a className="btn btn-secondary" href={url} target="_blank" rel="noopener noreferrer">{t('trade.preview')}</a>}
-        <button className="btn btn-secondary" disabled={busy} onClick={() => {
-          if (window.confirm(t('trade.rotateConfirm'))) act(async () => {
-            const config = await api('/api/trade/rotate', { method: 'POST' });
-            setSettings(config); setSavedEnabled(config.enabled); setNotice(t('trade.rotated'));
-          });
-        }}>{t('trade.rotate')}</button>
-      </div>
-    </>}
-    <div className="trade-actions">
-      <h3>{t('trade.inbox')}</h3>
-      <button className="btn btn-secondary" disabled={busy} onClick={() => act(() => load())}>{t('trade.refresh')}</button>
-    </div>
-    <p className="trade-muted">{t('trade.inboxHint')}</p>
-    {!requests.length && <p>{t('trade.emptyInbox')}</p>}
-    {requests.map(request => <details key={request.id} className="trade-inbox-item">
-      <summary>#{request.id} - {request.discord_contact} - {new Date(`${request.created_at.replace(' ', 'T')}Z`).toLocaleString()}</summary>
-      <p>{t('trade.contact')}: <strong>{request.discord_contact}</strong></p>
-      <p className="trade-message">{request.message}</p>
-      <div className="trade-columns">
-        <ProposalCards title={t('trade.owner.requested')} cards={request.proposal.requested} currency={request.proposal.summary.currency} />
-        <ProposalCards title={t('trade.owner.offered')} cards={request.proposal.offered} currency={request.proposal.summary.currency} />
-      </div>
-      <Balance quote={request.proposal} ownerView />
-      <p role="status">{t(`trade.notification.${request.notification}`)}</p>
-      <div className="trade-actions">
-        {request.notification !== 'delivered' && <button className="btn btn-secondary" disabled={busy || !settings?.webhook_configured}
-          onClick={() => act(async () => {
-            const result = await api(`/api/trade/requests/${request.id}/notify`, { method: 'POST' });
-            setRequests(previous => previous.map(item => item.id === request.id ? { ...item, notification: result.notification } : item));
-          })}>{t('trade.retryNotification')}</button>}
-        <button className="btn btn-secondary" disabled={busy} onClick={() => {
-          if (window.confirm(t('trade.deleteConfirm'))) act(async () => {
-            await api(`/api/trade/requests/${request.id}`, { method: 'DELETE' });
-            setRequests(previous => previous.filter(item => item.id !== request.id));
-          });
-        }}>{t('common.delete')}</button>
-      </div>
-    </details>)}
-    {nextBefore && <button className="btn btn-secondary" disabled={busy} onClick={() => act(async () => {
-      const inbox = await api(`/api/trade/requests?before=${nextBefore}`);
-      setRequests(previous => [...previous, ...inbox.requests]); setNextBefore(inbox.next_before);
-    })}>{t('trade.loadMore')}</button>}
-  </section>;
 }

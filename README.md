@@ -155,27 +155,78 @@ Alternatively, edit an owned copy and check **Listed in Trade Binder**, or
 select specific copies and use **Mark Trade**. **For Trade Only** filters your
 collection to those copies. Put wanted cards in **Collection → Wishlist**.
 
-Under **Settings → Trade-only sharing**, choose the valuation currency, enable
-anonymous proposals, save, and copy the independent trade link. Visitors see
-available copies and wanted cards side by side (stacked on phones), select
-quantities on both sides, and send a proposal with their Discord username or
-profile link and an optional message. No account is needed. This is a virtual
+For sealed products, expand a product under **Sealed** and use **Mark for trade**
+on its purchase lot. The listing follows that lot's remaining stock; opening,
+selling or trading units reduces availability automatically. Lots stay separate
+so their purchase costs and pack sources cannot be confused. **Remove from trade**
+only removes the listing, not the stock.
+
+Use **Sealed → Add → search → Add to wishlist** to want a sealed product without
+recording a purchase. Alternatively create one manually without **Add purchase
+lot**, enter the wanted quantity and save. Manage quantities in **Sealed →
+Wishlist**. Sealed wishlist entries do not count as owned inventory or spending.
+Both sealed trade listings and wishlist entries can be placed in trade binders,
+offered alongside cards, and balanced with cash.
+
+Everything else lives in the top-level **Trades** tab (an admin can hide it like
+other optional tabs). Under **Trades → Settings**, choose the valuation currency,
+enable anonymous proposals, save, and copy the independent master trade link,
+which lists every trade copy, listed sealed lot and wishlist item. Visitors see
+available and wanted items side by side (stacked on phones), click an
+item to select it (a highlighted border marks the selection), use − / + to
+change the quantity, sort both lists by name, value, set/number or copy count,
+and send a proposal with their Discord username or profile link and an optional
+message. Identical copies (same card, printing, condition, language and
+grade) are shown as one stack with a copy count; different prints or
+conditions stay separate. Visitors may add **+ Cash** to their side, either to
+balance a trade or to buy your trade cards outright with no wanted cards
+offered. Cards that are not on your wanted list can be described in the
+message. No account is needed. This is a virtual
 trade list; no physical storage binder is required.
 
 The comparison uses current cached quotes converted to the owner's chosen
 currency, including per-copy market-value overrides where present. Its percentage
 is `(offered − requested) / requested × 100`: positive means the visitor offers
 more value. Missing prices/FX or a zero comparison value leave the percentage
-unknown. Fallback finish/grade quotes are estimates; shipping and cash are not
-included. There is no required fairness threshold. The server revalidates the
+unknown. Fallback finish/grade quotes are estimates; any cash the visitor adds
+counts on the offered side, while shipping is not included. Stacked copies are
+priced individually (lowest-numbered copies are assigned first). There is no required fairness threshold. The server revalidates the
 advertised copies and quantities and calculates its own request-time snapshot.
 Proposals never reserve, remove, transfer, or automatically accept cards.
 
-Read proposals in **Settings → Trade request inbox**. Discord contacts are
+**Trades → Binders** shows the master list and any custom trade binders. Each
+binder has its own name, link and on/off switch, and contains only the trade
+cards, sealed lots and wishlist items you put in it. A binder link works even when the master
+link is disabled. Click stacks to select them, then add, remove or move them
+between binders, or **Unlist** them (trade copies become ordinary collection
+copies; wanted entries leave the wishlist). Currency and the Discord webhook are
+shared by all links.
+
+Read proposals in **Trades → Inbox**, filtered by status: **New**, **Active**
+(being negotiated), **Declined**, **Archived** or **Completed**. Each request
+shows the binder it came from and a private note. Discord contacts are
 self-reported, not authenticated identities: verify them and arrange any trade
 directly. The inbox records contact, message, selected copies, estimated values
 and notification status independently of subsequent inventory/price changes.
-Delete proposals when no longer needed.
+Delete proposals when no longer needed (completed trades are kept).
+
+**Complete trade** records the agreed deal after a review step and a
+confirmation. Choose the cards and sealed quantities you gave and received (adjusting
+their agreed values), any cash in either direction, any other value received,
+and the date. Bookkeeping is in USD and treats the trade as a fair-value barter:
+each given copy becomes a sale in **Sales History** whose proceeds are its share
+of (received item value + other value + cash received − cash paid), split in
+proportion to total market value including quantities (or evenly per unit if
+values are unavailable). Received cards are added to your collection with
+their agreed value as the purchase price, so lifetime spend increases by that
+amount. Received sealed products create new purchase lots at the agreed cost;
+given sealed units consume the selected lot's cost basis and appear in Sales
+History. Partial trades keep the remaining lot listed. Sealed sales are recorded
+in the lot's currency, with explicit FX conversion for the USD trade totals;
+unavailable exchange rates block completion rather than inventing a value.
+Wanted card and sealed quantities can be decremented automatically. A completed trade
+cannot be reopened or deleted. **Trades → History** lists completed trades with
+totals.
 
 For optional notifications, create a Discord channel webhook under **Edit Channel
 → Integrations → Webhooks**, and save its HTTPS `discord.com` webhook URL in the
@@ -189,15 +240,16 @@ outbound HTTPS access. Protect database backups, which include the webhook and
 proposal contacts.
 
 Trade-only tokens cannot unlock the collection-sharing API. Disable trade
-sharing to revoke access, or **Revoke and replace link** to invalidate all old
-trade links while retaining saved proposals. Anonymous reads, quote requests and
+sharing to revoke access, or **Revoke and replace link** to invalidate the old master
+link (binder links rotate separately) while retaining saved proposals. Anonymous reads, quote requests and
 submissions are rate-limited (submissions: five per hour per IP and fifty per hour
 per trade link). Configure `TRUST_PROXY` correctly behind a proxy; visitors sharing
 an IP also share its limit.
 
 **Collection Sharing remains separate**: its older Collection/Trade Binder/
 Wishlist links still expose all three tabs with the same collection token.
-Leave that feature disabled if you want to share *only* trade/wanted cards.
+Leave that feature disabled if you want to share *only* trade/wanted cards. Its
+legacy trade link is shown read-only under **Trades → Settings**.
 
 ### Hiding tabs
 

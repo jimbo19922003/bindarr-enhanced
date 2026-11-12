@@ -103,6 +103,24 @@ test('real server: isolated trade sharing, anonymous proposals, scoped inbox and
   assert.deepEqual((await call('/api/trade/requests', 'GET', undefined, other)).body.requests, []);
   assert.equal((await call(`/api/trade/requests/${saved.body.id}`, 'DELETE', undefined, other)).status, 404);
 
+  assert.equal((await call('/api/trade/requests/counts', 'GET', undefined, auth)).body.new, 1);
+  const updated = await call(`/api/trade/requests/${saved.body.id}`, 'PATCH', {status: 'active', owner_note: 'Meeting Friday'}, auth);
+  assert.equal(updated.status, 200, JSON.stringify(updated.body));
+  assert.equal(updated.body.status, 'active');
+  assert.equal((await call(`/api/trade/requests/${saved.body.id}`, 'PATCH', {status: 'active'}, other)).status, 404);
+  assert.deepEqual((await call('/api/trade/requests?status=active', 'GET', undefined, auth)).body.requests.map(row => row.id), [saved.body.id]);
+  const created = await call('/api/trade/binders', 'POST', {name: 'Friday meetup'}, auth);
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal((await call('/api/trade/binder-items', 'PUT', {entry_ids: [entries[0].id], add_to: [created.body.id]}, other)).status, 404);
+  assert.equal((await call('/api/trade/binder-items', 'PUT', {entry_ids: [entries[0].id], add_to: [created.body.id]}, auth)).status, 200);
+  const binderListing = await call(`/api/trade-public/${created.body.token}`);
+  assert.equal(binderListing.status, 200);
+  assert.equal(binderListing.body.available.length, 1);
+  assert.equal(binderListing.body.wanted.length, 0);
+  assert.deepEqual((await call('/api/trade/items', 'GET', undefined, auth)).body.available[0].binder_ids, [created.body.id]);
+  assert.equal((await call(`/api/trade/binders/${created.body.id}`, 'PUT', {enabled: false}, auth)).status, 200);
+  assert.equal((await call(`/api/trade-public/${created.body.token}`)).status, 404);
+
   await stop();
   await connection.close(); connection = null;
   await start();
@@ -115,4 +133,49 @@ test('real server: isolated trade sharing, anonymous proposals, scoped inbox and
   assert.equal(rotated.status, 200);
   assert.equal((await call(`/api/trade-public/${token}`)).status, 404);
   assert.equal((await call(`/api/trade-public/${rotated.body.token}`)).status, 200);
+
+  const box = await call('/api/sealed/products', 'POST', { name: 'Trade box', product_type: 'booster_box',
+    language: 'English', market_price: '120.00', market_currency: 'USD',
+    lot: { quantity: 2, total_cost: '140.00', currency: 'USD' } }, auth);
+  assert.equal(box.status, 201, JSON.stringify(box.body));
+  const want = await call('/api/sealed/products', 'POST', { name: 'Wanted ETB', product_type: 'etb',
+    language: 'English', market_price: '50.00', market_currency: 'USD' }, auth);
+  assert.equal(want.status, 201, JSON.stringify(want.body));
+  const listedBox = await call('/api/sealed/trade-listings', 'PUT', {
+    product_id: box.body.product.id, lot_id: box.body.product.lots[0].id, listed: true,
+  }, auth);
+  assert.equal(listedBox.status, 200, JSON.stringify(listedBox.body));
+  assert.equal((await call('/api/sealed/trade-listings', 'PUT', {
+    product_id: box.body.product.id, lot_id: box.body.product.lots[0].id, listed: true,
+  }, other)).status, 404, 'sealed trade listing cannot use another owner inventory');
+  assert.equal((await call('/api/sealed/trade-listings', 'PUT', {
+    product_id: want.body.product.id, quantity: 1, listed: true,
+  }, auth)).status, 200);
+  const sealedItems = await call('/api/sealed/trade-listings', 'GET', undefined, auth);
+  assert.equal(sealedItems.status, 200);
+  assert.equal(sealedItems.body.listings.length, 2);
+  const mixed = await call(`/api/trade-public/${rotated.body.token}`);
+  const givenSealed = mixed.body.available.find(item => item.kind === 'sealed');
+  const receivedSealed = mixed.body.wanted.find(item => item.kind === 'sealed');
+  assert.equal(givenSealed.quantity, 2);
+  const sealedProposal = await call(`/api/trade-public/${rotated.body.token}/requests`, 'POST', {
+    ...proposal, request_key: 'e2e-sealed-trade-12345',
+    requested: [{ entry_id: givenSealed.entry_id, quantity: 1 }],
+    offered: [{ entry_id: receivedSealed.entry_id, quantity: 1 }], cash_cents: 2000,
+  });
+  assert.equal(sealedProposal.status, 201, JSON.stringify(sealedProposal.body));
+  const completeBody = { given: [{ entry_id: givenSealed.entry_id, quantity: 1 }],
+    received: [{ index: 0, quantity: 1, unit_cents: 5000 }], cash_in_cents: 2000, completed_on: '2026-03-01' };
+  const completionUrl = `/api/trade/requests/${sealedProposal.body.id}/complete`;
+  const preview = await call(completionUrl, 'POST', { ...completeBody, preview: true }, auth);
+  assert.equal(preview.status, 200, JSON.stringify(preview.body));
+  assert.equal(preview.body.given[0].basis_cents, 7000);
+  assert.equal((await call(`/api/sealed/products/${box.body.product.id}`, 'GET', undefined, auth)).body.product.remaining_quantity, 2);
+  const completed = await call(completionUrl, 'POST', completeBody, auth);
+  assert.equal(completed.status, 200, JSON.stringify(completed.body));
+  assert.equal(completed.body.realized_gain_cents, 0);
+  assert.equal((await call(`/api/sealed/products/${box.body.product.id}`, 'GET', undefined, auth)).body.product.remaining_quantity, 1);
+  assert.equal((await call(`/api/sealed/products/${want.body.product.id}`, 'GET', undefined, auth)).body.product.remaining_quantity, 1);
+  assert.equal((await call('/api/sealed/trade-listings', 'GET', undefined, auth)).body.listings.filter(item => item.list_type === 'wishlist').length, 0);
+  assert.equal((await call(completionUrl, 'POST', completeBody, auth)).status, 409);
 });

@@ -4,7 +4,6 @@ import { GAMES, enabledGames, setGameEnabled, gameOptions, defaultGame } from '.
 import { CURRENCIES, getCurrency, setCurrency } from '../utils/formatPrice';
 import { LOCALES, localeName, useT } from '../utils/i18n';
 import { REPO_URL } from '../utils/repo';
-import { TradeSharing } from './TradePortal';
 
 // One secret: what it is called, what it buys you, and where to get one. Three of
 // these replaced three near-identical panels, so a fourth provider is a few lines
@@ -428,7 +427,6 @@ function Settings({ user, onUpdateUser, showToast }) {
   const activeTheme = theme || localStorage.getItem('theme') || 'dark';
   const themeQuery = activeTheme !== 'dark' ? `&theme=${encodeURIComponent(activeTheme)}` : '';
   const shareUrl = `${origin}/share/${user?.share_token}${activeTheme !== 'dark' ? `?theme=${encodeURIComponent(activeTheme)}` : ''}`;
-  const tradeUrl = `${origin}/share/${user?.share_token}?list=trade${themeQuery}`;
   const wishlistUrl = `${origin}/share/${user?.share_token}?list=wishlist${themeQuery}`;
 
   const [copiedType, setCopiedType] = useState(''); // 'collection', 'trade', 'wishlist'
@@ -452,8 +450,6 @@ function Settings({ user, onUpdateUser, showToast }) {
         <h2 style={{ fontSize: '1.25rem', color: 'var(--text-strong)' }}>{t('settings.title')}</h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{t('settings.subtitle')}</p>
       </div>
-
-      <TradeSharing origin={origin} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }} className="settings-grid">
         {/* Sharing Panel */}
@@ -518,22 +514,7 @@ function Settings({ user, onUpdateUser, showToast }) {
                 </div>
               </div>
 
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>{t('settings.linkTrade')}</label>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input 
-                    type="text" 
-                    className="input-control" 
-                    value={tradeUrl} 
-                    readOnly 
-                    style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.2)', color: 'var(--text-secondary)', cursor: 'default' }}
-                  />
-                  <button className="btn btn-secondary" onClick={() => copyToClipboard(tradeUrl, 'trade')} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
-                    {copiedType === 'trade' ? <Check size={14} style={{ color: 'var(--type-grass)' }} /> : <Clipboard size={14} />}
-                    <span>{t('settings.copy')}</span>
-                  </button>
-                </div>
-              </div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>{t('settings.tradeMoved')}</p>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>{t('settings.linkWishlist')}</label>

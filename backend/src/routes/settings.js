@@ -66,7 +66,7 @@ router.get('/version', async (req, res) => {
 
 // Feature tabs an admin may hide from the navigation. Core tabs (dashboard, add
 // cards, collection, settings, admin) are always shown.
-const HIDEABLE_TABS = ['sealed', 'sales-history', 'storage', 'deckbuilder', 'notes'];
+const HIDEABLE_TABS = ['sealed', 'sales-history', 'trades', 'storage', 'deckbuilder', 'notes'];
 
 function parseHiddenTabs(raw) {
   try {

@@ -11,6 +11,7 @@ import { useT } from '../utils/i18n';
 const HIDEABLE_TABS = [
   { id: 'sealed', label: 'nav.sealed' },
   { id: 'sales-history', label: 'nav.salesHistory' },
+  { id: 'trades', label: 'nav.trades' },
   { id: 'storage', label: 'nav.storage' },
   { id: 'deckbuilder', label: 'nav.deckBuilder' },
   { id: 'notes', label: 'nav.notes' },

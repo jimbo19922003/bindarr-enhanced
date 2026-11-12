@@ -3432,3 +3432,6 @@ button, input, select, textarea {
   color: var(--text-strong) !important;
 }
 
+
+/* Unread trade requests on the Trades nav tab. */
+.nav-tab .nav-tab-badge { margin-left: 0.3rem; font-size: 0.65rem; padding: 0.1rem 0.35rem; }

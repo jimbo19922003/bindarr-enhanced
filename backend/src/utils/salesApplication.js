@@ -48,6 +48,29 @@ function review(user,v,s) {
  const token=createHash('sha256').update(JSON.stringify({user,v,s})).digest('hex');
  return {...amounts,itemName:s.name,source:s.source,currency:v.currency,previewToken:token,basisReason:s.basisReason || null,willFreezeOpening:!!s.openingDraft};
 }
+async function prepare(db) {await opening.prepareSchema(db,cards.schema);await db.exec(sealed.schema);await db.exec(registry);await protection.install(db);}
+// Records an already reviewed sale inside the caller's open write transaction.
+async function write(db,user,v,s,checked,requestKey,payload) {
+ let record;const result={...checked,kind:v.kind,soldOn:v.soldOn,quantity:v.quantity,proceedsCents:v.proceedsCents,feesCents:v.feesCents};delete result.previewToken;
+ if(v.kind==='card'){
+  let lot=await db.get('SELECT * FROM card_acquisition_lot WHERE collection_id=? AND user_id=?',[v.id,user]);
+  if(!lot){
+   if(s.source==='opening'){if(s.openingDraft)await require('./completedRipBasis').freeze(db,user,s.openingDraft);lot=await opening.createOpeningLot(db,user,v.id);}
+   else {const inserted=await db.run('INSERT INTO card_acquisition_lot (user_id,collection_id,source,original_quantity,remaining_quantity,original_basis_cents,remaining_basis_cents,currency) VALUES (?,?,?,1,1,?,?,?)',[user,v.id,s.source,s.remainingBasisCents,s.remainingBasisCents,'USD']);lot={id:inserted.lastID};}
+  }
+  await db.run('UPDATE card_acquisition_lot SET remaining_quantity=0,remaining_basis_cents=? WHERE id=? AND user_id=?',[checked.remainingBasisCents,lot.id,user]);
+  const changed=await db.run("UPDATE collection SET list_type='sold' WHERE id=? AND user_id=? AND list_type='collection' AND quantity=1",[v.id,user]);if(changed.changes!==1)throw fail(409,'Card inventory changed');
+  const request=JSON.stringify({lotId:lot.id,soldOn:v.soldOn,quantity:1,proceedsCents:v.proceedsCents,feesCents:v.feesCents});
+  record=await db.run('INSERT INTO card_sale_record (user_id,lot_id,request_key,request_json,result_json,sold_on,quantity,proceeds_cents,fees_cents,sold_basis_cents,realized_gain_cents,currency,card_id) VALUES (?,?,?,?,?,?,1,?,?,?,?,?,?)',[user,lot.id,requestKey,request,JSON.stringify(result),v.soldOn,v.proceedsCents,v.feesCents,checked.soldBasisCents,checked.realizedGainCents,'USD',s.cardId]);
+ }else{
+  const request=JSON.stringify({lotId:v.id,soldOn:v.soldOn,quantity:v.quantity,proceedsCents:v.proceedsCents,feesCents:v.feesCents,currency:v.currency,notes:''});
+  record=await db.run('INSERT INTO sealed_sale_record (user_id,lot_id,request_key,request_json,result_json,sold_on,quantity,proceeds_cents,fees_cents,sold_basis_cents,realized_gain_cents,currency,product_name,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[user,v.id,requestKey,request,JSON.stringify(result),v.soldOn,v.quantity,v.proceedsCents,v.feesCents,checked.soldBasisCents,checked.realizedGainCents,v.currency,s.name,'']);
+  const changed=await db.run("UPDATE sealed_lot SET remaining_quantity=?,remaining_cost_cents=?,updated_at=datetime('now') WHERE id=? AND user_id=? AND remaining_quantity=? AND remaining_cost_cents=?",[checked.remainingQuantity,checked.remainingBasisCents,v.id,user,s.remainingQuantity,s.remainingBasisCents]);if(changed.changes!==1)throw fail(409,'Sealed inventory changed');
+ }
+ const response={...result,saleId:record.lastID};
+ await db.run('INSERT INTO sales_entry (user_id,request_key,payload_json,response_json,kind,sold_on,currency,gain_cents) VALUES (?,?,?,?,?,?,?,?)',[user,requestKey,payload,JSON.stringify(response),v.kind,v.soldOn,v.currency,checked.realizedGainCents]);
+ return response;
+}
 function createSalesApplication({connect}) {
  async function read(user,work) {
   if(!Number.isSafeInteger(user)||user<1)throw fail(401,'Authentication required');
@@ -75,30 +98,13 @@ function createSalesApplication({connect}) {
    const db=await connect();let began=false;
    try {
     await db.run('BEGIN IMMEDIATE');began=true;
-    await opening.prepareSchema(db,cards.schema);await db.exec(sealed.schema);await db.exec(registry);await protection.install(db);
+    await prepare(db);
     const prior=await db.get('SELECT payload_json,response_json FROM sales_entry WHERE user_id=? AND request_key=?',[user,body.requestKey]);
     if(prior){if(prior.payload_json!==payload)throw fail(409,'Request key already used for different sale details');await db.run('COMMIT');began=false;return JSON.parse(prior.response_json);}
     const s=await state(db,user,v),checked=review(user,v,s);
     if(checked.previewToken!==body.previewToken)throw fail(409,'Inventory or cost changed. Review the sale again.');
     if(checked.realizedGainCents==null&&body.allowUnknownBasis!==true)throw fail(400,'Acknowledge that unknown basis prevents calculating realized gain');
-    let record;const result={...checked,kind:v.kind,soldOn:v.soldOn,quantity:v.quantity,proceedsCents:v.proceedsCents,feesCents:v.feesCents};delete result.previewToken;
-    if(v.kind==='card'){
-     let lot=await db.get('SELECT * FROM card_acquisition_lot WHERE collection_id=? AND user_id=?',[v.id,user]);
-     if(!lot){
-      if(s.source==='opening'){if(s.openingDraft)await require('./completedRipBasis').freeze(db,user,s.openingDraft);lot=await opening.createOpeningLot(db,user,v.id);}
-      else {const inserted=await db.run('INSERT INTO card_acquisition_lot (user_id,collection_id,source,original_quantity,remaining_quantity,original_basis_cents,remaining_basis_cents,currency) VALUES (?,?,?,1,1,?,?,?)',[user,v.id,s.source,s.remainingBasisCents,s.remainingBasisCents,'USD']);lot={id:inserted.lastID};}
-     }
-     await db.run('UPDATE card_acquisition_lot SET remaining_quantity=0,remaining_basis_cents=? WHERE id=? AND user_id=?',[checked.remainingBasisCents,lot.id,user]);
-     const changed=await db.run("UPDATE collection SET list_type='sold' WHERE id=? AND user_id=? AND list_type='collection' AND quantity=1",[v.id,user]);if(changed.changes!==1)throw fail(409,'Card inventory changed');
-     const request=JSON.stringify({lotId:lot.id,soldOn:v.soldOn,quantity:1,proceedsCents:v.proceedsCents,feesCents:v.feesCents});
-     record=await db.run('INSERT INTO card_sale_record (user_id,lot_id,request_key,request_json,result_json,sold_on,quantity,proceeds_cents,fees_cents,sold_basis_cents,realized_gain_cents,currency,card_id) VALUES (?,?,?,?,?,?,1,?,?,?,?,?,?)',[user,lot.id,body.requestKey,request,JSON.stringify(result),v.soldOn,v.proceedsCents,v.feesCents,checked.soldBasisCents,checked.realizedGainCents,'USD',s.cardId]);
-    }else{
-     const request=JSON.stringify({lotId:v.id,soldOn:v.soldOn,quantity:v.quantity,proceedsCents:v.proceedsCents,feesCents:v.feesCents,currency:v.currency,notes:''});
-     record=await db.run('INSERT INTO sealed_sale_record (user_id,lot_id,request_key,request_json,result_json,sold_on,quantity,proceeds_cents,fees_cents,sold_basis_cents,realized_gain_cents,currency,product_name,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[user,v.id,body.requestKey,request,JSON.stringify(result),v.soldOn,v.quantity,v.proceedsCents,v.feesCents,checked.soldBasisCents,checked.realizedGainCents,v.currency,s.name,'']);
-     const changed=await db.run("UPDATE sealed_lot SET remaining_quantity=?,remaining_cost_cents=?,updated_at=datetime('now') WHERE id=? AND user_id=? AND remaining_quantity=? AND remaining_cost_cents=?",[checked.remainingQuantity,checked.remainingBasisCents,v.id,user,s.remainingQuantity,s.remainingBasisCents]);if(changed.changes!==1)throw fail(409,'Sealed inventory changed');
-    }
-    const response={...result,saleId:record.lastID};
-    await db.run('INSERT INTO sales_entry (user_id,request_key,payload_json,response_json,kind,sold_on,currency,gain_cents) VALUES (?,?,?,?,?,?,?,?)',[user,body.requestKey,payload,JSON.stringify(response),v.kind,v.soldOn,v.currency,checked.realizedGainCents]);
+    const response=await write(db,user,v,s,checked,body.requestKey,payload);
     await db.run('COMMIT');began=false;return response;
    }catch(e){if(began)await db.run('ROLLBACK').catch(()=>{});throw e;}finally{await db.close();}
   },
@@ -107,4 +113,4 @@ function createSalesApplication({connect}) {
   }
  };
 }
-module.exports={createSalesApplication};
+module.exports={createSalesApplication,saleSteps:{prepare,input,state,review,write}};

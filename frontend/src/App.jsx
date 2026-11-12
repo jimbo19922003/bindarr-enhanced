@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { LayoutDashboard, Database, Layers, MapPin, Sparkles, Settings as SettingsIcon, LogOut, ShieldAlert, Plus, Swords, StickyNote, Package } from 'lucide-react';
+import { LayoutDashboard, Database, Layers, MapPin, Sparkles, Settings as SettingsIcon, LogOut, ShieldAlert, Plus, Swords, StickyNote, Package, ArrowLeftRight } from 'lucide-react';
 import Login from './components/Login';
 import Logo from './components/Logo';
 import SaleDialogHost from './components/SaleDialogHost';
@@ -9,6 +9,7 @@ import { useT } from './utils/i18n';
 import { isNative } from './apiBase';
 import { parseOidcReturn, takeVerifier } from './utils/nativeOidc';
 import { isSealedMutation, VALUATION_CHANGED } from './utils/sealedMutation';
+import { TRADES_CHANGED } from './utils/tradeApi';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const AddCards = lazy(() => import('./components/AddCards'));
@@ -24,6 +25,7 @@ const DeckBuilder = lazy(() => import('./components/DeckBuilder'));
 const Notes = lazy(() => import('./components/Notes'));
 const SealedInventory = lazy(() => import('./components/SealedInventory'));
 const SalesHistory = lazy(() => import('./components/SalesHistory'));
+const Trades = lazy(() => import('./components/Trades'));
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -240,6 +242,19 @@ function App() {
     return () => { cancelled = true; window.removeEventListener(SETTINGS_CHANGED, load); };
   }, [token]);
   const tabShown = (tab) => !hiddenTabs.includes(tab) || activeTab === tab;
+  const [tradeCount, setTradeCount] = useState(0);
+  useEffect(() => {
+    if (!token) return undefined;
+    let cancelled = false;
+    const load = () => fetch('/api/trade/requests/counts')
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (!cancelled && data) setTradeCount(data.new || 0); })
+      .catch(() => {});
+    load();
+    const timer = setInterval(load, 120000);
+    window.addEventListener(TRADES_CHANGED, load);
+    return () => { cancelled = true; clearInterval(timer); window.removeEventListener(TRADES_CHANGED, load); };
+  }, [token]);
 
   useEffect(() => {
     if (!user || user.role !== 'admin') return;
@@ -299,6 +314,7 @@ function App() {
       case 'sealed': return <SealedInventory showToast={showToast} />;
       case 'sales-history': return <SalesHistory statsTrigger={statsTrigger} />;
       case 'notes': return <Notes showToast={showToast} />;
+      case 'trades': return <Trades user={user} showToast={showToast} onUpdate={triggerRefresh} />;
       case 'settings': return <Settings user={user} onUpdateUser={handleUpdateUser} showToast={showToast} />;
       case 'admin': return <AdminPanel user={user} onUpdateUser={handleUpdateUser} showToast={showToast} />;
       default: return <Dashboard statsTrigger={statsTrigger} onNavigate={goTab} setSelectedLocationId={setSelectedLocationId} setFocusEntryId={setFocusEntryId} onUpdate={triggerRefresh} showToast={showToast} />;
@@ -316,6 +332,7 @@ function App() {
           <button className={`nav-tab ${activeTab === 'collection' ? 'active' : ''}`} onClick={() => goTab('collection')} aria-label={t('nav.collection')} title={t('nav.collection')}><Layers size={18} /><span className="nav-tab-label">{t('nav.collection')}</span></button>
           {tabShown('sealed') && <button className={`nav-tab ${activeTab === 'sealed' ? 'active' : ''}`} onClick={() => goTab('sealed')} aria-label={t('nav.sealed')} title={t('nav.sealed')}><Package size={18} /><span className="nav-tab-label">{t('nav.sealed')}</span></button>}
           {tabShown('sales-history') && <button className={`nav-tab ${activeTab === 'sales-history' ? 'active' : ''}`} onClick={() => goTab('sales-history')} aria-label={t('nav.salesHistory')} title={t('nav.salesHistory')}><Database size={18} /><span className="nav-tab-label">{t('nav.salesHistory')}</span></button>}
+          {tabShown('trades') && <button className={`nav-tab ${activeTab === 'trades' ? 'active' : ''}`} onClick={() => goTab('trades')} aria-label={tradeCount ? t('nav.tradesNew', { count: tradeCount }) : t('nav.trades')} title={t('nav.trades')}><ArrowLeftRight size={18} /><span className="nav-tab-label">{t('nav.trades')}</span>{tradeCount > 0 && <span className="tab-count-badge has-unsorted nav-tab-badge" aria-hidden="true">{tradeCount}</span>}</button>}
           {tabShown('storage') && <button className={`nav-tab ${activeTab === 'storage' ? 'active' : ''}`} onClick={() => goTab('storage')} aria-label={t('nav.storage')} title={t('nav.storage')}><MapPin size={18} /><span className="nav-tab-label">{t('nav.storage')}</span></button>}
           {tabShown('deckbuilder') && <button className={`nav-tab ${activeTab === 'deckbuilder' ? 'active' : ''}`} onClick={() => goTab('deckbuilder')} aria-label={t('nav.deckBuilder')} title={t('nav.deckBuilder')}><Swords size={18} /><span className="nav-tab-label">{t('nav.deckBuilder')}</span></button>}
           {tabShown('notes') && <button className={`nav-tab ${activeTab === 'notes' ? 'active' : ''}`} onClick={() => goTab('notes')} aria-label={t('nav.notes')} title={t('nav.notes')}><StickyNote size={18} /><span className="nav-tab-label">{t('nav.notes')}</span></button>}

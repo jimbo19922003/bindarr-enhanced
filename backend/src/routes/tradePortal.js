@@ -33,7 +33,27 @@ function createTradeRouters(service) {
   privateRouter.get('/settings', handle(async (req, res) => res.json(await service.settings(req.user.id))));
   privateRouter.put('/settings', handle(async (req, res) => res.json(await service.update(req.user.id, req.body || {}))));
   privateRouter.post('/rotate', handle(async (req, res) => res.json(await service.rotate(req.user.id))));
-  privateRouter.get('/requests', handle(async (req, res) => res.json(await service.inbox(req.user.id, req.query.before == null ? null : Number(req.query.before)))));
+  privateRouter.get('/requests', handle(async (req, res) => res.json(await service.inbox(req.user.id,
+    req.query.before == null ? null : Number(req.query.before), req.query.status == null ? 'all' : String(req.query.status)))));
+  privateRouter.get('/requests/counts', handle(async (req, res) => res.json(await service.counts(req.user.id))));
+  privateRouter.patch('/requests/:id', handle(async (req, res) => res.json(await service.updateRequest(req.user.id, req.params.id, req.body || {}))));
+  privateRouter.get('/requests/:id/completion', handle(async (req, res) => res.json(await service.completionDraft(req.user.id, req.params.id))));
+  privateRouter.post('/requests/:id/complete', limit(30, 60000), handle(async (req, res) => {
+    const body = req.body || {};
+    res.json(body.preview === true ? await service.previewCompletion(req.user.id, req.params.id, body)
+      : await service.complete(req.user.id, req.params.id, body));
+  }));
+  privateRouter.get('/history', handle(async (req, res) => res.json(await service.history(req.user.id))));
+  privateRouter.get('/items', handle(async (req, res) => res.json(await service.items(req.user.id))));
+  privateRouter.post('/items/unlist', handle(async (req, res) => res.json(await service.unlist(req.user.id, req.body || {}))));
+  privateRouter.get('/binders', handle(async (req, res) => res.json(await service.binders(req.user.id))));
+  privateRouter.post('/binders', handle(async (req, res) => res.status(201).json(await service.createBinder(req.user.id, req.body || {}))));
+  privateRouter.put('/binder-items', handle(async (req, res) => res.json(await service.assign(req.user.id, req.body || {}))));
+  privateRouter.put('/binders/:id', handle(async (req, res) => res.json(await service.updateBinder(req.user.id, req.params.id, req.body || {}))));
+  privateRouter.post('/binders/:id/rotate', handle(async (req, res) => res.json(await service.rotateBinder(req.user.id, req.params.id))));
+  privateRouter.delete('/binders/:id', handle(async (req, res) => {
+    await service.deleteBinder(req.user.id, req.params.id); res.json({ ok: true });
+  }));
   privateRouter.post('/requests/:id/notify', limit(10, 60000), handle(async (req, res) => res.json({ notification: await service.retry(req.user.id, req.params.id) })));
   privateRouter.delete('/requests/:id', handle(async (req, res) => {
     await service.remove(req.user.id, req.params.id); res.json({ ok: true });

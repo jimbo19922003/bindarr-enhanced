@@ -25,6 +25,7 @@ const emptyForm = () => ({
   market_price: '',
   market_currency: 'USD',
   withLot: true,
+  wishlist_quantity: '1',
   quantity: '1',
   remaining_quantity: '',
   total_cost: '',
@@ -47,8 +48,12 @@ function moneyLabel(value, currency) {
 function SealedInventory({ showToast }) {
   const { t } = useT();
   const [products, setProducts] = useState([]);
+  const [tradeListings, setTradeListings] = useState([]);
+  const [tradeBusy, setTradeBusy] = useState(false);
+  const tradePending = useRef(false);
   const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [query, setQuery] = useState('');
   const [type, setType] = useState('');
   const [showArchived, setShowArchived] = useState(false);
@@ -79,29 +84,43 @@ function SealedInventory({ showToast }) {
     if (q.trim()) params.set('q', q.trim());
     if (productType) params.set('type', productType);
     if (archived) params.set('archived', '1');
-    if (!(next.showOpened ?? showOpened)) params.set('in_stock', '1');
-    const response = await fetch(`/api/sealed/products?${params.toString()}`);
+    const [response, tradeResponse] = await Promise.all([
+      fetch(`/api/sealed/products?${params.toString()}`),
+      fetch('/api/sealed/trade-listings'),
+    ]);
     const data = await response.json();
+    const tradeData = await tradeResponse.json();
     if (!response.ok) throw new Error(data.error || t('sealed.errLoad'));
+    if (!tradeResponse.ok) throw new Error(tradeData.error || t('sealed.trade.errLoad'));
     setProducts(data.products || []);
+    setTradeListings(tradeData.listings || []);
+    setLoadError('');
   };
 
   useEffect(() => {
     let gone = false;
     (async () => {
       try {
-        const [productRes, locationRes] = await Promise.all([
-          fetch('/api/sealed/products?in_stock=1'),
+        const [productRes, locationRes, tradeRes] = await Promise.all([
+          fetch('/api/sealed/products'),
           fetch('/api/locations'),
+          fetch('/api/sealed/trade-listings'),
         ]);
         const productData = await productRes.json();
         const locationData = await locationRes.json();
+        const tradeData = await tradeRes.json();
         if (gone) return;
         if (!productRes.ok) throw new Error(productData.error || t('sealed.errLoad'));
+        if (!locationRes.ok) throw new Error(locationData.error || t('sealed.errLoad'));
+        if (!tradeRes.ok) throw new Error(tradeData.error || t('sealed.trade.errLoad'));
         setProducts(productData.products || []);
+        setTradeListings(tradeData.listings || []);
         setLocations(Array.isArray(locationData) ? locationData : []);
       } catch (err) {
-        if (!gone) showToast(err.message, 'error');
+        if (!gone) {
+          setLoadError(err.message || t('sealed.errLoad'));
+          showToast(err.message, 'error');
+        }
       } finally {
         if (!gone) setLoading(false);
       }
@@ -113,13 +132,76 @@ function SealedInventory({ showToast }) {
 
   const refresh = async (next) => {
     try {
+      if (next?.reloadLocations) {
+        const response = await fetch('/api/locations');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || t('sealed.errLoad'));
+        setLocations(Array.isArray(data) ? data : []);
+      }
       await load(next || {});
     } catch (err) {
+      setLoadError(err.message || t('sealed.errLoad'));
       showToast(err.message, 'error');
     }
   };
 
   const selected = products.find(product => product.id === selectedId) || null;
+  const collectionProducts = products.filter(product => showOpened || product.remaining_quantity > 0);
+
+  const putListing = async (body) => {
+    const response = await fetch('/api/sealed/trade-listings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || t('sealed.trade.errSave'));
+    return data;
+  };
+
+  const updateListing = async (body) => {
+    if (tradePending.current) return;
+    tradePending.current = true;
+    setTradeBusy(true);
+    try {
+      await putListing(body);
+      await load();
+      showToast(t('sealed.trade.saved'), 'success');
+    } catch (err) {
+      showToast(err.message || t('sealed.trade.errSave'), 'error');
+    } finally {
+      tradePending.current = false;
+      setTradeBusy(false);
+    }
+  };
+
+  const addCatalogWishlist = async (result) => {
+    if (tradePending.current) return;
+    tradePending.current = true;
+    setTradeBusy(true);
+    try {
+      const response = await fetch('/api/sealed/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || t('sealed.errSave'));
+      const existing = tradeListings.find(listing => listing.product_id === data.product.id && listing.list_type === 'wishlist');
+      await putListing({ product_id: data.product.id, quantity: existing?.quantity || 1, listed: true });
+      setQuery('');
+      setType('');
+      await load({ query: '', type: '' });
+      setSelectedId(data.product.id);
+      setPane('wishlist');
+      showToast(t('sealed.trade.saved'), 'success');
+    } catch (err) {
+      showToast(err.message || t('sealed.trade.errSave'), 'error');
+    } finally {
+      tradePending.current = false;
+      setTradeBusy(false);
+    }
+  };
 
   const saveProduct = async (event) => {
     event.preventDefault();
@@ -158,10 +240,26 @@ function SealedInventory({ showToast }) {
       showToast(data.error || t('sealed.errSave'), 'error');
       return;
     }
+    if (!form.withLot) {
+      try {
+        await putListing({ product_id: data.product.id, quantity: Number(form.wishlist_quantity), listed: true });
+      } catch (err) {
+        setForm(null);
+        setPane('wishlist');
+        setQuery('');
+        setType('');
+        showToast(err.message || t('sealed.trade.errSave'), 'error');
+        refresh({ query: '', type: '' });
+        return;
+      }
+      setPane('wishlist');
+      setQuery('');
+      setType('');
+    }
     setForm(null);
     setSelectedId(data.product.id);
     showToast(t('sealed.saved'), 'success');
-    refresh();
+    refresh(form.withLot ? undefined : { query: '', type: '' });
   };
 
   const saveQuote = async (product) => {
@@ -375,11 +473,20 @@ function SealedInventory({ showToast }) {
         </div>
       </div>
 
+      {loadError && <div className="glass-panel" role="alert" style={{ padding: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <span style={{ flex: 1 }}>{loadError}</span>
+        <button className="btn btn-secondary" type="button" onClick={() => refresh({ reloadLocations: true })}>{t('sealed.trade.retry')}</button>
+      </div>}
+
       <div style={{ display: 'flex', justifyContent: 'center' }}>
-        <div className="sub-nav-tabs" style={{ width: '100%', maxWidth: '420px', margin: 0 }}>
+        <div className="sub-nav-tabs" style={{ width: '100%', maxWidth: '600px', margin: 0 }}>
           <button type="button" className={`sub-nav-tab ${pane === 'collection' ? 'active' : ''}`} onClick={() => setPane('collection')}>
             <Package size={18} />
             <span>{t('sealed.tabCollection')}</span>
+          </button>
+          <button type="button" className={`sub-nav-tab ${pane === 'wishlist' ? 'active' : ''}`}
+            onClick={() => { setPane('wishlist'); setQuery(''); setType(''); refresh({ query: '', type: '' }); }}>
+            <span>{t('sealed.trade.wishlist')}</span>
           </button>
           <button type="button" className={`sub-nav-tab ${pane === 'add' ? 'active' : ''}`} onClick={() => setPane('add')}>
             <Search size={18} />
@@ -458,6 +565,10 @@ function SealedInventory({ showToast }) {
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{result.set_name || typeLabel(result.product_type)}</span>
                   <span className="tcg-card-price">{result.market_price ? `${result.market_currency} ${result.market_price}` : '—'}</span>
                 </div>
+                <button className="btn btn-secondary" type="button" disabled={tradeBusy}
+                  onClick={event => { event.stopPropagation(); addCatalogWishlist(result); }}>
+                  {t('sealed.trade.addWishlist')}
+                </button>
               </div>
             </div>
           ))}
@@ -563,6 +674,12 @@ function SealedInventory({ showToast }) {
             <input type="checkbox" checked={form.withLot} onChange={e => setForm({ ...form, withLot: e.target.checked })} />
             {t('sealed.addLot')}
           </label>
+          {!form.withLot && <label>
+            {t('sealed.trade.wishlistQuantity')}
+            <input className="input-control" required type="number" min="1" step="1" value={form.wishlist_quantity}
+              onChange={event => setForm({ ...form, wishlist_quantity: event.target.value })} />
+            <small>{t('sealed.trade.withoutPurchase')}</small>
+          </label>}
           {form.withLot && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.6rem' }}>
               <input className="input-control" required type="number" min="1" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} aria-label={t('sealed.quantity')} />
@@ -584,6 +701,29 @@ function SealedInventory({ showToast }) {
         </form>
       )}
       </>)}
+
+      {pane === 'wishlist' && (
+        <div style={{ display: 'grid', gap: '0.75rem' }}>
+          <p style={{ color: 'var(--text-secondary)', margin: 0 }}>{t('sealed.trade.wishlistHint')}</p>
+          <button className="btn btn-secondary" type="button" onClick={() => setPane('add')}>{t('sealed.trade.findWishlist')}</button>
+          {products.length === 0 && <p>{t('sealed.trade.emptyWishlist')}</p>}
+          {products.map(product => <article key={product.id} className="glass-panel" style={{ padding: '0.9rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              {product.image_url && <img src={product.image_url} alt="" width="48" height="48" style={{ objectFit: 'contain' }} />}
+              <div style={{ flex: '1 1 12rem' }}>
+                <strong>{product.name}</strong>
+                <small style={{ display: 'block', color: 'var(--text-secondary)' }}>
+                  {typeLabel(product.product_type)} · {product.language}{product.set_name ? ` · ${product.set_name}` : ''}
+                </small>
+              </div>
+              <WishlistControl product={product} t={t} busy={tradeBusy}
+                selected={selectedId === product.id}
+                listing={tradeListings.find(listing => listing.product_id === product.id && listing.list_type === 'wishlist')}
+                onSave={updateListing} />
+            </div>
+          </article>)}
+        </div>
+      )}
 
       {pane === 'collection' && (<>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -617,12 +757,12 @@ function SealedInventory({ showToast }) {
         </label>
       </div>
 
-      {products.length === 0 && (
+      {collectionProducts.length === 0 && (
         <div className="glass-panel" style={{ padding: '1.5rem', color: 'var(--text-secondary)' }}>{t(showOpened ? 'sealed.empty' : 'sealed.emptyOnHand')}</div>
       )}
 
       <div style={{ display: 'grid', gap: '0.75rem' }}>
-        {products.map(product => (
+        {collectionProducts.map(product => (
           <article key={product.id} className="glass-panel" style={{ padding: '0.9rem', opacity: product.archived_at ? 0.65 : 1 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
               <button
@@ -671,6 +811,9 @@ function SealedInventory({ showToast }) {
                 onArchiveLot={(lot, archived) => setArchived('lot', lot.id, archived)}
                 showToast={showToast}
                 onChanged={refresh}
+                tradeListings={tradeListings}
+                tradeBusy={tradeBusy}
+                onTrade={updateListing}
               />
             )}
           </article>
@@ -684,6 +827,28 @@ function SealedInventory({ showToast }) {
       )}
     </div>
   );
+}
+
+function WishlistControl({ product, listing, t, busy, onSave, selected }) {
+  const [quantity, setQuantity] = useState(String(listing?.quantity || 1));
+  const quantityInput = useRef(null);
+  useEffect(() => { setQuantity(String(listing?.quantity || 1)); }, [product.id, listing?.quantity]);
+  useEffect(() => { if (selected) quantityInput.current?.focus(); }, [selected]);
+  return <form onSubmit={event => {
+    event.preventDefault();
+    onSave({ product_id: product.id, quantity: Number(quantity), listed: true });
+  }} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+    <label>
+      {t('sealed.trade.wishlistQuantity')}
+      <input ref={quantityInput} className="input-control" type="number" min="1" step="1" required value={quantity}
+        disabled={busy || !!product.archived_at} onChange={event => setQuantity(event.target.value)} style={{ width: '5rem', marginLeft: '0.5rem' }} />
+    </label>
+    <button className="btn btn-secondary" type="submit" disabled={busy || !!product.archived_at}>
+      {t(listing ? 'sealed.trade.saveWishlist' : 'sealed.trade.addWishlist')}
+    </button>
+    {listing && <button className="btn btn-secondary" type="button" disabled={busy}
+      onClick={() => onSave({ product_id: product.id, listed: false })}>{t('sealed.trade.removeWishlist')}</button>}
+  </form>;
 }
 
 function SealedImportModal({ csv, setCsv, busy, onImport, onClose, t }) {
@@ -799,7 +964,7 @@ function compareLots(a, b, sort) {
   return a.id - b.id;
 }
 
-function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchiveLot, showToast, onChanged }) {
+function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchiveLot, showToast, onChanged, tradeListings, tradeBusy, onTrade }) {
   const [ripLot, setRipLot] = useState(null);
   const [sort, setSort] = useState({ key: 'purchased_at', dir: 'desc' });
   const [lot, setLot] = useState({ quantity: '1', remaining_quantity: '', total_cost: '', currency: 'USD', purchased_at: todayISO(), location_id: '', notes: '' });
@@ -846,9 +1011,13 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
           <tbody>
             {lotGroups.map(group => group.lots[0].parent_opening_id ? (
               <ConvertedLotGroup key={group.key} group={group} t={t} onRip={setRipLot} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot}
+                product={product} tradeListings={tradeListings} tradeBusy={tradeBusy} onTrade={onTrade}
                 onSell={!product.archived_at ? item => { const target = sealedSaleTarget(item, product); if (target) window.dispatchEvent(new CustomEvent("bindarr_sell_item", { detail: { ...target, onSold: onChanged } })); } : null} />
             ) : group.lots.map(item => (
               <LotRow key={item.id} lot={item} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot} onRip={() => setRipLot(item)}
+                tradeListed={tradeListings.some(listing => listing.lot_id === item.id)} tradeBusy={tradeBusy}
+                onTrade={!product.archived_at || tradeListings.some(listing => listing.lot_id === item.id)
+                  ? () => onTrade({ product_id: product.id, lot_id: item.id, listed: !tradeListings.some(listing => listing.lot_id === item.id) }) : null}
                 onConvert={!product.archived_at && !item.parent_opening_id && product.product_type !== 'booster_pack' ? () => setRipLot({ ...item, convert: true }) : null}
                 onSell={!product.archived_at && !item.cost_pending ? () => { const target = sealedSaleTarget(item, product); if (target) window.dispatchEvent(new CustomEvent("bindarr_sell_item", { detail: { ...target, onSold: onChanged } })); } : null} />
             )))}
@@ -889,7 +1058,7 @@ function ProductDetail({ product, locations, t, onAddLot, onUpdateLot, onArchive
   );
 }
 
-function ConvertedLotGroup({ group, t, onRip, onUpdateLot, onArchiveLot, onSell }) {
+function ConvertedLotGroup({ group, t, onRip, onUpdateLot, onArchiveLot, onSell, product, tradeListings, tradeBusy, onTrade }) {
   const [expanded, setExpanded] = useState(false);
   const first = group.lots[0];
   const next = group.lots.find(lot => lot.remaining_quantity > 0 && !lot.archived_at);
@@ -908,11 +1077,14 @@ function ConvertedLotGroup({ group, t, onRip, onUpdateLot, onArchiveLot, onSell 
       </div></td>
     </tr>
     {expanded && group.lots.map(lot => <LotRow key={lot.id} lot={lot} t={t} onUpdateLot={onUpdateLot} onArchiveLot={onArchiveLot}
+      tradeListed={tradeListings.some(listing => listing.lot_id === lot.id)} tradeBusy={tradeBusy}
+      onTrade={!product.archived_at || tradeListings.some(listing => listing.lot_id === lot.id)
+        ? () => onTrade({ product_id: product.id, lot_id: lot.id, listed: !tradeListings.some(listing => listing.lot_id === lot.id) }) : null}
       onRip={() => onRip(lot)} onSell={onSell && !lot.cost_pending ? () => onSell(lot) : null} />)}
   </>;
 }
 
-function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip, onConvert, onSell }) {
+function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip, onConvert, onSell, tradeListed, tradeBusy, onTrade }) {
   const [remaining, setRemaining] = useState(String(lot.remaining_quantity));
   const [cost, setCost] = useState(lot.total_cost);
   const canRip = !lot.archived_at && lot.remaining_quantity > 0;
@@ -938,6 +1110,9 @@ function LotRow({ lot, t, onUpdateLot, onArchiveLot, onRip, onConvert, onSell })
           {canRip && <button className="btn btn-primary" type="button" onClick={onRip}>{t('sealed.letItRip')}</button>}
           {canRip && onConvert && <button className="btn btn-secondary" type="button" onClick={onConvert}>{t('sealed.convertToPacks')}</button>}
           {canRip && onSell && <button className="btn btn-secondary" type="button" onClick={onSell} title={`Sell from lot #${lot.id}`}>Sell</button>}
+          {onTrade && (tradeListed || canRip) && <button className="btn btn-secondary" type="button" onClick={onTrade} disabled={tradeBusy}>
+            {t(tradeListed ? 'sealed.trade.removeTrade' : 'sealed.trade.markTrade')}
+          </button>}
           {!lot.parent_opening_id && <button className="btn btn-secondary" type="button" onClick={() => onUpdateLot(lot, { remaining_quantity: Number(remaining), total_cost: cost })}>{t('sealed.save')}</button>}
           <button className="btn btn-secondary" type="button" onClick={() => onArchiveLot(lot, !lot.archived_at)}>
             {lot.archived_at ? t('sealed.restore') : t('sealed.archive')}

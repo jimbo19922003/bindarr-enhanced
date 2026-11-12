@@ -32,6 +32,7 @@
 
 .trade-public input:not([type="checkbox"]),
 .trade-public textarea,
+.trade-public select,
 .trade-settings input:not([type="checkbox"]),
 .trade-settings select {
   min-width: 0;
@@ -59,34 +60,86 @@
 
 .trade-card {
   display: flex;
-  gap: 0.75rem;
-  padding: 0.75rem;
+  flex-direction: column;
   background: var(--surface-1);
-  border: 1px solid var(--border-glass);
+  border: 2px solid var(--border-glass);
   border-radius: var(--radius-sm);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
-.trade-card > div {
+.trade-card:hover { border-color: var(--accent-blue); }
+
+.trade-card-select {
+  display: flex;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trade-card-select:disabled { cursor: not-allowed; opacity: 0.6; }
+.trade-card-select:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+
+.trade-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.trade-card img {
+.trade-card img,
+.trade-card-placeholder {
   width: 76px;
   height: 106px;
   object-fit: contain;
   flex-shrink: 0;
 }
 
+.trade-card-placeholder { background: var(--surface-2); border-radius: var(--radius-sm); }
+
 .trade-selected {
   border-color: var(--accent-blue);
   background: var(--surface-3);
+  box-shadow: 0 0 0 1px var(--accent-blue);
+}
+
+.trade-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0 0.75rem 0.75rem;
+}
+
+.trade-stepper .btn { min-width: 2.25rem; padding: 0.25rem 0.6rem; }
+
+.trade-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
 }
 
 .trade-card-name { font-weight: 700; }
-.trade-card input[type="number"] { width: 5rem; }
+
+.trade-cash {
+  padding: 0.75rem;
+  border: 1px dashed var(--accent-blue);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.trade-cash p { margin: 0.35rem 0 0; }
+.trade-cash input { flex: 1; }
 .trade-muted { color: var(--text-secondary); font-size: 0.85rem; }
-.trade-card p, .trade-balance p { margin: 0.35rem 0; }
+.trade-balance p { margin: 0.35rem 0; }
 .trade-balance { padding: 1rem; background: var(--surface-2); border-radius: var(--radius-sm); }
 .trade-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
 .trade-inbox-item { border-top: 1px solid var(--border-glass); padding-top: 1rem; overflow-wrap: anywhere; }
